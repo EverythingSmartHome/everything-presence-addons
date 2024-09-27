@@ -868,31 +868,37 @@ function handleDeviceSelection() {
     const baseUrl = 'api/states/';
 
     const zonePrefix = `zone_${zoneNumber}`;
+    
+    // Helper function to round to nearest 10 and add .0
+    const roundToNearestTen = (num) => {
+      return (Math.round(num / 10) * 10).toFixed(1);
+    };
+
     const requests = [
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_begin_x`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: Math.round(zone.beginX.toString()) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.beginX) })
       }),
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_end_x`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: Math.round(zone.endX.toString()) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.endX) })
       }),
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_begin_y`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: Math.round(zone.beginY.toString()) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.beginY) })
       }),
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_end_y`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: Math.round(zone.endY.toString()) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.endY) })
       })
     ];
 
     await Promise.all(requests);
-  }
+}
 
   // Start the application
   init();
