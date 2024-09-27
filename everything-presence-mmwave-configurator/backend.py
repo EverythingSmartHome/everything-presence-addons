@@ -77,9 +77,26 @@ def get_entity_state(entity_id):
 @app.route('/api/states/<entity_id>', methods=['POST'])
 def save_zone(entity_id):
     try:
+        # Extract the incoming data from the request
         zone_data = request.json
         state_value = zone_data.get('state')
-        response = requests.post(f'{HOME_ASSISTANT_API}/states/{entity_id}', headers=headers, json={"state": state_value})
+        
+        # Extract the unit_of_measurement from attributes
+        attributes = zone_data.get('attributes', {})
+        unit_of_measurement = attributes.get('unit_of_measurement')
+
+        # Prepare the payload to send to Home Assistant, including the state and attributes
+        payload = {
+            "state": state_value,
+            "attributes": {
+                "unit_of_measurement": unit_of_measurement
+            }
+        }
+
+        # Make the POST request to Home Assistant API
+        response = requests.post(f'{HOME_ASSISTANT_API}/states/{entity_id}', headers=headers, json=payload)
+
+        # Check the response and return appropriate messages
         if response.status_code == 200:
             return jsonify({"message": f"Zone entity {entity_id} updated successfully."}), 200
         else:
@@ -87,6 +104,7 @@ def save_zone(entity_id):
 
     except Exception as e:
         return jsonify({"error": "An error occurred while saving the zone.", "details": str(e)}), 500
+
 
 if __name__ == '__main__':
     threading.Thread(target=check_connectivity).start()
