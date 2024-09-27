@@ -446,7 +446,7 @@ saveZonesButton.addEventListener('click', saveZonesToHA);
                 {% set model = device_attr(device, 'model') %}
                 {% set manufacturer = device_attr(device, 'manufacturer') %}
                 {% if manufacturer == 'EverythingSmartTechnology' %}
-                    {% if model == 'Everything Presence Lite' or model == 'Everything Presence Lite' %}
+                    {% if model == 'Everything_Presence_Lite' or model == 'Everything Presence Lite' %}
                         {% set devices.list = devices.list + [{'id': device, 'name': device_attr(device, 'name')}] %}
                     {% endif %}
                 {% endif %}
