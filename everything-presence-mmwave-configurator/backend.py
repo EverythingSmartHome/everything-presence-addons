@@ -74,36 +74,35 @@ def get_entity_state(entity_id):
     else:
         return jsonify({'error': 'Unauthorized or entity not found'}), response.status_code
     
-@app.route('/api/states/<entity_id>', methods=['POST'])
-def save_zone(entity_id):
+@app.route('/api/services/number/set_value', methods=['POST'])
+def set_value():
     try:
         # Extract the incoming data from the request
-        zone_data = request.json
-        state_value = zone_data.get('state')
-        
-        # Extract the unit_of_measurement from attributes
-        attributes = zone_data.get('attributes', {})
-        unit_of_measurement = attributes.get('unit_of_measurement')
+        data = request.json
+        entity_id = data.get('entity_id')
+        value = data.get('value')
 
-        # Prepare the payload to send to Home Assistant, including the state and attributes
+        if not entity_id or value is None:
+            return jsonify({"error": "Missing entity_id or value"}), 400
+
+        # Prepare the payload to send to Home Assistant
         payload = {
-            "state": state_value,
-            "attributes": {
-                "unit_of_measurement": unit_of_measurement
-            }
+            "entity_id": entity_id,
+            "value": value
         }
 
         # Make the POST request to Home Assistant API
-        response = requests.post(f'{HOME_ASSISTANT_API}/states/{entity_id}', headers=headers, json=payload)
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/number/set_value', headers=headers, json=payload)
 
         # Check the response and return appropriate messages
         if response.status_code == 200:
-            return jsonify({"message": f"Zone entity {entity_id} updated successfully."}), 200
+            return jsonify({"message": f"Entity {entity_id} updated successfully."}), 200
         else:
             return jsonify({"error": f"Failed to update entity {entity_id}.", "details": response.text}), response.status_code
 
     except Exception as e:
-        return jsonify({"error": "An error occurred while saving the zone.", "details": str(e)}), 500
+        return jsonify({"error": "An error occurred while setting the value.", "details": str(e)}), 500
+
 
 
 if __name__ == '__main__':

@@ -865,40 +865,53 @@ function handleDeviceSelection() {
   }
 
   async function saveZoneToHA(zoneNumber, zone, zoneEntities) {
-    const baseUrl = 'api/states/';
+    const baseUrl = 'api/services/number/set_value'; // Updated endpoint
 
     const zonePrefix = `zone_${zoneNumber}`;
     
     // Helper function to round to nearest 10 and add .0
     const roundToNearestTen = (num) => {
-      return (Math.round(num / 10) * 10).toFixed(1);
+        return (Math.round(num / 10) * 10).toFixed(1);
     };
 
     const requests = [
-      fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_begin_x`]}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.beginX), "attributes": {"unit_of_measurement": "mm"} })
-      }),
-      fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_end_x`]}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.endX), "attributes": {"unit_of_measurement": "mm"} })
-      }),
-      fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_begin_y`]}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.beginY), "attributes": {"unit_of_measurement": "mm"} })
-      }),
-      fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_end_y`]}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.endY), "attributes": {"unit_of_measurement": "mm"} })
-      })
+        fetch(`${baseUrl}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entity_id: zoneEntities[`${zonePrefix}_begin_x`], 
+                value: roundToNearestTen(zone.beginX)
+            })
+        }),
+        fetch(`${baseUrl}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entity_id: zoneEntities[`${zonePrefix}_end_x`], 
+                value: roundToNearestTen(zone.endX)
+            })
+        }),
+        fetch(`${baseUrl}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entity_id: zoneEntities[`${zonePrefix}_begin_y`], 
+                value: roundToNearestTen(zone.beginY)
+            })
+        }),
+        fetch(`${baseUrl}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                entity_id: zoneEntities[`${zonePrefix}_end_y`], 
+                value: roundToNearestTen(zone.endY)
+            })
+        })
     ];
 
     await Promise.all(requests);
 }
+
 
   // Start the application
   init();
