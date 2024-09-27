@@ -43,8 +43,6 @@
           <button id="stopRefreshButton">Stop Refresh</button>
         </div>
 
-        <button id="saveZonesButton">Save Zones</button>
-
         <!-- Status Indicator -->
         <div id="statusIndicator">Status: Not Refreshing</div>
       </div>
@@ -102,15 +100,21 @@
         </div>
 
 
-        <div class="info-group">
+        <!-- <div class="info-group">
           <h2>Occupancy State</h2>
           <p id="occupancy-state">No data available.</p>
         </div>
-      </div>
+      </div> -->
 
       <!-- Visualization Canvas -->
       <div id="canvas-container">
         <canvas id="visualizationCanvas" width="960" height="600"></canvas>
+      </div>
+
+      <div id="save-controls">
+      <div id="save-control-group">
+        <button id="saveZonesButton">Save Zones</button>
+      </div>
       </div>
 
       <!-- Coordinates Output -->

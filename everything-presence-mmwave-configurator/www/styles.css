@@ -49,6 +49,22 @@ body {
     margin-right: 20px;
     margin-bottom: 10px;
   }
+
+  #save-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 10px;
+    margin: 0 auto;
+  }
+  
+  .save-control-group {
+    display: flex;
+    align-items: center;
+    margin-right: 20px;
+    margin-bottom: 10px;
+  }
   
   .control-group label {
     margin-right: 10px;
@@ -56,6 +72,7 @@ body {
   }
   
   #controls input[type="text"],
+  #controls select,
   #controls input[type="number"] {
     padding: 10px;
     font-size: 14px;
@@ -66,6 +83,17 @@ body {
   }
   
   #controls button {
+    padding: 10px;
+    margin: 10px;
+    font-size: 14px;
+    color: #fff;
+    background-color: #007bff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  #save-controls button {
     padding: 10px 16px;
     font-size: 14px;
     color: #fff;
@@ -76,6 +104,10 @@ body {
   }
   
   #controls button:hover {
+    background-color: #0056b3;
+  }
+
+  #save-controls button:hover {
     background-color: #0056b3;
   }
   

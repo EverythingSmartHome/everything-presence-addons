@@ -5,7 +5,9 @@ import logging
 import threading
 
 # Configure logging
-#logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)  # Set global logging level to ERROR
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)  # Suppress Werkzeug request logs
 
 app = Flask(__name__)
 
