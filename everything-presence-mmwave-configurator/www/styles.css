@@ -1,0 +1,255 @@
+/* General Styles */
+body {
+    margin: 0;
+    font-family: 'Open Sans', sans-serif;
+    background-color: #f0f2f5;
+    color: #333;
+  }
+  
+  #container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  
+  header, footer {
+    background-color: #ffffff;
+    color: #333;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  header h1 {
+    margin: 0;
+    font-weight: 600;
+  }
+  
+  footer p {
+    margin: 0;
+    text-align: center;
+  }
+  
+  #main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+  }
+  
+  #controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  
+  .control-group {
+    display: flex;
+    align-items: center;
+    margin-right: 20px;
+    margin-bottom: 10px;
+  }
+  
+  .control-group label {
+    margin-right: 10px;
+    font-weight: 600;
+  }
+  
+  #controls input[type="text"],
+  #controls input[type="number"] {
+    padding: 10px;
+    font-size: 14px;
+    margin-right: 10px;
+    border: 1px solid #ccd0d5;
+    border-radius: 4px;
+    background-color: #fff;
+  }
+  
+  #controls button {
+    padding: 10px 16px;
+    font-size: 14px;
+    color: #fff;
+    background-color: #007bff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  
+  #controls button:hover {
+    background-color: #0056b3;
+  }
+  
+  #statusIndicator {
+    margin-top: 10px;
+    font-weight: 600;
+    color: #555;
+  }
+  
+  #canvas-container {
+    position: relative;
+    margin: 0 auto;
+    max-width: 960px;
+    border: 1px solid #ccc;
+    background-color: #fff;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  
+  #coordinatesOutput {
+    margin-top: 20px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    background-color: #e9ecef;
+    padding: 15px;
+    border-radius: 4px;
+  }
+  
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  
+  /* Cursor Styles */
+  canvas.crosshair {
+    cursor: crosshair;
+  }
+  
+  canvas.move {
+    cursor: move;
+  }
+  
+  canvas.nwse-resize {
+    cursor: nwse-resize;
+  }
+
+  /* Existing styles... */
+
+/* Dark Mode Styles */
+body.dark-mode {
+  background-color: #121212;
+  color: #e0e0e0;
+}
+
+body.dark-mode header, body.dark-mode footer {
+  background-color: #1e1e1e;
+}
+
+body.dark-mode .control-group label {
+  color: #ffffff;
+}
+
+body.dark-mode select, 
+body.dark-mode input[type="number"], 
+body.dark-mode button {
+  background-color: #1e1e1e;
+  border: 1px solid #333333;
+  color: #e0e0e0;
+}
+
+body.dark-mode button {
+  background-color: #bb86fc;
+  color: #000000;
+}
+
+body.dark-mode button:hover {
+  background-color: #9a67ea;
+}
+
+/* Dark Mode Toggle Button */
+#dark-mode-toggle {
+  background-color: #f1f1f1;
+  color: #000000;
+  border: none;
+  padding: 10px 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+#dark-mode-toggle:hover {
+  background-color: #dddddd;
+}
+
+/* Information Display Styles */
+#info-display {
+  margin-top: 30px;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.info-group {
+  flex: 1 1 45%;
+  margin: 10px 0;
+}
+
+.info-group h2 {
+  margin-bottom: 10px;
+}
+
+.info-group p {
+  background-color: #f9f9f9;
+  padding: 10px;
+  border-radius: 4px;
+  word-wrap: break-word;
+}
+
+body.dark-mode .info-group p {
+  background-color: #1e1e1e;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  #info-display {
+    flex-direction: column;
+  }
+
+  .info-group {
+    flex: 1 1 100%;
+  }
+}
+
+#entity-select, label[for="entity-select"] {
+  display: none;
+}
+
+#target-tracking {
+  display: none;
+}
+
+/* Style for the Target Tracking Info Box */
+.info-box {
+  border: 1px solid #ccc;
+  padding: 15px;
+  margin: 15px 0;
+  border-radius: 5px;
+  background-color: #f9f9f9;
+}
+
+#target-tracking-info h3 {
+  margin-top: 0;
+  text-align: center;
+}
+
+#target-tracking-info table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#target-tracking-info th, #target-tracking-info td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: center;
+}
+
+#target-tracking-info tr:nth-child(even) {
+  background-color: #f2f2f2;
+}
+
+#target-tracking-info th {
+  background-color: #4CAF50;
+  color: white;
+}
+
+  

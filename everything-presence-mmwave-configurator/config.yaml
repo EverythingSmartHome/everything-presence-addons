@@ -1,0 +1,19 @@
+name: "Everything Presence Zone Configurator"
+description: "Helps you to visually create zones for the Everything Presence Lite, a mmWave Presence Sensor for Home Assistant"
+version: "1.0.0"
+slug: "everything-presence-zone-configurator"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: services
+boot: auto
+ingress: true
+ingress_port: 8099
+ingress_entry: index.html
+ports:
+  8099/tcp: null
+homeassistant_api: true

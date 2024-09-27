@@ -1,0 +1,3 @@
+#!/command/with-contenv bashio
+
+exec python3 /app/backend.py

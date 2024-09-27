@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Everything Presence Lite - Zone Configurator</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- Include Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div id="container">
+    <header>
+      <h1>Everything Presence Lite - Zone Configurator</h1>
+    </header>
+
+    <div id="main-content">
+      <div id="controls">
+        <!-- Device Selection Drop-Down -->
+        <div class="control-group">
+          <label for="device-select">Select Device:</label>
+          <select id="device-select">
+            <option value="" disabled selected>Loading devices...</option>
+          </select>
+        </div>
+
+        <!-- Entity Selection Drop-Down -->
+        <div class="control-group">
+          <label for="entity-select">Select Entities:</label>
+          <select id="entity-select" multiple>
+            <!-- Options will be populated based on selected device -->
+          </select>
+        </div>
+
+        <!-- Refresh Rate Controls -->
+        <div class="control-group">
+          <label for="refreshRateInput">Refresh Rate (ms):</label>
+          <input type="number" id="refreshRateInput" value="500" min="100" step="100">
+          <button id="setRefreshRateButton">Set Refresh Rate</button>
+          <button id="stopRefreshButton">Stop Refresh</button>
+        </div>
+
+        <button id="saveZonesButton">Save Zones</button>
+
+        <!-- Status Indicator -->
+        <div id="statusIndicator">Status: Not Refreshing</div>
+      </div>
+
+      <!-- Display Target Tracking Information and Occupancy State -->
+      <!-- Target Tracking Info Box -->
+        <div id="target-tracking-info" class="info-box">
+          <h3>Target Tracking Information</h3>
+          <table>
+              <thead>
+                  <tr>
+                      <th>Target</th>
+                      <th>Status</th>
+                      <th>X Coordinate (mm)</th>
+                      <th>Y Coordinate (mm)</th>
+                      <th>Speed (mm/s)</th>
+                      <th>Resolution</th>
+                      <th>Angle (°)</th>
+                      <th>Distance (mm)</th>
+                  </tr>
+              </thead>
+              <tbody>
+                  <tr id="target-1">
+                      <td>Target 1</td>
+                      <td id="target-1-status">N/A</td>
+                      <td id="target-1-x">N/A</td>
+                      <td id="target-1-y">N/A</td>
+                      <td id="target-1-speed">N/A</td>
+                      <td id="target-1-resolution">N/A</td>
+                      <td id="target-1-angle">N/A</td>
+                      <td id="target-1-distance">N/A</td>
+                  </tr>
+                  <tr id="target-2">
+                      <td>Target 2</td>
+                      <td id="target-2-status">N/A</td>
+                      <td id="target-2-x">N/A</td>
+                      <td id="target-2-y">N/A</td>
+                      <td id="target-2-speed">N/A</td>
+                      <td id="target-2-resolution">N/A</td>
+                      <td id="target-2-angle">N/A</td>
+                      <td id="target-2-distance">N/A</td>
+                  </tr>
+                  <tr id="target-3">
+                      <td>Target 3</td>
+                      <td id="target-3-status">N/A</td>
+                      <td id="target-3-x">N/A</td>
+                      <td id="target-3-y">N/A</td>
+                      <td id="target-3-speed">N/A</td>
+                      <td id="target-3-resolution">N/A</td>
+                      <td id="target-3-angle">N/A</td>
+                      <td id="target-3-distance">N/A</td>
+                  </tr>
+              </tbody>
+          </table>
+        </div>
+
+
+        <div class="info-group">
+          <h2>Occupancy State</h2>
+          <p id="occupancy-state">No data available.</p>
+        </div>
+      </div>
+
+      <!-- Visualization Canvas -->
+      <div id="canvas-container">
+        <canvas id="visualizationCanvas" width="960" height="600"></canvas>
+      </div>
+
+      <!-- Coordinates Output -->
+      <div id="coordinatesOutput"></div>
+    </div>
+
+    <footer>
+      <p>&copy; Everything Presence Lite - Zone Configurator</p>
+    </footer>
+  </div>
+  <script src="script.js"></script>
+</body>
+
+</html>
