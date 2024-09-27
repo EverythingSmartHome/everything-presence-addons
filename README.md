@@ -1,2 +1,2 @@
-# Everything Presence Zone Configurator Add-on
-A Home Assistant add-on to visually create zones for the Everything Presence Lite
+# Everything Presence Add-ons
+Home Assistant add-ons for Everything Presence One/Lite products
