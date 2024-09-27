@@ -23,6 +23,8 @@ COPY backend.py /app/backend.py
 
 # Copy services
 COPY services/ /etc/services.d/
+RUN chmod +x /etc/services.d/backend/run
+RUN chmod +x /etc/services.d/nginx/run
 
 # Expose the ingress port
 EXPOSE 8099
