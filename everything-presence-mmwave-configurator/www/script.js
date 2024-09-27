@@ -878,22 +878,22 @@ function handleDeviceSelection() {
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_begin_x`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.beginX) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.beginX), "attributes": {"unit_of_measurement": "mm"} })
       }),
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_end_x`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.endX) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.endX), "attributes": {"unit_of_measurement": "mm"} })
       }),
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_begin_y`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.beginY) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.beginY), "attributes": {"unit_of_measurement": "mm"} })
       }),
       fetch(`${baseUrl}${zoneEntities[`${zonePrefix}_end_y`]}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: roundToNearestTen(zone.endY) })
+        body: JSON.stringify({ state: roundToNearestTen(zone.endY), "attributes": {"unit_of_measurement": "mm"} })
       })
     ];
 
