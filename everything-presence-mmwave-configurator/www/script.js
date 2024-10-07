@@ -5,7 +5,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Variables for device selection
   const deviceSelect = document.getElementById("device-select");
-  let selectedDeviceId = "";
   let selectedEntities = [];
   let targets = [];
   let haZones = [];
@@ -19,6 +18,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let refreshInterval = 500;
   let refreshIntervalId = null;
   let isFetchingData = false;
+  let installationAngle = 0;
+  let detectionRange = 6000;
+  let offsetY = 0;
 
   // Variables for dragging and resizing
   let isDragging = false;
@@ -51,11 +53,17 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function scaleY(value) {
-    return value * scale;
+    return (value + offsetY) * scale;
   }
 
   function unscaleY(value) {
-    return value / scale;
+    return value / scale - offsetY;
+  }
+
+  function calculateOffsetY() {
+    let absAngle = Math.abs(installationAngle);
+    if (absAngle <= 30) offsetY = 0;
+    else offsetY = detectionRange * Math.sin((absAngle - 30) * Math.PI / 180);
   }
 
   // Drawing functions
@@ -88,16 +96,16 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function drawRadarBackground() {
-    const centerX = canvas.width / 2;
-    const centerY = 0;
+    const centerX = scaleX(0);
+    const centerY = scaleY(0);
+    const halfDetectionAngle = 60;
+    const startAngleRadians = (-halfDetectionAngle - installationAngle) / 180 * Math.PI;
+    const endAngleRadians = (halfDetectionAngle - installationAngle) / 180 * Math.PI;
 
-    const detectionRange = 7500;
-    const halfAngleRadians = Math.atan(10000 / detectionRange);
+    const startAngle = Math.PI / 2 + startAngleRadians;
+    const endAngle = Math.PI / 2 + endAngleRadians;
 
-    const startAngle = Math.PI / 2 - halfAngleRadians;
-    const endAngle = Math.PI / 2 + halfAngleRadians;
-
-    const radius = scaleY(detectionRange);
+    const radius = scaleY(detectionRange) - scaleY(0);
 
     ctx.beginPath();
     ctx.moveTo(centerX, centerY);
@@ -233,8 +241,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (newEndX > 6000) {
         dx += 6000 - newEndX;
       }
-      if (newBeginY < 0) {
-        dy += -newBeginY;
+      if (newBeginY < -offsetY) {
+        dy += -offsetY - newBeginY;
       }
       if (newEndY > 7500) {
         dy += 7500 - newEndY;
@@ -254,7 +262,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (dragType === "create") {
       // Handle zone creation (ensure it stays within bounds)
       zone.endX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
-      zone.endY = Math.max(0, Math.min(7500, unscaleY(mousePos.y)));
+      zone.endY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
 
       zone.endX = Math.round(zone.endX);
       zone.endY = Math.round(zone.endY);
@@ -275,13 +283,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Vertical grid lines
     for (let x = -6000; x <= 6000; x += gridSize) {
       ctx.beginPath();
-      ctx.moveTo(scaleX(x), scaleY(0));
+      ctx.moveTo(scaleX(x), scaleY(-2000));
       ctx.lineTo(scaleX(x), scaleY(7500));
       ctx.stroke();
     }
 
     // Horizontal grid lines
-    for (let y = 0; y <= 7500; y += gridSize) {
+    for (let y = -2000; y <= 7500; y += gridSize) {
       ctx.beginPath();
       ctx.moveTo(scaleX(-6000), scaleY(y));
       ctx.lineTo(scaleX(6000), scaleY(y));
@@ -321,12 +329,12 @@ document.addEventListener("DOMContentLoaded", () => {
       newBeginY += dy;
       // Constrain to boundaries and not beyond opposite corner
       newBeginX = Math.max(-6000, Math.min(newBeginX, zone.endX));
-      newBeginY = Math.max(0, Math.min(newBeginY, zone.endY));
+      newBeginY = Math.max(-offsetY, Math.min(newBeginY, zone.endY));
     } else if (corner === "top-right") {
       newEndX += dx;
       newBeginY += dy;
       newEndX = Math.min(6000, Math.max(newEndX, zone.beginX));
-      newBeginY = Math.max(0, Math.min(newBeginY, zone.endY));
+      newBeginY = Math.max(-offsetY, Math.min(newBeginY, zone.endY));
     } else if (corner === "bottom-left") {
       newBeginX += dx;
       newEndY += dy;
@@ -400,9 +408,8 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateCoordinatesOutput() {
     let output = "User Zones:\n";
     userZones.forEach((zone, index) => {
-      output += `Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${
-        zone.endX
-      }, Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
+      output += `Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX
+        }, Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
     });
     coordinatesOutput.textContent = output;
   }
@@ -575,6 +582,10 @@ document.addEventListener("DOMContentLoaded", () => {
       "zone_2_occupancy_off_delay",
       "zone_3_occupancy_off_delay",
       "zone_4_occupancy_off_delay",
+
+      // Configured Values
+      "max_distance",
+      "installation_angle"
     ];
 
     return entities.filter((entityId) => {
@@ -813,6 +824,20 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       targets = updatedTargets;
+
+      detectionRange = entityStates.find(
+        (entity) => entity.entity_id.endsWith(`max_distance`)
+      )?.state ?? 600;
+      detectionRange *= 10; //Convert from cm to mm
+
+      let newInstallationAngle = Number(entityStates.find(
+        (entity) => entity.entity_id.endsWith(`installation_angle`)
+      )?.state ?? 0);
+
+      if (installationAngle != newInstallationAngle) {
+        installationAngle = newInstallationAngle;
+        calculateOffsetY();
+      }
 
       // Draw the visualization
       drawVisualization();
