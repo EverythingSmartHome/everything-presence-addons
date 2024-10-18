@@ -3,6 +3,7 @@ import requests
 import os
 import logging
 import threading
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)  # Set global logging level to ERROR
@@ -12,19 +13,29 @@ log.setLevel(logging.ERROR)  # Suppress Werkzeug request logs
 app = Flask(__name__)
 
 SUPERVISOR_TOKEN = os.getenv('SUPERVISOR_TOKEN')
+HA_URL = os.getenv('HA_URL')
+HA_TOKEN = os.getenv('HA_TOKEN')
 
-HOME_ASSISTANT_API = 'http://supervisor/core/api'
-
-headers = {
-    'Authorization': f'Bearer {SUPERVISOR_TOKEN}',
-    'Content-Type': 'application/json',
-}
+if SUPERVISOR_TOKEN:
+    logging.error('Running as a Home Assistant Add-on.')
+    HOME_ASSISTANT_API = 'http://supervisor/core/api'
+    headers = {
+        'Authorization': f'Bearer {SUPERVISOR_TOKEN}',
+        'Content-Type': 'application/json',
+    }
+elif HA_URL and HA_TOKEN:
+    logging.error('Running as a standalone docker container.')
+    HOME_ASSISTANT_API = HA_URL.rstrip('/') + '/api'
+    headers = {
+        'Authorization': f'Bearer {HA_TOKEN}',
+        'Content-Type': 'application/json',
+    }
+else:
+    logging.error('No SUPERVISOR_TOKEN found and no HA_URL and HA_TOKEN provided.')
+    sys.exit(1)
 
 def check_connectivity():
     """Function to check connectivity with Home Assistant API."""
-    if not SUPERVISOR_TOKEN:
-        logging.error("Cannot perform connectivity check without Supervisor token.")
-        return
     try:
         logging.info("Checking connectivity with Home Assistant API...")
         response = requests.get(f'{HOME_ASSISTANT_API}/', headers=headers, timeout=10)
@@ -79,7 +90,6 @@ def get_entity_state(entity_id):
 @app.route('/api/services/number/set_value', methods=['POST'])
 def set_value():
     try:
-        # Extract the incoming data from the request
         data = request.json
         entity_id = data.get('entity_id')
         value = data.get('value')
@@ -87,16 +97,14 @@ def set_value():
         if not entity_id or value is None:
             return jsonify({"error": "Missing entity_id or value"}), 400
 
-        # Prepare the payload to send to Home Assistant
         payload = {
             "entity_id": entity_id,
             "value": value
         }
-
+        
         # Make the POST request to Home Assistant API
         response = requests.post(f'{HOME_ASSISTANT_API}/services/number/set_value', headers=headers, json=payload)
 
-        # Check the response and return appropriate messages
         if response.status_code == 200:
             return jsonify({"message": f"Entity {entity_id} updated successfully."}), 200
         else:
@@ -104,8 +112,6 @@ def set_value():
 
     except Exception as e:
         return jsonify({"error": "An error occurred while setting the value.", "details": str(e)}), 500
-
-
 
 if __name__ == '__main__':
     threading.Thread(target=check_connectivity).start()
