@@ -28,9 +28,10 @@ jobs:
       - name: Extract version from config.yaml
         id: get_version
         run: |
-          VERSION=$(grep '^version:' config.yaml | awk '{print $2}' | tr -d '"')
+          VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
           echo "Extracted version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+        
 
       - name: Extract metadata for Docker
         id: meta
@@ -41,9 +42,10 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
-          context: .
+          context: ./everything-presence-mmwave-configurator
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}
             ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest
+      
