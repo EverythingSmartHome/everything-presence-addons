@@ -16,10 +16,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Install yq
-        run: |
-          sudo apt-get update && sudo apt-get install -y yq
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
@@ -29,7 +25,7 @@ jobs:
       - name: Extract version from config.yaml
         id: get_version
         run: |
-          VERSION=$(yq e '.version' everything-presence-mmwave-configurator/config.yaml | tr -d '"')
+          VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
           echo "Extracted version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
 
