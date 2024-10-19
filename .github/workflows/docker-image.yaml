@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -13,11 +16,44 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Install yq
+        run: |
+          sudo apt-get update && sudo apt-get install -y yq
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+
+      - name: Extract version from config.yaml
+        id: get_version
+        run: |
+          VERSION=$(yq e '.version' everything-presence-mmwave-configurator/config.yaml | tr -d '"')
+          echo "Extracted version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./everything-presence-mmwave-configurator
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: false  
+          load: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}
+
+      - name: Test Docker image (optional)
+        run: |
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }} echo "Image built successfully"
+
+  push:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
@@ -25,21 +61,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract version from config.yaml
-        id: get_version
-        run: |
-          VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
-          echo "Extracted version: $VERSION"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-        
-
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator
-
-      - name: Build and push Docker image
+      - name: Push Docker image
         uses: docker/build-push-action@v4
         with:
           context: ./everything-presence-mmwave-configurator
@@ -48,4 +70,3 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}
             ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest
-      
