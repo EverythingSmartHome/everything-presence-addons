@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -19,33 +22,44 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Extract version from config.yaml
         id: get_version
         run: |
           VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
           echo "Extracted version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-        
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v4
+      - name: Set Build Variables
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "PLATFORMS=linux/amd64,linux/arm64,linux/arm/v7" >> $GITHUB_ENV
+            echo "PUSH=true" >> $GITHUB_ENV
+            echo "LOAD=false" >> $GITHUB_ENV
+          else
+            echo "PLATFORMS=linux/amd64" >> $GITHUB_ENV
+            echo "PUSH=false" >> $GITHUB_ENV
+            echo "LOAD=true" >> $GITHUB_ENV
+          fi
+  
+      - name: Log in to Docker Hub
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v2
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and (optionally) Push Docker image
         uses: docker/build-push-action@v4
         with:
           context: ./everything-presence-mmwave-configurator
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          push: true
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ env.PUSH }}
+          load: ${{ env.LOAD }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}
             ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest
-      
+
+      - name: Test Docker image
+        if: env.LOAD == 'true'
+        run: |
+          docker run --rm ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }} echo "Image built successfully"
