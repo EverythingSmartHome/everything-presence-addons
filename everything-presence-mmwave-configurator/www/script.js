@@ -8,7 +8,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let selectedEntities = [];
   let targets = [];
   let haZones = [];
+  let haExclusionZones = [];
   let userZones = [];
+  let exclusionZones = [];
 
   // Variables for live refresh
   const refreshRateInput = document.getElementById("refreshRateInput");
@@ -39,6 +41,13 @@ document.addEventListener("DOMContentLoaded", () => {
     { fill: "rgba(0, 0, 255, 0.1)", stroke: "blue" },
     { fill: "rgba(255, 255, 0, 0.1)", stroke: "yellow" },
   ];
+
+  const zoneTypeSelect = document.getElementById("zone-type-select");
+  let currentZoneType = "regular";
+
+  zoneTypeSelect.addEventListener("change", (event) => {
+    currentZoneType = event.target.value;
+  });
 
   const saveZonesButton = document.getElementById("saveZonesButton");
 
@@ -86,6 +95,16 @@ document.addEventListener("DOMContentLoaded", () => {
     userZones.forEach((zone, index) => {
       drawZone(zone, index, "user");
     });
+
+    // Draw HA Exlcusion zones (non-interactive)
+    haExclusionZones.forEach((zone, index) => {
+      drawZone(zone, index, "haExclusion");
+    });
+
+    // Draw exclusion zones (interactive)
+    exclusionZones.forEach((zone, index) => {
+      drawZone(zone, index, "exclusion");
+    })
 
     // Draw targets
     targets.forEach((target) => {
@@ -135,6 +154,14 @@ document.addEventListener("DOMContentLoaded", () => {
       ctx.fillStyle = "rgba(90, 34, 139, 0.1)";
       ctx.strokeStyle = "purple";
       ctx.lineWidth = 2;
+    } else if (zoneType === "haExclusion") {
+      ctx.fillStyle = "rgba(255, 255, 0, 0.1)";
+      ctx.strokeStyle = "yellow";
+      ctx.lineWidth = 2;
+    } else if (zoneType === "exclusion") {
+      ctx.fillStyle = "rgba(255, 165, 0, 0.1)"; // Orange with transparency
+      ctx.strokeStyle = "orange";
+      ctx.lineWidth = 2;
     }
 
     ctx.beginPath();
@@ -148,8 +175,16 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.fillStyle = isDarkMode ? "#e0e0e0" : "#333333";
     ctx.font = "12px Open Sans";
 
-    const zoneLabel =
-      zoneType === "ha" ? `HA Zone ${index + 1}` : `User Zone ${index + 1}`;
+    let zoneLabel;
+    if (zoneType === "ha") {
+      zoneLabel = `HA Zone ${index + 1}`;
+    } else if (zoneType === "user") {
+      zoneLabel = `User Zone ${index + 1}`;
+    } else if (zoneType === "exclusion") {
+      zoneLabel = `Exclusion Zone ${index + 1}`;
+    } else if (zoneType === "haExclusion") {
+      zoneLabel = `HA Exclusion Zone ${index + 1}`;
+    }
     ctx.fillText(zoneLabel, x + 5, y + 15);
   }
 
@@ -189,36 +224,59 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       isDragging = true;
     } else {
-      // Start creating a new user zone if less than 4 user zones
-      if (userZones.length < 4) {
-        dragType = "create";
-        draggingZone = userZones.length;
-        const startX = unscaleX(mousePos.x);
-        const startY = unscaleY(mousePos.y);
-        userZones.push({
-          beginX: startX,
-          beginY: startY,
-          endX: startX,
-          endY: startY,
-        });
-        isDragging = true;
-      } else {
-        alert("Maximum of 4 user zones allowed.");
+      if (currentZoneType === "regular") {
+        // Start creating a new user zone if less than 4 user zones
+        if (userZones.length < 4) {
+          dragType = "create";
+          draggingZone = userZones.length;
+          const startX = unscaleX(mousePos.x);
+          const startY = unscaleY(mousePos.y);
+          userZones.push({
+            beginX: startX,
+            beginY: startY,
+            endX: startX,
+            endY: startY,
+          });
+          isDragging = true;
+        } else {
+          alert("Maximum of 4 user zones allowed.");
+        }
+      } else if (currentZoneType === "exclusion") {
+        const maxExclusionZones = 1;
+        if (exclusionZones.length < maxExclusionZones) {
+          dragType = "create";
+          draggingZone = exclusionZones.length;
+          const startX = unscaleX(mousePos.x);
+          const startY = unscaleY(mousePos.y);
+          exclusionZones.push({
+            beginX: startX,
+            beginY: startY,
+            endX: startX,
+            endY: startY,
+          });
+          isDragging = true;
+        } else {
+          alert(`Maximum of ${maxExclusionZones} exclusion zones allowed.`);
+        }
       }
     }
   }
 
   function onMouseMove(e) {
     const mousePos = getMousePos(canvas, e);
-
+    const zoneInfo = getZoneAtPosition(mousePos);
     if (!isDragging) {
       // Update cursor style based on hover state
-      const zoneInfo = getZoneAtPosition(mousePos);
       if (zoneInfo !== null) {
-        canvas.classList.remove("crosshair");
-        canvas.classList.add(zoneInfo.corner ? "nwse-resize" : "move");
+        if (zoneInfo.zoneType === "user") {
+          canvas.classList.remove("crosshair");
+          canvas.classList.add(zoneInfo.corner ? "nwse-resize" : "move");
+        } else if (zoneInfo.zoneType === "exclusion") {
+          canvas.classList.remove("crosshair");
+          canvas.classList.add(zoneInfo.corner ? "nwse-resize" : "move");
+        }
       } else {
-        canvas.classList.remove("move", "nwse-resize");
+        canvas.classList.remove("move", "nwse-resize", "pointer");
         canvas.classList.add("crosshair");
       }
       return;
@@ -226,46 +284,91 @@ document.addEventListener("DOMContentLoaded", () => {
     let dx = unscaleX(mousePos.x) - unscaleX(dragOffset.x);
     let dy = unscaleY(mousePos.y) - unscaleY(dragOffset.y);
 
-    const zone = userZones[draggingZone];
-
     if (dragType === "move") {
-      let newBeginX = zone.beginX + dx;
-      let newEndX = zone.endX + dx;
-      let newBeginY = zone.beginY + dy;
-      let newEndY = zone.endY + dy;
+      if (zoneInfo.zoneType === "user") {
+        zone = userZones[draggingZone];
 
-      // Adjust dx and dy to prevent moving beyond boundaries
-      if (newBeginX < -6000) {
-        dx += -6000 - newBeginX;
-      }
-      if (newEndX > 6000) {
-        dx += 6000 - newEndX;
-      }
-      if (newBeginY < -offsetY) {
-        dy += -offsetY - newBeginY;
-      }
-      if (newEndY > 7500) {
-        dy += 7500 - newEndY;
-      }
+        let newBeginX = zone.beginX + dx;
+        let newEndX = zone.endX + dx;
+        let newBeginY = zone.beginY + dy;
+        let newEndY = zone.endY + dy;
 
-      zone.beginX += dx;
-      zone.endX += dx;
-      zone.beginY += dy;
-      zone.endY += dy;
 
-      zone.beginX = Math.round(zone.beginX);
-      zone.endX = Math.round(zone.endX);
-      zone.beginY = Math.round(zone.beginY);
-      zone.endY = Math.round(zone.endY);
+        if (newBeginX < -6000) {
+          dx += -6000 - newBeginX;
+        }
+        if (newEndX > 6000) {
+          dx += 6000 - newEndX;
+        }
+        if (newBeginY < -offsetY) {
+          dy += -offsetY - newBeginY;
+        }
+        if (newEndY > 7500) {
+          dy += 7500 - newEndY;
+        }
+
+        zone.beginX += dx;
+        zone.endX += dx;
+        zone.beginY += dy;
+        zone.endY += dy;
+
+        zone.beginX = Math.round(zone.beginX);
+        zone.endX = Math.round(zone.endX);
+        zone.beginY = Math.round(zone.beginY);
+        zone.endY = Math.round(zone.endY);
+      } else if (zoneInfo.zoneType === "exclusion") {
+        const zone = exclusionZones[draggingZone];
+        let newBeginX = zone.beginX + dx;
+        let newEndX = zone.endX + dx;
+        let newBeginY = zone.beginY + dy;
+        let newEndY = zone.endY + dy;
+
+        // Adjust dx and dy to prevent moving beyond boundaries
+        if (newBeginX < -6000) {
+          dx += -6000 - newBeginX;
+        }
+        if (newEndX > 6000) {
+          dx += 6000 - newEndX;
+        }
+        if (newBeginY < -offsetY) {
+          dy += -offsetY - newBeginY;
+        }
+        if (newEndY > 7500) {
+          dy += 7500 - newEndY;
+        }
+
+        zone.beginX += dx;
+        zone.endX += dx;
+        zone.beginY += dy;
+        zone.endY += dy;
+
+        zone.beginX = Math.round(zone.beginX);
+        zone.endX = Math.round(zone.endX);
+        zone.beginY = Math.round(zone.beginY);
+        zone.endY = Math.round(zone.endY);
+      }
     } else if (dragType === "resize") {
-      adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
+      if (zoneInfo.zoneType === "user") {
+        const zone = userZones[draggingZone];
+        adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
+      } else if (zoneInfo.zoneType === "exclusion") {
+        const zone = exclusionZones[draggingZone];
+        adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
+      }
     } else if (dragType === "create") {
-      // Handle zone creation (ensure it stays within bounds)
-      zone.endX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
-      zone.endY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
-
-      zone.endX = Math.round(zone.endX);
-      zone.endY = Math.round(zone.endY);
+      if (currentZoneType === "regular") {
+        const zone = userZones[draggingZone];
+        zone.endX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
+        zone.endY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
+        zone.endX = Math.round(zone.endX);
+        zone.endY = Math.round(zone.endY);
+      } else if (currentZoneType === "exclusion") {
+        const zone = exclusionZones[draggingZone];
+        zone.endX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
+        zone.endY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
+        zone.endX = Math.round(zone.endX);
+        zone.endY = Math.round(zone.endY);
+      }
     }
 
     dragOffset.x = mousePos.x;
@@ -309,11 +412,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const mousePos = getMousePos(canvas, e);
     const zoneInfo = getZoneAtPosition(mousePos);
     if (zoneInfo !== null) {
-      const { index } = zoneInfo;
-      if (confirm(`Delete User Zone ${index + 1}?`)) {
-        userZones.splice(index, 1);
-        drawVisualization();
-        updateCoordinatesOutput();
+      const { index, zoneType } = zoneInfo;
+      if (zoneType === "user") {
+        if (confirm(`Delete User Zone ${index + 1}?`)) {
+          userZones.splice(index, 1);
+          drawVisualization();
+          updateCoordinatesOutput();
+        }
+      } else if (zoneType === "exclusion") {
+        if (confirm(`Delete Exclusion Zone?`)) {
+          exclusionZones.splice(index, 1);
+          drawVisualization();
+          updateCoordinatesOutput();
+        }
       }
     }
   }
@@ -363,20 +474,20 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getZoneAtPosition(pos) {
-    for (let i = userZones.length - 1; i >= 0; i--) {
-      const zone = userZones[i];
+    // Check exclusion zone
+    for (let i = exclusionZones.length - 1; i >= 0; i--) {
+      const zone = exclusionZones[i];
       const x = scaleX(Math.min(zone.beginX, zone.endX));
       const y = scaleY(Math.min(zone.beginY, zone.endY));
       const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
       const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
 
-      // Check for resize handles
       const handleSize = 8;
       const corners = [
-        { x: x, y: y, corner: "top-left" },
-        { x: x + width, y: y, corner: "top-right" },
-        { x: x, y: y + height, corner: "bottom-left" },
-        { x: x + width, y: y + height, corner: "bottom-right" },
+        { x: x, y: y, corner: "top-left", type: "exclusion", index: i },
+        { x: x + width, y: y, corner: "top-right", type: "exclusion", index: i },
+        { x: x, y: y + height, corner: "bottom-left", type: "exclusion", index: i },
+        { x: x + width, y: y + height, corner: "bottom-right", type: "exclusion", index: i },
       ];
       for (const corner of corners) {
         if (
@@ -385,18 +496,53 @@ document.addEventListener("DOMContentLoaded", () => {
           pos.y >= corner.y - handleSize / 2 &&
           pos.y <= corner.y + handleSize / 2
         ) {
-          return { index: i, corner: corner.corner };
+          return { index: corner.index, corner: corner.corner, zoneType: corner.type };
         }
       }
 
-      // Check if over zone
       if (
         pos.x >= x &&
         pos.x <= x + width &&
         pos.y >= y &&
         pos.y <= y + height
       ) {
-        return { index: i, corner: null };
+        return { index: i, corner: null, zoneType: "exclusion" };
+      }
+    }
+
+    // Check user zones
+    for (let i = userZones.length - 1; i >= 0; i--) {
+      const zone = userZones[i];
+      const x = scaleX(Math.min(zone.beginX, zone.endX));
+      const y = scaleY(Math.min(zone.beginY, zone.endY));
+      const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
+      const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
+
+      const handleSize = 8;
+      const corners = [
+        { x: x, y: y, corner: "top-left", type: "user", index: i },
+        { x: x + width, y: y, corner: "top-right", type: "user", index: i },
+        { x: x, y: y + height, corner: "bottom-left", type: "user", index: i },
+        { x: x + width, y: y + height, corner: "bottom-right", type: "user", index: i },
+      ];
+      for (const corner of corners) {
+        if (
+          pos.x >= corner.x - handleSize / 2 &&
+          pos.x <= corner.x + handleSize / 2 &&
+          pos.y >= corner.y - handleSize / 2 &&
+          pos.y <= corner.y + handleSize / 2
+        ) {
+          return { index: i, corner: corner.corner, zoneType: corner.type };
+        }
+      }
+
+      if (
+        pos.x >= x &&
+        pos.x <= x + width &&
+        pos.y >= y &&
+        pos.y <= y + height
+      ) {
+        return { index: i, corner: null, zoneType: "user" };
       }
     }
     return null;
@@ -408,9 +554,17 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateCoordinatesOutput() {
     let output = "User Zones:\n";
     userZones.forEach((zone, index) => {
-      output += `Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX
-        }, Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
+      output += `Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX},
+       Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
     });
+
+    if (exclusionZones.length > 0) {
+      output += "\nExclusion Zones:\n";
+      exclusionZones.forEach((zone, index) => {
+        output += `Exclusion Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX}, Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
+      });
+    }
+
     coordinatesOutput.textContent = output;
   }
 
@@ -585,7 +739,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Configured Values
       "max_distance",
-      "installation_angle"
+      "installation_angle",
+
+      //Occupancy Masks
+      "occupancy_mask_1_begin_x",
+      "occupancy_mask_1_begin_y",
+      "occupancy_mask_1_end_x",
+      "occupancy_mask_1_end_y"
     ];
 
     return entities.filter((entityId) => {
@@ -601,7 +761,8 @@ document.addEventListener("DOMContentLoaded", () => {
         await populateEntityDropdown(selectedDeviceId);
         targets = [];
         haZones = [];
-        userZones = []; // Reset user zones if needed
+        userZones = [];
+        haExclusionZones = [];
         drawVisualization();
         updateCoordinatesOutput();
       }
@@ -680,46 +841,64 @@ document.addEventListener("DOMContentLoaded", () => {
 
     entities.forEach((entity) => {
       const entityId = entity.entity_id;
-      const match = entityId.match(/zone_(\d+)_(begin|end)_(x|y)$/);
+      const match = entityId.match(/zone_(\d+)_(begin|end)_(x|y)$/) || entityId.match(/occupancy_mask_(\d+)_(begin|end)_(x|y)$/);
 
       if (match) {
+        const zoneType = entityId.includes("occupancy_mask") ? "occupancy_mask" : "zone";
         const zoneNumber = match[1]; // e.g., '1' for zone_1
         const position = match[2]; // 'begin' or 'end'
         const axis = match[3]; // 'x' or 'y'
 
-        if (!zones[zoneNumber]) {
-          zones[zoneNumber] = {};
+        const zoneKey = `${zoneType}_${zoneNumber}`;
+
+        if (!zones[zoneKey]) {
+          zones[zoneKey] = {};
         }
 
         // Assign values based on axis
         if (axis === "x") {
           if (position === "begin") {
-            zones[zoneNumber].beginX = parseFloat(entity.state) || 0;
+            zones[zoneKey].beginX = parseFloat(entity.state) || 0;
           } else {
-            zones[zoneNumber].endX = parseFloat(entity.state) || 0;
+            zones[zoneKey].endX = parseFloat(entity.state) || 0;
           }
         } else if (axis === "y") {
           if (position === "begin") {
-            zones[zoneNumber].beginY = parseFloat(entity.state) || 0;
+            zones[zoneKey].beginY = parseFloat(entity.state) || 0;
           } else {
-            zones[zoneNumber].endY = parseFloat(entity.state) || 0;
+            zones[zoneKey].endY = parseFloat(entity.state) || 0;
           }
         }
       }
     });
 
     // Convert zones object to an array
-    const reconstructedZones = Object.keys(zones).map((zoneNumber) => {
-      const zone = zones[zoneNumber];
-      return {
-        beginX: zone.beginX || 0,
-        beginY: zone.beginY || 0,
-        endX: zone.endX || 0,
-        endY: zone.endY || 0,
-      };
+    const reconstructedRegularZones = [];
+    const reconstructedExclusionZones = [];
+
+    Object.keys(zones).forEach((key) => {
+      const zone = zones[key];
+      if (key.startsWith("occupancy_mask")) {
+        reconstructedExclusionZones.push({
+          beginX: zone.beginX || 0,
+          beginY: zone.beginY || 0,
+          endX: zone.endX || 0,
+          endY: zone.endY || 0,
+        });
+      } else if (key.startsWith("zone")) {
+        reconstructedRegularZones.push({
+          beginX: zone.beginX || 0,
+          beginY: zone.beginY || 0,
+          endX: zone.endX || 0,
+          endY: zone.endY || 0,
+        });
+      }
     });
 
-    return reconstructedZones;
+    return {
+      regularZones: reconstructedRegularZones,
+      exclusionZones: reconstructedExclusionZones,
+    };
   }
 
   function updateTargetTrackingInfo() {
@@ -759,8 +938,9 @@ document.addEventListener("DOMContentLoaded", () => {
       );
       const entityStates = await Promise.all(dataPromises);
 
-      // Reconstruct zones from entity states
-      haZones = reconstructZones(entityStates);
+      const reconstructed = reconstructZones(entityStates);
+      haZones = reconstructed.regularZones;
+      haExclusionZones = reconstructed.exclusionZones;
 
       // Process targets based on entity states
       const targetNumbers = [1, 2, 3];
@@ -896,18 +1076,19 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("Failed to find zone entities.");
       return;
     }
-    const zonesToSave = [];
 
+    // Prepare regular zones (up to 4)
+    const regularZonesToSave = [];
     for (let i = 0; i < 4; i++) {
       if (userZones[i]) {
-        zonesToSave.push({
+        regularZonesToSave.push({
           beginX: userZones[i].beginX || 0,
           endX: userZones[i].endX || 0,
           beginY: userZones[i].beginY || 0,
           endY: userZones[i].endY || 0,
         });
       } else {
-        zonesToSave.push({
+        regularZonesToSave.push({
           beginX: 0,
           endX: 0,
           beginY: 0,
@@ -916,15 +1097,29 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    // Send the zones data to Home Assistant
+    const exclusionZonesToSave = exclusionZones.map(zone => ({
+      beginX: zone.beginX || 0,
+      endX: zone.endX || 0,
+      beginY: zone.beginY || 0,
+      endY: zone.endY || 0,
+    }));
+
+    // Send the regular zones
     try {
-      for (let i = 0; i < zonesToSave.length; i++) {
-        const zone = zonesToSave[i];
+      for (let i = 0; i < regularZonesToSave.length; i++) {
+        const zone = regularZonesToSave[i];
         await saveZoneToHA(i + 1, zone, zoneEntities);
+      }
+
+      // Send the exclusion zone
+      for (let i = 0; i < exclusionZonesToSave.length; i++) {
+        const zone = exclusionZonesToSave[i];
+        await saveExclusionZoneToHA(i + 1, zone, zoneEntities);
       }
 
       alert("Zones saved successfully!");
       userZones = [];
+      exclusionZones = [];
       drawVisualization();
       updateCoordinatesOutput();
     } catch (error) {
@@ -936,47 +1131,33 @@ document.addEventListener("DOMContentLoaded", () => {
   function extractZoneEntities(entities) {
     const zoneEntities = {};
 
-    // Iterate through entities and map each relevant zone entity to its exact match
+    const regularZoneRegex = /zone_(\d+)_(begin|end)_(x|y)$/;
+    const exclusionZoneRegex = /occupancy_mask_(\d+)_(begin|end)_(x|y)$/;
+  
     entities.forEach((entity) => {
       const entityId = entity.id;
+      console.log(entityId);
+      // Check for Regular Zones
+      let match = entityId.match(regularZoneRegex);
+      if (match) {
+        console.log(entityId);
+        const [_, zoneNumber, position, axis] = match;
+        const key = `zone_${zoneNumber}_${position}_${axis}`;
+        zoneEntities[key] = entityId;
+        return;
+      }
+  
+      // Check for Exclusion Zones
+      match = entityId.match(exclusionZoneRegex);
+      if (match) {
+        const [_, maskNumber, position, axis] = match;
+        const key = `occupancy_mask_${maskNumber}_${position}_${axis}`;
+        zoneEntities[key] = entityId;
+        return;
+      }
 
-      if (entityId.includes("zone_1_begin_x"))
-        zoneEntities.zone_1_begin_x = entityId;
-      if (entityId.includes("zone_1_begin_y"))
-        zoneEntities.zone_1_begin_y = entityId;
-      if (entityId.includes("zone_1_end_x"))
-        zoneEntities.zone_1_end_x = entityId;
-      if (entityId.includes("zone_1_end_y"))
-        zoneEntities.zone_1_end_y = entityId;
-
-      if (entityId.includes("zone_2_begin_x"))
-        zoneEntities.zone_2_begin_x = entityId;
-      if (entityId.includes("zone_2_begin_y"))
-        zoneEntities.zone_2_begin_y = entityId;
-      if (entityId.includes("zone_2_end_x"))
-        zoneEntities.zone_2_end_x = entityId;
-      if (entityId.includes("zone_2_end_y"))
-        zoneEntities.zone_2_end_y = entityId;
-
-      if (entityId.includes("zone_3_begin_x"))
-        zoneEntities.zone_3_begin_x = entityId;
-      if (entityId.includes("zone_3_begin_y"))
-        zoneEntities.zone_3_begin_y = entityId;
-      if (entityId.includes("zone_3_end_x"))
-        zoneEntities.zone_3_end_x = entityId;
-      if (entityId.includes("zone_3_end_y"))
-        zoneEntities.zone_3_end_y = entityId;
-
-      if (entityId.includes("zone_4_begin_x"))
-        zoneEntities.zone_4_begin_x = entityId;
-      if (entityId.includes("zone_4_begin_y"))
-        zoneEntities.zone_4_begin_y = entityId;
-      if (entityId.includes("zone_4_end_x"))
-        zoneEntities.zone_4_end_x = entityId;
-      if (entityId.includes("zone_4_end_y"))
-        zoneEntities.zone_4_end_y = entityId;
     });
-
+  
     return zoneEntities;
   }
 
@@ -1024,6 +1205,63 @@ document.addEventListener("DOMContentLoaded", () => {
       }),
     ];
 
+    await Promise.all(requests);
+  }
+
+  async function saveExclusionZoneToHA(zoneNumber, zone, zoneEntities) {
+    const baseUrl = "api/services/number/set_value";
+  
+    const zonePrefix = `occupancy_mask_${zoneNumber}`;
+    console.log("Saving Exclusion Zone:", zonePrefix);
+    console.log("Zone Entities:", zoneEntities);
+  
+    const roundToNearestTen = (num) => {
+      return (Math.round(num / 10) * 10).toFixed(1);
+    };
+  
+    const keys = [
+      `${zonePrefix}_begin_x`,
+      `${zonePrefix}_end_x`,
+      `${zonePrefix}_begin_y`,
+      `${zonePrefix}_end_y`,
+    ];
+  
+    const requests = keys.map(key => {
+      const entityId = zoneEntities[key];
+      if (!entityId) {
+        console.warn(`Entity ID for ${key} not found. Skipping this field.`);
+        return Promise.resolve();
+      }
+  
+      let value;
+      switch (key) {
+        case `${zonePrefix}_begin_x`:
+          value = roundToNearestTen(zone.beginX);
+          break;
+        case `${zonePrefix}_end_x`:
+          value = roundToNearestTen(zone.endX);
+          break;
+        case `${zonePrefix}_begin_y`:
+          value = roundToNearestTen(zone.beginY);
+          break;
+        case `${zonePrefix}_end_y`:
+          value = roundToNearestTen(zone.endY);
+          break;
+        default:
+          value = 0;
+      }
+  
+      return fetch(`${baseUrl}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: entityId,
+          value: value,
+        }),
+      });
+    });
+  
+    // Execute all fetch requests
     await Promise.all(requests);
   }
 
