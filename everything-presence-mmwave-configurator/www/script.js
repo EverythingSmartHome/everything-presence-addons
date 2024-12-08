@@ -78,30 +78,34 @@ document.addEventListener("DOMContentLoaded", () => {
   /// Returns the entity's state converted from whatever unit is configured in the UI converted to millimeters
   function getEntityStateMM(entity) {
     const state = entity ? parseFloat(entity.state) || 0 : 0;
-    // cm, in, ft, km, m, mi, nmi, yd are supported in home assistant, we can safely ignore mm since that's the target unit.
-    if (entity.attributes.unit_of_measurement == "in") {
-      // Convert inches to millimeters
-      return state * 25.4;
-    } else if (entity.attributes.unit_of_measurement == "ft") {
-      // Convert feet to millimeters
-      return state * 304.8;
-    } else if (entity.attributes.unit_of_measurement == "km") {
-      // Convert kilometers to millimeters
-      return state * 1000000;
-    } else if (entity.attributes.unit_of_measurement == "m") {
-      // Convert meters to millimeters
-      return state * 1000;
-    } else if (entity.attributes.unit_of_measurement == "mi") {
-      // Convert miles to millimeters
-      return state * 1.609e6;
-    } else if (entity.attributes.unit_of_measurement == "nmi") {
-      // Convert nautical miles to millimeters
-      return state * 1.852e6;
-    } else if (entity.attributes.unit_of_measurement == "yd") {
-      // Convert yards to millimeters
-      return state * 914.4;
+    let result = state;
+    // cm, in, ft, km, m, mi, nmi, yd are supported in home assistant
+    switch (entity.attributes.unit_of_measurement) {
+      case "mm":
+        break; // Avoid checking every unit for the most common case
+      case "in":
+        result = state * 25.4; // Convert inches to millimeters
+        break;
+      case "ft":
+        result = state * 304.8; // Convert feet to millimeters
+        break;
+      case "km":
+        result = state * 1000000; // Convert kilometers to millimeters
+        break;
+      case "m":
+        result = state * 1000; // Convert meters to millimeters
+        break;
+      case "mi":
+        result = state * 1.609e6; // Convert miles to millimeters
+        break;
+      case "nmi":
+        result = state * 1.852e6; // Convert nautical miles to millimeters
+        break;
+      case "yd":
+        result = state * 914.4; // Convert yards to millimeters
+        break;
     }
-    return state;
+    return Math.round(result);
   }
 
   // Drawing functions
