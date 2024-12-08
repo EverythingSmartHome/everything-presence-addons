@@ -1013,25 +1013,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const updatedTargets = targetNumbers.map((targetNumber) => {
         // Find corresponding entities for the target
         const activeEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_active`),
+          entity.id.includes(`target_${targetNumber}_active`)
         );
         const xEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_x`),
+          entity.id.includes(`target_${targetNumber}_x`)
         );
         const yEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_y`),
+          entity.id.includes(`target_${targetNumber}_y`)
         );
         const speedEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_speed`),
+          entity.id.includes(`target_${targetNumber}_speed`)
         );
         const resolutionEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_resolution`),
+          entity.id.includes(`target_${targetNumber}_resolution`)
         );
         const angleEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_angle`),
+          entity.id.includes(`target_${targetNumber}_angle`)
         );
         const distanceEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_distance`),
+          entity.id.includes(`target_${targetNumber}_distance`)
         );
 
         // Extract data from entityStates
