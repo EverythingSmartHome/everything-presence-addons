@@ -53,6 +53,50 @@ document.addEventListener("DOMContentLoaded", () => {
 
   saveZonesButton.addEventListener("click", saveZonesToHA);
 
+  // ==========================
+  //   === Persistence State ===
+  // ==========================
+  let isPersistenceEnabled = false; // Flag to toggle persistence
+  let persistentDots = []; // Array to store persistent dots
+
+  // Add a button for toggling persistence
+  const persistenceToggleButton = document.getElementById("persistenceToggleButton");
+
+  // If the button doesn't exist, create and append it to the body
+  if (!persistenceToggleButton) {
+    const button = document.createElement("button");
+    button.id = "persistenceToggleButton";
+    button.textContent = "Enable Persistence";
+    // Style the button as needed
+    button.style.marginLeft = "10px";
+    // Append to a suitable container, e.g., next to saveZonesButton
+    saveZonesButton.parentElement.appendChild(button);
+  }
+
+  // Now, fetch the button
+  const persistenceButton = document.getElementById("persistenceToggleButton");
+
+  // Event listener to toggle persistence
+  persistenceButton.addEventListener("click", () => {
+    isPersistenceEnabled = !isPersistenceEnabled;
+    persistenceButton.textContent = isPersistenceEnabled ? "Disable Persistence" : "Enable Persistence";
+
+    if (isPersistenceEnabled) {
+      // Set refresh rate to 250ms when persistence is enabled
+      setRefreshRate(250, true); // Pass a flag to indicate it's a programmatic change
+    } else {
+      // Revert to user-specified refresh rate when persistence is disabled
+      const userRefreshRate = parseInt(refreshRateInput.value, 10) || 500;
+      setRefreshRate(userRefreshRate, true);
+      // Optionally clear persistent dots when disabled
+      persistentDots = [];
+      drawVisualization();
+    }
+  });
+
+  // ==========================
+  //   === Scaling Functions ===
+  // ==========================
   function scaleX(value) {
     return (value + 6000) * scale;
   }
@@ -75,7 +119,9 @@ document.addEventListener("DOMContentLoaded", () => {
     else offsetY = detectionRange * Math.sin((absAngle - 30) * Math.PI / 180);
   }
 
-  // Drawing functions
+  // ==========================
+  //    === Drawing Functions ===
+  // ==========================
   function drawVisualization() {
     // Clear the canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -96,7 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
       drawZone(zone, index, "user");
     });
 
-    // Draw HA Exlcusion zones (non-interactive)
+    // Draw HA Exclusion zones (non-interactive)
     haExclusionZones.forEach((zone, index) => {
       drawZone(zone, index, "haExclusion");
     });
@@ -104,7 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw exclusion zones (interactive)
     exclusionZones.forEach((zone, index) => {
       drawZone(zone, index, "exclusion");
-    })
+    });
 
     // Draw targets
     targets.forEach((target) => {
@@ -112,6 +158,13 @@ document.addEventListener("DOMContentLoaded", () => {
         drawTarget(target);
       }
     });
+
+    // ==========================
+    // === Draw Persistent Dots ==
+    // ==========================
+    if (isPersistenceEnabled) {
+      drawPersistentDots();
+    }
   }
 
   function drawRadarBackground() {
@@ -199,6 +252,22 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.closePath();
   }
 
+  // ==========================
+  //   === Persistent Dots ===
+  // ==========================
+  function drawPersistentDots() {
+    ctx.fillStyle = "black"; // Choose desired color for persistent dots
+    persistentDots.forEach((dot) => {
+      ctx.beginPath();
+      ctx.arc(scaleX(dot.x), scaleY(dot.y), 3, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.closePath();
+    });
+  }
+
+  // ==========================
+  //    === Event Listeners ===
+  // ==========================
   // Event listeners for canvas interactions
   canvas.addEventListener("mousedown", onMouseDown);
   canvas.addEventListener("mousemove", onMouseMove);
@@ -210,7 +279,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const zoneInfo = getZoneAtPosition(mousePos);
 
     if (zoneInfo !== null) {
-      const { index, corner } = zoneInfo;
+      const { index, corner, zoneType } = zoneInfo;
       draggingZone = index;
       dragOffset.x = mousePos.x;
       dragOffset.y = mousePos.y;
@@ -268,16 +337,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!isDragging) {
       // Update cursor style based on hover state
       if (zoneInfo !== null) {
-        if (zoneInfo.zoneType === "user") {
-          canvas.classList.remove("crosshair");
-          canvas.classList.add(zoneInfo.corner ? "nwse-resize" : "move");
-        } else if (zoneInfo.zoneType === "exclusion") {
-          canvas.classList.remove("crosshair");
-          canvas.classList.add(zoneInfo.corner ? "nwse-resize" : "move");
+        if (zoneInfo.zoneType === "user" || zoneInfo.zoneType === "exclusion") {
+          canvas.style.cursor = zoneInfo.corner ? "nwse-resize" : "move";
         }
       } else {
-        canvas.classList.remove("move", "nwse-resize", "pointer");
-        canvas.classList.add("crosshair");
+        canvas.style.cursor = "crosshair";
       }
       return;
     }
@@ -286,14 +350,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (dragType === "move") {
       if (zoneInfo.zoneType === "user") {
-        zone = userZones[draggingZone];
+        let zone = userZones[draggingZone];
 
         let newBeginX = zone.beginX + dx;
         let newEndX = zone.endX + dx;
         let newBeginY = zone.beginY + dy;
         let newEndY = zone.endY + dy;
 
-
+        // Constrain within boundaries
         if (newBeginX < -6000) {
           dx += -6000 - newBeginX;
         }
@@ -317,7 +381,7 @@ document.addEventListener("DOMContentLoaded", () => {
         zone.beginY = Math.round(zone.beginY);
         zone.endY = Math.round(zone.endY);
       } else if (zoneInfo.zoneType === "exclusion") {
-        const zone = exclusionZones[draggingZone];
+        let zone = exclusionZones[draggingZone];
         let newBeginX = zone.beginX + dx;
         let newEndX = zone.endX + dx;
         let newBeginY = zone.beginY + dy;
@@ -474,7 +538,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getZoneAtPosition(pos) {
-    // Check exclusion zone
+    // Check exclusion zones first (higher priority)
     for (let i = exclusionZones.length - 1; i >= 0; i--) {
       const zone = exclusionZones[i];
       const x = scaleX(Math.min(zone.beginX, zone.endX));
@@ -510,7 +574,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    // Check user zones
+    // Check user zones next
     for (let i = userZones.length - 1; i >= 0; i--) {
       const zone = userZones[i];
       const x = scaleX(Math.min(zone.beginX, zone.endX));
@@ -532,7 +596,7 @@ document.addEventListener("DOMContentLoaded", () => {
           pos.y >= corner.y - handleSize / 2 &&
           pos.y <= corner.y + handleSize / 2
         ) {
-          return { index: i, corner: corner.corner, zoneType: corner.type };
+          return { index: corner.index, corner: corner.corner, zoneType: corner.type };
         }
       }
 
@@ -548,7 +612,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return null;
   }
 
-  // Update coordinates output
+  // ==========================
+  //    === Coordinates Output ===
+  // ==========================
   const coordinatesOutput = document.getElementById("coordinatesOutput");
 
   function updateCoordinatesOutput() {
@@ -568,21 +634,32 @@ document.addEventListener("DOMContentLoaded", () => {
     coordinatesOutput.textContent = output;
   }
 
+  // ==========================
+  //   === Fetch Entity State ===
+  // ==========================
   async function fetchEntityState(entityId) {
     if (!entityId) {
       console.error("Attempted to fetch entity with undefined ID.");
       return null;
     }
 
-    const response = await fetch(`api/entities/${entityId}`);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch entity ${entityId}: ${response.statusText}`
-      );
+    try {
+      const response = await fetch(`api/entities/${entityId}`);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch entity ${entityId}: ${response.statusText}`
+        );
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`Error fetching entity ${entityId}:`, error);
+      return null;
     }
-    return response.json();
   }
 
+  // ==========================
+  //   === Dark Mode Toggle ===
+  // ==========================
   const darkModeToggle = document.getElementById("dark-mode-toggle");
 
   function setupDarkModeToggle() {
@@ -612,9 +689,15 @@ document.addEventListener("DOMContentLoaded", () => {
         darkModeToggle.textContent = "🌙";
         localStorage.setItem("darkMode", "disabled");
       }
+
+      // Redraw visualization to reflect theme change
+      drawVisualization();
     });
   }
 
+  // ==========================
+  //   === Device Dropdown ===
+  // ==========================
   // Populate device selection drop-down
   async function fetchDevices() {
     const template = `
@@ -655,6 +738,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // ==========================
+  //   === Entity Dropdown ===
+  // ==========================
   // Populate entity selection drop-down based on selected device
   async function populateEntityDropdown(deviceId) {
     const template = `
@@ -741,7 +827,7 @@ document.addEventListener("DOMContentLoaded", () => {
       "max_distance",
       "installation_angle",
 
-      //Occupancy Masks
+      // Occupancy Masks
       "occupancy_mask_1_begin_x",
       "occupancy_mask_1_begin_y",
       "occupancy_mask_1_end_x",
@@ -753,6 +839,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // ==========================
+  // === Handle Device Selection ===
+  // ==========================
   // Handle device selection change
   function handleDeviceSelection() {
     deviceSelect.addEventListener("change", async (event) => {
@@ -763,13 +852,17 @@ document.addEventListener("DOMContentLoaded", () => {
         haZones = [];
         userZones = [];
         haExclusionZones = [];
+        exclusionZones = [];
+        persistentDots = []; // Clear persistent dots when a new device is selected
         drawVisualization();
         updateCoordinatesOutput();
       }
     });
   }
 
-  // Live data fetching functions
+  // ==========================
+  // === Refresh Rate Controls ===
+  // ==========================
   function setupRefreshRateControls() {
     setRefreshRateButton.addEventListener("click", () => {
       const newRate = parseInt(refreshRateInput.value, 10);
@@ -778,16 +871,46 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      refreshInterval = newRate;
-      if (refreshIntervalId !== null) {
-        startLiveRefresh();
-      }
+      setRefreshRate(newRate, false); // Pass false to indicate user-initiated change
     });
-
-    // toggleRefreshButton.addEventListener("click", () => {
-    //   stopLiveRefresh();
-    // });
   }
+
+  /**
+   * Sets the refresh rate and restarts the live refresh if needed.
+   * @param {number} rate - The new refresh rate in milliseconds.
+   * @param {boolean} isProgrammatic - Indicates if the change is programmatic (e.g., persistence toggle).
+   */
+  function setRefreshRate(rate, isProgrammatic) {
+    refreshInterval = rate;
+    refreshRateInput.value = rate;
+
+    if (refreshIntervalId !== null) {
+      clearInterval(refreshIntervalId);
+    }
+
+    if (selectedEntities.length === 0) {
+      alert("No entities selected for live updating.");
+      return;
+    }
+
+    fetchLiveData();
+
+    refreshIntervalId = setInterval(fetchLiveData, refreshInterval);
+
+    statusIndicator.textContent = `Status: Refreshing every ${refreshInterval} ms`;
+
+    // Update toggleRefreshButton text based on whether it's starting or stopping
+    // If it's programmatic, keep the current state
+    if (!isProgrammatic) {
+      isRefreshing = true;
+      toggleRefreshButton.textContent = "Stop Refresh";
+    }
+  }
+
+  // ==========================
+  // === Live Refresh ===
+  // ==========================
+  let isRefreshing = false; // To track refresh state
 
   function startLiveRefresh() {
     if (refreshIntervalId !== null) {
@@ -828,14 +951,16 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Please enter a valid refresh rate (minimum 100 ms).");
         return;
       }
-      refreshInterval = newRate;
-      startLiveRefresh();
+      setRefreshRate(newRate, false); // Pass false to indicate user-initiated change
     }
   }
 
   // Update the event listener for the toggle button
   toggleRefreshButton.addEventListener("click", toggleRefresh);
 
+  // ==========================
+  // === Reconstruct Zones ===
+  // ==========================
   function reconstructZones(entities) {
     const zones = {};
 
@@ -901,6 +1026,9 @@ document.addEventListener("DOMContentLoaded", () => {
     };
   }
 
+  // ==========================
+  // === Target Tracking ===
+  // ==========================
   function updateTargetTrackingInfo() {
     // Assuming targets array has 3 targets
     targets.forEach((target) => {
@@ -925,6 +1053,9 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // ==========================
+  // === Live Data Fetching ===
+  // ==========================
   async function fetchLiveData() {
     if (isFetchingData) {
       return;
@@ -970,25 +1101,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Extract data from entityStates
         const activeData = entityStates.find(
-          (entity) => entity.entity_id === activeEntity.id
+          (entity) => entity.entity_id === (activeEntity ? activeEntity.id : "")
         );
         const xData = entityStates.find(
-          (entity) => entity.entity_id === xEntity.id
+          (entity) => entity.entity_id === (xEntity ? xEntity.id : "")
         );
         const yData = entityStates.find(
-          (entity) => entity.entity_id === yEntity.id
+          (entity) => entity.entity_id === (yEntity ? yEntity.id : "")
         );
         const speedData = entityStates.find(
-          (entity) => entity.entity_id === speedEntity.id
+          (entity) => entity.entity_id === (speedEntity ? speedEntity.id : "")
         );
         const resolutionData = entityStates.find(
-          (entity) => entity.entity_id === resolutionEntity.id
+          (entity) => entity.entity_id === (resolutionEntity ? resolutionEntity.id : "")
         );
         const angleData = entityStates.find(
-          (entity) => entity.entity_id === angleEntity.id
+          (entity) => entity.entity_id === (angleEntity ? angleEntity.id : "")
         );
         const distanceData = entityStates.find(
-          (entity) => entity.entity_id === distanceEntity.id
+          (entity) => entity.entity_id === (distanceEntity ? distanceEntity.id : "")
         );
 
         return {
@@ -1008,7 +1139,7 @@ document.addEventListener("DOMContentLoaded", () => {
       detectionRange = entityStates.find(
         (entity) => entity.entity_id.endsWith(`max_distance`)
       )?.state ?? 600;
-      detectionRange *= 10; //Convert from cm to mm
+      detectionRange *= 10; // Convert from cm to mm
 
       let newInstallationAngle = Number(entityStates.find(
         (entity) => entity.entity_id.endsWith(`installation_angle`)
@@ -1017,6 +1148,24 @@ document.addEventListener("DOMContentLoaded", () => {
       if (installationAngle != newInstallationAngle) {
         installationAngle = newInstallationAngle;
         calculateOffsetY();
+      }
+
+      // ==========================
+      // === Handle Persistence ===
+      // ==========================
+      if (isPersistenceEnabled) {
+        targets.forEach((target) => {
+          if (target.active) {
+            const lastDot = persistentDots[persistentDots.length - 1];
+            if (!lastDot || lastDot.x !== target.x || lastDot.y !== target.y) {
+              persistentDots.push({ x: target.x, y: target.y });
+              // Optional: Limit the number of persistent dots
+              if (persistentDots.length > 1000) { // Example limit
+                persistentDots.shift(); // Remove oldest dot
+              }
+            }
+          }
+        });
       }
 
       // Draw the visualization
@@ -1033,7 +1182,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Initialize the application
+  // ==========================
+  // === Initialize the App ===
+  // ==========================
   async function init() {
     await fetchDevices(); // Fetch and populate devices
     handleDeviceSelection();
@@ -1041,6 +1192,9 @@ document.addEventListener("DOMContentLoaded", () => {
     setupRefreshRateControls();
   }
 
+  // ==========================
+  // === Execute Template ===
+  // ==========================
   async function executeTemplate(template) {
     try {
       const response = await fetch("api/template", {
@@ -1064,6 +1218,9 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // ==========================
+  // === Save Zones to HA ===
+  // ==========================
   async function saveZonesToHA() {
     if (!selectedEntities || selectedEntities.length === 0) {
       alert("No entities loaded. Please select a valid device.");
@@ -1120,6 +1277,7 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("Zones saved successfully!");
       userZones = [];
       exclusionZones = [];
+      persistentDots = []; // Optionally clear persistent dots after saving
       drawVisualization();
       updateCoordinatesOutput();
     } catch (error) {
@@ -1128,12 +1286,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // ==========================
+  // === Extract Zone Entities ===
+  // ==========================
   function extractZoneEntities(entities) {
     const zoneEntities = {};
 
     const regularZoneRegex = /zone_(\d+)_(begin|end)_(x|y)$/;
     const exclusionZoneRegex = /occupancy_mask_(\d+)_(begin|end)_(x|y)$/;
-  
+
     entities.forEach((entity) => {
       const entityId = entity.id;
       console.log(entityId);
@@ -1146,7 +1307,7 @@ document.addEventListener("DOMContentLoaded", () => {
         zoneEntities[key] = entityId;
         return;
       }
-  
+
       // Check for Exclusion Zones
       match = entityId.match(exclusionZoneRegex);
       if (match) {
@@ -1157,10 +1318,13 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
     });
-  
+
     return zoneEntities;
   }
 
+  // ==========================
+  // === Save Zone to HA ===
+  // ==========================
   async function saveZoneToHA(zoneNumber, zone, zoneEntities) {
     const baseUrl = "api/services/number/set_value";
 
@@ -1208,6 +1372,9 @@ document.addEventListener("DOMContentLoaded", () => {
     await Promise.all(requests);
   }
 
+  // ==========================
+  // === Save Exclusion Zone to HA ===
+  // ==========================
   async function saveExclusionZoneToHA(zoneNumber, zone, zoneEntities) {
     const baseUrl = "api/services/number/set_value";
   
@@ -1265,5 +1432,13 @@ document.addEventListener("DOMContentLoaded", () => {
     await Promise.all(requests);
   }
 
+  // ==========================
+  // === Extract and Process Persistence ===
+  // ==========================
+  // The persistence functionality has been integrated within fetchLiveData function above.
+
+  // ==========================
+  // === Initialize the App ===
+  // ==========================
   init();
 });
