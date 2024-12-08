@@ -72,7 +72,40 @@ document.addEventListener("DOMContentLoaded", () => {
   function calculateOffsetY() {
     let absAngle = Math.abs(installationAngle);
     if (absAngle <= 30) offsetY = 0;
-    else offsetY = detectionRange * Math.sin((absAngle - 30) * Math.PI / 180);
+    else offsetY = detectionRange * Math.sin(((absAngle - 30) * Math.PI) / 180);
+  }
+
+  /// Returns the entity's state converted from whatever unit is configured in the UI converted to millimeters
+  function getEntityStateMM(entity) {
+    const state = entity ? parseFloat(entity.state) || 0 : 0;
+    let result = state;
+    // cm, in, ft, km, m, mi, nmi, yd are supported in home assistant
+    switch (entity.attributes.unit_of_measurement) {
+      case "mm":
+        break; // Avoid checking every unit for the most common case
+      case "in":
+        result = state * 25.4; // Convert inches to millimeters
+        break;
+      case "ft":
+        result = state * 304.8; // Convert feet to millimeters
+        break;
+      case "km":
+        result = state * 1000000; // Convert kilometers to millimeters
+        break;
+      case "m":
+        result = state * 1000; // Convert meters to millimeters
+        break;
+      case "mi":
+        result = state * 1.609e6; // Convert miles to millimeters
+        break;
+      case "nmi":
+        result = state * 1.852e6; // Convert nautical miles to millimeters
+        break;
+      case "yd":
+        result = state * 914.4; // Convert yards to millimeters
+        break;
+    }
+    return Math.round(result);
   }
 
   // Drawing functions
@@ -104,7 +137,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw exclusion zones (interactive)
     exclusionZones.forEach((zone, index) => {
       drawZone(zone, index, "exclusion");
-    })
+    });
 
     // Draw targets
     targets.forEach((target) => {
@@ -118,8 +151,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const centerX = scaleX(0);
     const centerY = scaleY(0);
     const halfDetectionAngle = 60;
-    const startAngleRadians = (-halfDetectionAngle - installationAngle) / 180 * Math.PI;
-    const endAngleRadians = (halfDetectionAngle - installationAngle) / 180 * Math.PI;
+    const startAngleRadians =
+      ((-halfDetectionAngle - installationAngle) / 180) * Math.PI;
+    const endAngleRadians =
+      ((halfDetectionAngle - installationAngle) / 180) * Math.PI;
 
     const startAngle = Math.PI / 2 + startAngleRadians;
     const endAngle = Math.PI / 2 + endAngleRadians;
@@ -292,7 +327,6 @@ document.addEventListener("DOMContentLoaded", () => {
         let newEndX = zone.endX + dx;
         let newBeginY = zone.beginY + dy;
         let newEndY = zone.endY + dy;
-
 
         if (newBeginX < -6000) {
           dx += -6000 - newBeginX;
@@ -485,9 +519,27 @@ document.addEventListener("DOMContentLoaded", () => {
       const handleSize = 8;
       const corners = [
         { x: x, y: y, corner: "top-left", type: "exclusion", index: i },
-        { x: x + width, y: y, corner: "top-right", type: "exclusion", index: i },
-        { x: x, y: y + height, corner: "bottom-left", type: "exclusion", index: i },
-        { x: x + width, y: y + height, corner: "bottom-right", type: "exclusion", index: i },
+        {
+          x: x + width,
+          y: y,
+          corner: "top-right",
+          type: "exclusion",
+          index: i,
+        },
+        {
+          x: x,
+          y: y + height,
+          corner: "bottom-left",
+          type: "exclusion",
+          index: i,
+        },
+        {
+          x: x + width,
+          y: y + height,
+          corner: "bottom-right",
+          type: "exclusion",
+          index: i,
+        },
       ];
       for (const corner of corners) {
         if (
@@ -496,7 +548,11 @@ document.addEventListener("DOMContentLoaded", () => {
           pos.y >= corner.y - handleSize / 2 &&
           pos.y <= corner.y + handleSize / 2
         ) {
-          return { index: corner.index, corner: corner.corner, zoneType: corner.type };
+          return {
+            index: corner.index,
+            corner: corner.corner,
+            zoneType: corner.type,
+          };
         }
       }
 
@@ -523,7 +579,13 @@ document.addEventListener("DOMContentLoaded", () => {
         { x: x, y: y, corner: "top-left", type: "user", index: i },
         { x: x + width, y: y, corner: "top-right", type: "user", index: i },
         { x: x, y: y + height, corner: "bottom-left", type: "user", index: i },
-        { x: x + width, y: y + height, corner: "bottom-right", type: "user", index: i },
+        {
+          x: x + width,
+          y: y + height,
+          corner: "bottom-right",
+          type: "user",
+          index: i,
+        },
       ];
       for (const corner of corners) {
         if (
@@ -577,7 +639,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const response = await fetch(`api/entities/${entityId}`);
     if (!response.ok) {
       throw new Error(
-        `Failed to fetch entity ${entityId}: ${response.statusText}`
+        `Failed to fetch entity ${entityId}: ${response.statusText}`,
       );
     }
     return response.json();
@@ -745,7 +807,7 @@ document.addEventListener("DOMContentLoaded", () => {
       "occupancy_mask_1_begin_x",
       "occupancy_mask_1_begin_y",
       "occupancy_mask_1_end_x",
-      "occupancy_mask_1_end_y"
+      "occupancy_mask_1_end_y",
     ];
 
     return entities.filter((entityId) => {
@@ -841,10 +903,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     entities.forEach((entity) => {
       const entityId = entity.entity_id;
-      const match = entityId.match(/zone_(\d+)_(begin|end)_(x|y)$/) || entityId.match(/occupancy_mask_(\d+)_(begin|end)_(x|y)$/);
+      const match =
+        entityId.match(/zone_(\d+)_(begin|end)_(x|y)$/) ||
+        entityId.match(/occupancy_mask_(\d+)_(begin|end)_(x|y)$/);
 
       if (match) {
-        const zoneType = entityId.includes("occupancy_mask") ? "occupancy_mask" : "zone";
+        const zoneType = entityId.includes("occupancy_mask")
+          ? "occupancy_mask"
+          : "zone";
         const zoneNumber = match[1]; // e.g., '1' for zone_1
         const position = match[2]; // 'begin' or 'end'
         const axis = match[3]; // 'x' or 'y'
@@ -915,7 +981,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById(`target-${targetNumber}-speed`).textContent =
           target.speed;
         document.getElementById(
-          `target-${targetNumber}-resolution`
+          `target-${targetNumber}-resolution`,
         ).textContent = target.resolution;
         document.getElementById(`target-${targetNumber}-angle`).textContent =
           target.angle;
@@ -934,7 +1000,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       // Fetch data for all selected entities
       const dataPromises = selectedEntities.map((entity) =>
-        fetchEntityState(entity.id)
+        fetchEntityState(entity.id),
       );
       const entityStates = await Promise.all(dataPromises);
 
@@ -947,72 +1013,74 @@ document.addEventListener("DOMContentLoaded", () => {
       const updatedTargets = targetNumbers.map((targetNumber) => {
         // Find corresponding entities for the target
         const activeEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_active`)
+          entity.id.endsWith(`target_${targetNumber}_active`),
         );
         const xEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_x`)
+          entity.id.endsWith(`target_${targetNumber}_x`),
         );
         const yEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_y`)
+          entity.id.endsWith(`target_${targetNumber}_y`),
         );
         const speedEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_speed`)
+          entity.id.endsWith(`target_${targetNumber}_speed`),
         );
         const resolutionEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_resolution`)
+          entity.id.endsWith(`target_${targetNumber}_resolution`),
         );
         const angleEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_angle`)
+          entity.id.endsWith(`target_${targetNumber}_angle`),
         );
         const distanceEntity = selectedEntities.find((entity) =>
-          entity.id.endsWith(`target_${targetNumber}_distance`)
+          entity.id.endsWith(`target_${targetNumber}_distance`),
         );
 
         // Extract data from entityStates
         const activeData = entityStates.find(
-          (entity) => entity.entity_id === activeEntity.id
+          (entity) => entity.entity_id === activeEntity.id,
         );
         const xData = entityStates.find(
-          (entity) => entity.entity_id === xEntity.id
+          (entity) => entity.entity_id === xEntity.id,
         );
         const yData = entityStates.find(
-          (entity) => entity.entity_id === yEntity.id
+          (entity) => entity.entity_id === yEntity.id,
         );
         const speedData = entityStates.find(
-          (entity) => entity.entity_id === speedEntity.id
+          (entity) => entity.entity_id === speedEntity.id,
         );
         const resolutionData = entityStates.find(
-          (entity) => entity.entity_id === resolutionEntity.id
+          (entity) => entity.entity_id === resolutionEntity.id,
         );
         const angleData = entityStates.find(
-          (entity) => entity.entity_id === angleEntity.id
+          (entity) => entity.entity_id === angleEntity.id,
         );
         const distanceData = entityStates.find(
-          (entity) => entity.entity_id === distanceEntity.id
+          (entity) => entity.entity_id === distanceEntity.id,
         );
 
         return {
           number: targetNumber,
           active: activeData && activeData.state === "on",
-          x: xData ? parseFloat(xData.state) || 0 : 0,
-          y: yData ? parseFloat(yData.state) || 0 : 0,
-          speed: speedData ? parseFloat(speedData.state) || 0 : 0,
+          x: getEntityStateMM(xData),
+          y: getEntityStateMM(yData),
+          speed: getEntityStateMM(speedData),
           resolution: resolutionData ? resolutionData.state : "N/A",
           angle: angleData ? parseFloat(angleData.state) || 0 : 0,
-          distance: distanceData ? parseFloat(distanceData.state) || 0 : 0,
+          distance: getEntityStateMM(distanceData),
         };
       });
 
       targets = updatedTargets;
 
-      detectionRange = entityStates.find(
-        (entity) => entity.entity_id.endsWith(`max_distance`)
-      )?.state ?? 600;
+      detectionRange =
+        entityStates.find((entity) => entity.entity_id.endsWith(`max_distance`))
+          ?.state ?? 600;
       detectionRange *= 10; //Convert from cm to mm
 
-      let newInstallationAngle = Number(entityStates.find(
-        (entity) => entity.entity_id.endsWith(`installation_angle`)
-      )?.state ?? 0);
+      let newInstallationAngle = Number(
+        entityStates.find((entity) =>
+          entity.entity_id.endsWith(`installation_angle`),
+        )?.state ?? 0,
+      );
 
       if (installationAngle != newInstallationAngle) {
         installationAngle = newInstallationAngle;
@@ -1097,7 +1165,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    const exclusionZonesToSave = exclusionZones.map(zone => ({
+    const exclusionZonesToSave = exclusionZones.map((zone) => ({
       beginX: zone.beginX || 0,
       endX: zone.endX || 0,
       beginY: zone.beginY || 0,
@@ -1133,7 +1201,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const regularZoneRegex = /zone_(\d+)_(begin|end)_(x|y)$/;
     const exclusionZoneRegex = /occupancy_mask_(\d+)_(begin|end)_(x|y)$/;
-  
+
     entities.forEach((entity) => {
       const entityId = entity.id;
       console.log(entityId);
@@ -1146,7 +1214,7 @@ document.addEventListener("DOMContentLoaded", () => {
         zoneEntities[key] = entityId;
         return;
       }
-  
+
       // Check for Exclusion Zones
       match = entityId.match(exclusionZoneRegex);
       if (match) {
@@ -1155,9 +1223,8 @@ document.addEventListener("DOMContentLoaded", () => {
         zoneEntities[key] = entityId;
         return;
       }
-
     });
-  
+
     return zoneEntities;
   }
 
@@ -1210,29 +1277,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function saveExclusionZoneToHA(zoneNumber, zone, zoneEntities) {
     const baseUrl = "api/services/number/set_value";
-  
+
     const zonePrefix = `occupancy_mask_${zoneNumber}`;
     console.log("Saving Exclusion Zone:", zonePrefix);
     console.log("Zone Entities:", zoneEntities);
-  
+
     const roundToNearestTen = (num) => {
       return (Math.round(num / 10) * 10).toFixed(1);
     };
-  
+
     const keys = [
       `${zonePrefix}_begin_x`,
       `${zonePrefix}_end_x`,
       `${zonePrefix}_begin_y`,
       `${zonePrefix}_end_y`,
     ];
-  
-    const requests = keys.map(key => {
+
+    const requests = keys.map((key) => {
       const entityId = zoneEntities[key];
       if (!entityId) {
         console.warn(`Entity ID for ${key} not found. Skipping this field.`);
         return Promise.resolve();
       }
-  
+
       let value;
       switch (key) {
         case `${zonePrefix}_begin_x`:
@@ -1250,7 +1317,7 @@ document.addEventListener("DOMContentLoaded", () => {
         default:
           value = 0;
       }
-  
+
       return fetch(`${baseUrl}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1260,7 +1327,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }),
       });
     });
-  
+
     // Execute all fetch requests
     await Promise.all(requests);
   }
