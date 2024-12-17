@@ -1440,6 +1440,141 @@ document.addEventListener("DOMContentLoaded", () => {
     await Promise.all(requests);
   }
 
+	// ==========================
+	// === Export Zones ===
+	// === by charmines ===
+	// ==========================
+	document.getElementById("exportZonesButton").addEventListener("click", exportZones);
+	async function exportZones() {
+		if (!selectedEntities || selectedEntities.length === 0) {
+			alert("No entities loaded. Please select a valid device.");
+			return;
+		}
+
+		// Ensure we have entities for all zones (4 zones, each with begin_x, begin_y, end_x, end_y)
+		const zoneEntities = extractZoneEntities(selectedEntities);
+		if (Object.keys(zoneEntities).length === 0) {
+			alert("Failed to find zone entities.");
+			return;
+		}
+
+		const name = prompt("Enter a name for the exported zones:");
+
+		const zones = {
+			name,
+			userZones,
+			exclusionZones,
+			haZones,
+			haExclusionZones,
+		};
+		console.log("Exporting Zones", zones);
+
+		const blob = new Blob([JSON.stringify(zones)], { type: "text/plain" });
+		const url = URL.createObjectURL(blob);
+
+		// Create a link element and set its attributes
+		const link = document.createElement("a");
+		link.href = url;
+		link.setAttribute("download", `zones_${name}.json`);
+
+		// Append the link to the DOM, click it, and remove it
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+
+		let zeConf =
+			"Zones Exported!\nThe following zones types will be imported upon request:";
+
+		if (zones.userZones.length > 0) {
+			zeConf += "\nUser Zones";
+		} else if (zones.haZones.length > 0) {
+			zeConf += "\nHA Zones";
+		}
+
+		if (zones.exclusionZones.length > 0) {
+			zeConf += "\nExclusion Zones";
+		} else if (zones.haExclusionZones.length > 0) {
+			zeConf += "\nHA Exclusion Zones";
+		}
+
+		alert(zeConf);
+	}
+
+	// ==========================
+	// === Import Zones ===
+	// === by charmines ===
+	// ==========================
+	document.getElementById("importZonesButton").addEventListener("click", importZones);
+	async function importZones() {
+		if (!selectedEntities || selectedEntities.length === 0) {
+			alert("No entities loaded. Please select a valid device.");
+			return;
+		}
+
+		// Ensure we have entities for all zones (4 zones, each with begin_x, begin_y, end_x, end_y)
+		const zoneEntities = extractZoneEntities(selectedEntities);
+		if (Object.keys(zoneEntities).length === 0) {
+			alert("Failed to find zone entities.");
+			return;
+		}
+
+		// Create File Input
+		const input = document.createElement("input");
+		input.type = "file";
+		input.accept = ".json";
+		document.body.appendChild(input);
+
+		// Handle the input event
+		input.onchange = () => {
+			const reader = new FileReader();
+
+			reader.onload = function (e) {
+				const importedZones = JSON.parse(e.target.result);
+				console.log("Import Content:", importedZones);
+
+				exclusionZones = importedZones.exclusionZones;
+				if (importedZones.userZones.length > 0) {
+					userZones = importedZones.userZones;
+				} else {
+					userZones = importedZones.haZones;
+				}
+
+				if (importedZones.exclusionZones.length > 0) {
+					exclusionZones = importedZones.exclusionZones;
+				} else {
+					exclusionZones = importedZones.haExclusionZones;
+				}
+
+				drawVisualization();
+				updateCoordinatesOutput();
+				alert("Zones Imported! Zones must be saved to apply!");
+			};
+
+			reader.readAsText(input.files[0]);
+
+			document.body.removeChild(input);
+		};
+		input.click();
+	}
+
+	// ==========================
+	// === Reset Zones ===
+	// === by charmines ===
+	// ==========================
+	document.getElementById("resetZonesButton").addEventListener("click", resetZones);
+	function resetZones() {
+		if (
+			confirm(
+				"Are you sure you want to reset zones?\nThis will clear user zones but will not change applied (HA) zones"
+			)
+		) {
+			userZones = [];
+			exclusionZones = [];
+			drawVisualization();
+			updateCoordinatesOutput();
+		}
+	}
+
   // ==========================
   // === Save Exclusion Zone to HA ===
   // ==========================
