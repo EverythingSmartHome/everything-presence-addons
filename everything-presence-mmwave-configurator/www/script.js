@@ -27,6 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Variables for dragging and resizing
   let isDragging = false;
   let draggingZone = null;
+  let draggingZoneType = null;
   let dragType = null; // 'move', 'resize', 'create'
   let resizeCorner = null;
   const dragOffset = { x: 0, y: 0 };
@@ -313,9 +314,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const mousePos = getMousePos(canvas, e);
     const zoneInfo = getZoneAtPosition(mousePos);
 
+    if(e.button === 2) return; // This prevents deleting then creating zones by ignoring right clicks
+
     if (zoneInfo !== null) {
       const { index, corner, zoneType } = zoneInfo;
       draggingZone = index;
+      draggingZoneType = zoneType;
       dragOffset.x = mousePos.x;
       dragOffset.y = mousePos.y;
 
@@ -384,7 +388,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let dy = unscaleY(mousePos.y) - unscaleY(dragOffset.y);
 
     if (dragType === "move") {
-      if (zoneInfo.zoneType === "user") {
+      if (draggingZoneType === "user") {
         let zone = userZones[draggingZone];
 
         let newBeginX = zone.beginX + dx;
@@ -415,7 +419,7 @@ document.addEventListener("DOMContentLoaded", () => {
         zone.endX = Math.round(zone.endX);
         zone.beginY = Math.round(zone.beginY);
         zone.endY = Math.round(zone.endY);
-      } else if (zoneInfo.zoneType === "exclusion") {
+      } else if (draggingZoneType === "exclusion") {
         let zone = exclusionZones[draggingZone];
         let newBeginX = zone.beginX + dx;
         let newEndX = zone.endX + dx;
@@ -447,10 +451,10 @@ document.addEventListener("DOMContentLoaded", () => {
         zone.endY = Math.round(zone.endY);
       }
     } else if (dragType === "resize") {
-      if (zoneInfo.zoneType === "user") {
+      if (draggingZoneType === "user") {
         const zone = userZones[draggingZone];
         adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
-      } else if (zoneInfo.zoneType === "exclusion") {
+      } else if (draggingZoneType === "exclusion") {
         const zone = exclusionZones[draggingZone];
         adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
       }
@@ -1574,6 +1578,28 @@ document.addEventListener("DOMContentLoaded", () => {
 			updateCoordinatesOutput();
 		}
 	}
+
+	// ==========================
+	// === HA -> User Zones ===
+	// === by charmines ===
+	// ==========================
+	document.getElementById("haUserZonesButton").addEventListener("click", haUserZones);
+	async function haUserZones() {
+    console.log(haZones, haExclusionZones, userZones, exclusionZones)
+    for await (const zone of haZones){
+      if(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0 ) break;
+      const zoneIndex = haZones.indexOf(zone);
+      userZones[zoneIndex] = zone;
+    }
+    for await (const zone of haExclusionZones){
+      if(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0 ) break;
+      const zoneIndex = haExclusionZones.indexOf(zone);
+      exclusionZones[zoneIndex] = zone;
+    }
+    drawVisualization();
+    updateCoordinatesOutput();
+    console.log(haZones, haExclusionZones, userZones, exclusionZones)
+  }
 
   // ==========================
   // === Save Exclusion Zone to HA ===
