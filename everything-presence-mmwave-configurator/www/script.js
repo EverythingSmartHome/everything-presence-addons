@@ -1444,161 +1444,160 @@ document.addEventListener("DOMContentLoaded", () => {
     await Promise.all(requests);
   }
 
-	// ==========================
-	// === Export Zones ===
-	// === by charmines ===
-	// ==========================
-	document.getElementById("exportZonesButton").addEventListener("click", exportZones);
-	async function exportZones() {
-		if (!selectedEntities || selectedEntities.length === 0) {
-			alert("No entities loaded. Please select a valid device.");
-			return;
-		}
+  // ==========================
+  // === Export Zones ===
+  // === by charmines ===
+  // ==========================
+  document.getElementById("exportZonesButton").addEventListener("click", exportZones);
+  async function exportZones() {
+    if (!selectedEntities || selectedEntities.length === 0) {
+      alert("No entities loaded. Please select a valid device.");
+      return;
+    }
 
-		// Ensure we have entities for all zones (4 zones, each with begin_x, begin_y, end_x, end_y)
-		const zoneEntities = extractZoneEntities(selectedEntities);
-		if (Object.keys(zoneEntities).length === 0) {
-			alert("Failed to find zone entities.");
-			return;
-		}
+    // Ensure we have entities for all zones (4 zones, each with begin_x, begin_y, end_x, end_y)
+    const zoneEntities = extractZoneEntities(selectedEntities);
+    if (Object.keys(zoneEntities).length === 0) {
+      alert("Failed to find zone entities.");
+      return;
+    }
 
-		const name = prompt("Enter a name for the exported zones:");
+    const name = prompt("Enter a name for the exported zones:");
 
-		const zones = {
-			name,
-			userZones,
-			exclusionZones,
-			haZones,
-			haExclusionZones,
-		};
-		console.log("Exporting Zones", zones);
+    const zones = {
+      name,
+      userZones,
+      exclusionZones,
+      haZones,
+      haExclusionZones,
+    };
+    console.log("Exporting Zones", zones);
 
-		const blob = new Blob([JSON.stringify(zones)], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
+    const blob = new Blob([JSON.stringify(zones)], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
 
-		// Create a link element and set its attributes
-		const link = document.createElement("a");
-		link.href = url;
-		link.setAttribute("download", `zones_${name}.json`);
+    // Create a link element and set its attributes
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `zones_${name}.json`);
 
-		// Append the link to the DOM, click it, and remove it
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
+    // Append the link to the DOM, click it, and remove it
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-		let zeConf =
-			"Zones Exported!\nThe following zones types will be imported upon request:";
+    let zeConf = "Zones Exported!\nThe following zones types will be imported upon request:";
 
-		if (zones.userZones.length > 0) {
-			zeConf += "\nUser Zones";
-		} else if (zones.haZones.length > 0) {
-			zeConf += "\nHA Zones";
-		}
+    if (zones.userZones.length > 0) {
+      zeConf += "\nUser Zones";
+    } else if (zones.haZones.length > 0) {
+      zeConf += "\nHA Zones";
+    }
 
-		if (zones.exclusionZones.length > 0) {
-			zeConf += "\nExclusion Zones";
-		} else if (zones.haExclusionZones.length > 0) {
-			zeConf += "\nHA Exclusion Zones";
-		}
+    if (zones.exclusionZones.length > 0) {
+      zeConf += "\nExclusion Zones";
+    } else if (zones.haExclusionZones.length > 0) {
+      zeConf += "\nHA Exclusion Zones";
+    }
 
-		alert(zeConf);
-	}
+    alert(zeConf);
+  }
 
-	// ==========================
-	// === Import Zones ===
-	// === by charmines ===
-	// ==========================
-	document.getElementById("importZonesButton").addEventListener("click", importZones);
-	async function importZones() {
-		if (!selectedEntities || selectedEntities.length === 0) {
-			alert("No entities loaded. Please select a valid device.");
-			return;
-		}
+  // ==========================
+  // === Import Zones ===
+  // === by charmines ===
+  // ==========================
+  document.getElementById("importZonesButton").addEventListener("click", importZones);
+  async function importZones() {
+    if (!selectedEntities || selectedEntities.length === 0) {
+      alert("No entities loaded. Please select a valid device.");
+      return;
+    }
 
-		// Ensure we have entities for all zones (4 zones, each with begin_x, begin_y, end_x, end_y)
-		const zoneEntities = extractZoneEntities(selectedEntities);
-		if (Object.keys(zoneEntities).length === 0) {
-			alert("Failed to find zone entities.");
-			return;
-		}
+    // Ensure we have entities for all zones (4 zones, each with begin_x, begin_y, end_x, end_y)
+    const zoneEntities = extractZoneEntities(selectedEntities);
+    if (Object.keys(zoneEntities).length === 0) {
+      alert("Failed to find zone entities.");
+      return;
+    }
 
-		// Create File Input
-		const input = document.createElement("input");
-		input.type = "file";
-		input.accept = ".json";
-		document.body.appendChild(input);
+    // Create File Input
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    document.body.appendChild(input);
 
-		// Handle the input event
-		input.onchange = () => {
-			const reader = new FileReader();
+    // Handle the input event
+    input.onchange = () => {
+      const reader = new FileReader();
 
-			reader.onload = function (e) {
-				const importedZones = JSON.parse(e.target.result);
-				console.log("Import Content:", importedZones);
+      reader.onload = function (e) {
+        const importedZones = JSON.parse(e.target.result);
+        console.log("Import Content:", importedZones);
 
-				exclusionZones = importedZones.exclusionZones;
-				if (importedZones.userZones.length > 0) {
-					userZones = importedZones.userZones;
-				} else {
-					userZones = importedZones.haZones;
-				}
+        exclusionZones = importedZones.exclusionZones;
+        if (importedZones.userZones.length > 0) {
+          userZones = importedZones.userZones;
+        } else {
+          userZones = importedZones.haZones;
+        }
 
-				if (importedZones.exclusionZones.length > 0) {
-					exclusionZones = importedZones.exclusionZones;
-				} else {
-					exclusionZones = importedZones.haExclusionZones;
-				}
+        if (importedZones.exclusionZones.length > 0) {
+          exclusionZones = importedZones.exclusionZones;
+        } else {
+          exclusionZones = importedZones.haExclusionZones;
+        }
 
-				drawVisualization();
-				updateCoordinatesOutput();
-				alert("Zones Imported! Zones must be saved to apply!");
-			};
+        drawVisualization();
+        updateCoordinatesOutput();
+        alert("Zones Imported! Zones must be saved to apply!");
+      };
 
-			reader.readAsText(input.files[0]);
+      reader.readAsText(input.files[0]);
 
-			document.body.removeChild(input);
-		};
-		input.click();
-	}
+      document.body.removeChild(input);
+    };
+    input.click();
+  }
 
-	// ==========================
-	// === Reset Zones ===
-	// === by charmines ===
-	// ==========================
-	document.getElementById("resetZonesButton").addEventListener("click", resetZones);
-	function resetZones() {
-		if (
-			confirm(
-				"Are you sure you want to reset zones?\nThis will clear user zones but will not change applied (HA) zones"
-			)
-		) {
-			userZones = [];
-			exclusionZones = [];
-			drawVisualization();
-			updateCoordinatesOutput();
-		}
-	}
+  // ==========================
+  // === Reset Zones ===
+  // === by charmines ===
+  // ==========================
+  document.getElementById("resetZonesButton").addEventListener("click", resetZones);
+  function resetZones() {
+    if (
+      confirm(
+        "Are you sure you want to reset zones?\nThis will clear user zones but will not change applied (HA) zones"
+      )
+    ) {
+      userZones = [];
+      exclusionZones = [];
+      drawVisualization();
+      updateCoordinatesOutput();
+    }
+  }
 
-	// ==========================
-	// === HA -> User Zones ===
-	// === by charmines ===
-	// ==========================
-	document.getElementById("haUserZonesButton").addEventListener("click", haUserZones);
-	async function haUserZones() {
-    console.log(haZones, haExclusionZones, userZones, exclusionZones)
-    for await (const zone of haZones){
-      if(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0 ) break;
+  // ==========================
+  // === HA -> User Zones ===
+  // === by charmines ===
+  // ==========================
+  document.getElementById("haUserZonesButton").addEventListener("click", haUserZones);
+  async function haUserZones() {
+    for await (const zone of haZones) {
+      if (zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)
+        break;
       const zoneIndex = haZones.indexOf(zone);
       userZones[zoneIndex] = zone;
     }
-    for await (const zone of haExclusionZones){
-      if(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0 ) break;
+    for await (const zone of haExclusionZones) {
+      if (zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)
+        break;
       const zoneIndex = haExclusionZones.indexOf(zone);
       exclusionZones[zoneIndex] = zone;
     }
     drawVisualization();
     updateCoordinatesOutput();
-    console.log(haZones, haExclusionZones, userZones, exclusionZones)
   }
 
   // ==========================
