@@ -770,7 +770,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 {% set manufacturer = device_attr(device, 'manufacturer') %}
                 {% if manufacturer == 'EverythingSmartTechnology' %}
                     {% if model == 'Everything_Presence_Lite' or model == 'Everything Presence Lite' %}
-                        {% set devices.list = devices.list + [{'id': device, 'name': device_attr(device, 'name')}] %}
+                        {% set devices.list = devices.list + [{'id': device, 'name': device_attr(device, 'name_by_user')}] %}
                     {% endif %}
                 {% endif %}
             {% endfor %}
