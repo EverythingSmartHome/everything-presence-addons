@@ -41,6 +41,13 @@ jobs:
             echo "PUSH=false" >> $GITHUB_ENV
             echo "LOAD=true" >> $GITHUB_ENV
           fi
+      - name: Debug DockerHub Username
+        run: |
+          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            echo "DOCKERHUB_USERNAME is empty!"
+          else
+            echo "DOCKERHUB_USERNAME is set."
+          fi
   
       - name: Log in to Docker Hub
         if: env.PUSH == 'true'
