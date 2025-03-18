@@ -1,6 +1,6 @@
 ### 1.1.2
 
-- Added Zone Exports UI button & JavaScript to save current zones in map to a JSON file to allow for re-import or backups
+- Added Zone Exports UI button & JavaScript to save current zones in map to a JSON file to allow for re-import or backup
 - Added Zone Imports UI button & JavaScript to import the previously saved JSON files
 - Added Zone Reset UI button & JavaScript to reset user zones in current view
 - Fixed issue where right clicking and canceling a deletion would add a new zone by ignoring right clicks in mouse down event - Fixes [#18](https://github.com/EverythingSmartHome/everything-presence-addons/issues/18)
