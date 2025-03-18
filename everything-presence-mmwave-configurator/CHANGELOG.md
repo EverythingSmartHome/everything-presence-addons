@@ -9,9 +9,6 @@
 - Made sure that when converting HA Zones to User Zones any zone at origin (all 0 coordinates) were ignored so the zone could be added
 - Added this backdated changelog - Fixes [#35](https://github.com/EverythingSmartHome/everything-presence-addons/issues/35)
 - Bumped version to 1.1.2
-- Made some code that might be used by people for once - charmines aka [@ilikestohack](https://github.com/ilikestohack)
-
-Please ask any questions by contacting @charmines on discord!
 
 [Github Compare](https://github.com/EverythingSmartHome/everything-presence-addons/compare/1.1.1...1.1.2)
 
