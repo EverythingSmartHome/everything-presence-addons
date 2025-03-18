@@ -41,12 +41,15 @@ jobs:
             echo "PUSH=false" >> $GITHUB_ENV
             echo "LOAD=true" >> $GITHUB_ENV
           fi
-      - name: Debug DockerHub Username
+      - name: Set Image Tags
         run: |
-          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
-            echo "DOCKERHUB_USERNAME is empty!"
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
+            echo "LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest" >> $GITHUB_ENV
           else
-            echo "DOCKERHUB_USERNAME is set."
+            # Use a dummy namespace for PR builds.
+            echo "IMAGE_TAG=test/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
+            echo "LATEST_TAG=test/everything-presence-mmwave-configurator:latest" >> $GITHUB_ENV
           fi
   
       - name: Log in to Docker Hub
@@ -64,8 +67,8 @@ jobs:
           push: ${{ env.PUSH }}
           load: ${{ env.LOAD }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest
+            ${{ env.IMAGE_TAG }}
+            ${{ env.LATEST_TAG }}
 
       - name: Test Docker image
         if: env.LOAD == 'true'
