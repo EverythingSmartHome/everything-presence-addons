@@ -1,14 +1,14 @@
 ### 1.1.2
 
-- Added Zone Exports UI button & JavaScript to save current zones in map to a JSON file to allow for re-import or backups
-- Added Zone Imports UI button & JavaScript to import the previously saved JSON files
-- Added Zone Reset UI button & JavaScript to reset user zones in current view
-- Fixed issue where right clicking and canceling a deletion would add a new zone by ignoring right clicks in mouse down event - Fixes [#18](https://github.com/EverythingSmartHome/everything-presence-addons/issues/18)
-- Fixed issues where when dragging an item it would break due to the zoneType being pulled as null because you were dragging over the area outside of the zone (Could not get the zone), now there is a type variable that is updated only when the dragging is started
-- Added a button to convert the HA Zones to User Zones that can be saved/repositioned - Fixes [#27](https://github.com/EverythingSmartHome/everything-presence-addons/issues/27)
-- Made sure that when converting HA Zones to User Zones any zone at origin (all 0 coordinates) were ignored so the zone could be added
-- Added this backdated changelog - Fixes [#35](https://github.com/EverythingSmartHome/everything-presence-addons/issues/35)
-- Bumped version to 1.1.2
+- Added Zone Exports UI button & JavaScript to save current zones in map to a JSON file to allow for re-import or backups [@ilikestohack](https://github.com/ilikestohack)
+- Added Zone Imports UI button & JavaScript to import the previously saved JSON files [@ilikestohack](https://github.com/ilikestohack)
+- Added Zone Reset UI button & JavaScript to reset user zones in current view [@ilikestohack](https://github.com/ilikestohack)
+- Fixed issue where right clicking and canceling a deletion would add a new zone by ignoring right clicks in mouse down event - Fixes [#18](https://github.com/EverythingSmartHome/everything-presence-addons/issues/18) [@ilikestohack](https://github.com/ilikestohack)
+- Fixed issues where when dragging an item it would break due to the zoneType being pulled as null because you were dragging over the area outside of the zone (Could not get the zone), now there is a type variable that is updated only when the dragging is started [@ilikestohack](https://github.com/ilikestohack)
+- Added a button to convert the HA Zones to User Zones that can be saved/repositioned - Fixes [#27](https://github.com/EverythingSmartHome/everything-presence-addons/issues/27) [@ilikestohack](https://github.com/ilikestohack)
+- Made sure that when converting HA Zones to User Zones any zone at origin (all 0 coordinates) were ignored so the zone could be added [@ilikestohack](https://github.com/ilikestohack)
+- Added this backdated changelog - Fixes [#35](https://github.com/EverythingSmartHome/everything-presence-addons/issues/35) [@ilikestohack](https://github.com/ilikestohack)
+- Bumped version to 1.1.2 [@ilikestohack](https://github.com/ilikestohack)
 
 [Github Compare](https://github.com/EverythingSmartHome/everything-presence-addons/compare/1.1.1...1.1.2)
 
