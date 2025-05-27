@@ -1,3 +1,6 @@
+### 1.1.4
+- Adds support for second exclusion zone [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
 ### 1.1.3
 - Added the ability to display devices by their Friendly name to make device selection easier  [OliverHi](https://github.com/OliverHi)
 

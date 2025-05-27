@@ -350,7 +350,7 @@ document.addEventListener("DOMContentLoaded", () => {
           alert("Maximum of 4 user zones allowed.");
         }
       } else if (currentZoneType === "exclusion") {
-        const maxExclusionZones = 1;
+        const maxExclusionZones = 2;
         if (exclusionZones.length < maxExclusionZones) {
           dragType = "create";
           draggingZone = exclusionZones.length;
@@ -523,7 +523,7 @@ document.addEventListener("DOMContentLoaded", () => {
           updateCoordinatesOutput();
         }
       } else if (zoneType === "exclusion") {
-        if (confirm(`Delete Exclusion Zone?`)) {
+        if (confirm(`Delete Exclusion Zone ${index + 1}?`)) {
           exclusionZones.splice(index, 1);
           drawVisualization();
           updateCoordinatesOutput();
@@ -900,6 +900,10 @@ document.addEventListener("DOMContentLoaded", () => {
       "occupancy_mask_1_begin_y",
       "occupancy_mask_1_end_x",
       "occupancy_mask_1_end_y",
+      "occupancy_mask_2_begin_x",
+      "occupancy_mask_2_begin_y",
+      "occupancy_mask_2_end_x",
+      "occupancy_mask_2_end_y",
     ];
 
     return entities.filter((entityId) => {
