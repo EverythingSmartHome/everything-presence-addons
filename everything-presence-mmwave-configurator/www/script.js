@@ -2162,12 +2162,25 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
-    const exclusionZonesToSave = exclusionZones.map((zone) => ({
-      beginX: zone.beginX || 0,
-      endX: zone.endX || 0,
-      beginY: zone.beginY || 0,
-      endY: zone.endY || 0,
-    }));
+    // Prepare exclusion zones (up to 2)
+    const exclusionZonesToSave = [];
+    for (let i = 0; i < 2; i++) {
+      if (exclusionZones[i]) {
+        exclusionZonesToSave.push({
+          beginX: exclusionZones[i].beginX || 0,
+          endX: exclusionZones[i].endX || 0,
+          beginY: exclusionZones[i].beginY || 0,
+          endY: exclusionZones[i].endY || 0,
+        });
+      } else {
+        exclusionZonesToSave.push({
+          beginX: 0,
+          endX: 0,
+          beginY: 0,
+          endY: 0,
+        });
+      }
+    }
 
     // Send the regular zones
     try {
