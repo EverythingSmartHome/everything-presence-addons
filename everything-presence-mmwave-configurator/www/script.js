@@ -48,6 +48,212 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentZoneNumber = 1;
   let selectedZoneTile = null;
 
+  // Animation system
+  let animatedZones = new Map(); // Track zones with animations
+
+  // Ghost zone preview system
+  let ghostZone = null; // Track the preview zone being created
+  let isCreatingZone = false; // Indicate zone creation mode
+
+  // Hover effects system
+  let hoveredZone = null; // Track which zone is being hovered
+  let hoveredCorner = null; // Track which corner is being hovered
+  let mousePosition = { x: 0, y: 0 }; // Track mouse position for effects
+
+  // Animation helper functions
+  function animateZoneCreation(zoneType, index) {
+    const animationKey = `${zoneType}-${index}`;
+    const startTime = Date.now();
+    const duration = 300; // 300ms animation
+    
+    animatedZones.set(animationKey, {
+      type: 'appear',
+      startTime,
+      duration,
+      zoneType,
+      index
+    });
+    
+    // Schedule animation frame updates
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      if (progress < 1) {
+        drawVisualization();
+        requestAnimationFrame(animate);
+      } else {
+        animatedZones.delete(animationKey);
+        drawVisualization();
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  function animateZoneDeletion(zoneType, index, zone, callback) {
+    const animationKey = `${zoneType}-${index}`;
+    const startTime = Date.now();
+    const duration = 250; // 250ms animation
+    
+    animatedZones.set(animationKey, {
+      type: 'disappear',
+      startTime,
+      duration,
+      zoneType,
+      index,
+      zone: { ...zone } // Store a copy of the zone data
+    });
+    
+    // Schedule animation frame updates
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      
+      if (progress < 1) {
+        drawVisualization();
+        requestAnimationFrame(animate);
+      } else {
+        animatedZones.delete(animationKey);
+        callback(); // Execute the actual deletion
+        drawVisualization();
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  function getAnimationTransform(animationType, progress) {
+    if (animationType === 'appear') {
+      if (progress < 0.5) {
+        // First half: scale from 0 to 1.05
+        const t = progress * 2;
+        return {
+          scale: t * 1.05,
+          opacity: t * 0.8
+        };
+      } else {
+        // Second half: scale from 1.05 to 1
+        const t = (progress - 0.5) * 2;
+        return {
+          scale: 1.05 - (t * 0.05),
+          opacity: 0.8 + (t * 0.2)
+        };
+      }
+    } else if (animationType === 'disappear') {
+      if (progress < 0.5) {
+        // First half: scale from 1 to 1.05
+        const t = progress * 2;
+        return {
+          scale: 1 + (t * 0.05),
+          opacity: 1 - (t * 0.5)
+        };
+      } else {
+        // Second half: scale from 1.05 to 0
+        const t = (progress - 0.5) * 2;
+        return {
+          scale: 1.05 - (t * 1.05),
+          opacity: 0.5 - (t * 0.5)
+        };
+      }
+    }
+    return { scale: 1, opacity: 1 };
+  }
+
+  // Ghost zone drawing function
+  function drawGhostZone(zone, zoneType) {
+    if (!zone) return;
+    
+    const x = scaleX(Math.min(zone.beginX, zone.endX));
+    const y = scaleY(Math.min(zone.beginY, zone.endY));
+    const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
+    const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
+
+    // Save canvas state
+    ctx.save();
+    
+    // Ghost zone styling
+    const cornerRadius = 8;
+    const isDarkMode = document.body.classList.contains("dark-mode");
+    
+    let fillColor, strokeColor, glowColor;
+    
+    if (zoneType === "regular") {
+      fillColor = "#8b5cf620";
+      strokeColor = "#8b5cf6";
+      glowColor = "#8b5cf640";
+    } else if (zoneType === "exclusion") {
+      fillColor = "#f8717120";
+      strokeColor = "#f87171";
+      glowColor = "#f8717140";
+    }
+
+    // Draw glow effect
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    
+    // Draw semi-transparent fill
+    ctx.fillStyle = fillColor;
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, cornerRadius);
+    ctx.fill();
+    
+    // Reset shadow for border
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    
+    // Draw dashed border
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.setLineDash([12, 6]);
+    ctx.globalAlpha = 0.7;
+    
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, cornerRadius);
+    ctx.stroke();
+    
+    ctx.strokeStyle = strokeColor + "60"; // 60% opacity
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 4]); // Smaller inner dash
+    ctx.globalAlpha = 0.5;
+    
+    ctx.beginPath();
+    ctx.roundRect(x + 2, y + 2, width - 4, height - 4, cornerRadius - 1);
+    ctx.stroke();
+    
+    // Reset line dash and draw preview label
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.8;
+    
+    // Font for ghost label
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.font = "500 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    
+    const label = zoneType === "regular" ? "Zone Preview" : "Exclusion Preview";
+    
+    const textMetrics = ctx.measureText(label);
+    const textWidth = textMetrics.width;
+    const textHeight = 14;
+    const textPadding = 7;
+    const textX = x + 10;
+    const textY = y + textHeight / 2 + 6;
+    
+    // Draw semi-transparent text background
+    ctx.fillStyle = isDarkMode ? "rgba(0, 0, 0, 0.4)" : "rgba(255, 255, 255, 0.9)";
+    ctx.beginPath();
+    ctx.roundRect(textX - textPadding/2, textY - textHeight/2 + 1, textWidth + textPadding, textHeight - 2, 5);
+    ctx.fill();
+    
+    ctx.fillStyle = isDarkMode ? "#ffffff" : "#1a202c";
+    ctx.fillText(label, textX, textY);
+    
+    // Restore canvas state
+    ctx.restore();
+  }
+
   // Initialize zone tile selection
   function setupZoneTileSelection() {
     const zoneTiles = document.querySelectorAll('.zone-tile');
@@ -80,6 +286,40 @@ document.addEventListener("DOMContentLoaded", () => {
     currentZoneNumber = parseInt(tile.dataset.zoneNumber);
   }
 
+  // Check if a target is inside a zone
+  function isTargetInZone(target, zone) {
+    if (!target || !zone || !target.active) return false;
+    
+    const minX = Math.min(zone.beginX, zone.endX);
+    const maxX = Math.max(zone.beginX, zone.endX);
+    const minY = Math.min(zone.beginY, zone.endY);
+    const maxY = Math.max(zone.beginY, zone.endY);
+    
+    return target.x >= minX && target.x <= maxX && 
+           target.y >= minY && target.y <= maxY;
+  }
+
+  // Check if any target has presence in a zone
+  function checkZonePresence(zoneType, zoneNumber) {
+    let zone = null;
+    let haZone = null;
+    
+    if (zoneType === 'regular') {
+      zone = userZones[zoneNumber - 1];
+      haZone = haZones[zoneNumber - 1];
+    } else {
+      zone = exclusionZones[zoneNumber - 1];
+      haZone = haExclusionZones[zoneNumber - 1];
+    }
+    
+    // Use the active zone
+    const activeZone = zone || haZone;
+    if (!activeZone) return false;
+    
+    // Check if any active target is in zone
+    return targets.some(target => isTargetInZone(target, activeZone));
+  }
+
   // Update zone tile displays with current data
   function updateZoneTileDisplays() {
     // Update regular zones
@@ -97,6 +337,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const tile = document.querySelector(`.zone-tile[data-zone-type="${zoneType}"][data-zone-number="${zoneNumber}"]`);
     if (!tile) return;
 
+    const colorIndicator = tile.querySelector('.zone-color-indicator');
     const statusIndicator = tile.querySelector('.zone-status-indicator');
     const statusText = tile.querySelector('.zone-status-text');
     const xDisplay = tile.querySelector(`#${zoneType === 'regular' ? 'zone' : 'exclusion'}-${zoneNumber}-x-display`);
@@ -142,6 +383,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const isConfigured = zone != null || (haZone && !isDisabledCoordinates && 
       (haZone.beginX !== 0 || haZone.endX !== 0 || haZone.beginY !== 0 || haZone.endY !== 0));
     
+    // Update tile class for tooltip
+    tile.classList.toggle('disabled', isEntityDisabled);
+    
     // Update status indicator
     statusIndicator.className = 'zone-status-indicator';
     if (isEntityDisabled) {
@@ -155,17 +399,68 @@ document.addEventListener("DOMContentLoaded", () => {
       statusIndicator.classList.add('enabled-not-configured');
     }
 
-    // Update status text
+    // Update status text with presence detection
     statusText.className = 'zone-status-text';
     if (isEntityDisabled) {
       statusText.textContent = 'Entity Disabled';
       statusText.classList.add('disabled');
     } else if (isConfigured) {
-      statusText.textContent = 'No Presence';
-      statusText.classList.add('no-presence');
+      // Check for actual presence in the zone
+      if (zoneType === 'regular') {
+        const hasPresence = checkZonePresence(zoneType, zoneNumber);
+        if (hasPresence) {
+          statusText.textContent = 'Presence';
+          statusText.classList.add('presence');
+        } else {
+          statusText.textContent = 'No Presence';
+          statusText.classList.add('no-presence');
+        }
+      } else {
+        statusText.textContent = 'Configured';
+        statusText.classList.add('no-presence');
+      }
     } else {
       statusText.textContent = 'Not Configured';
       statusText.classList.add('enabled-not-configured');
+    }
+
+    // Update colour indicator to match canvas
+    updateZoneColorIndicator(colorIndicator, zoneType, zoneNumber, zone, haZone);
+  }
+
+  function updateZoneColorIndicator(colorIndicator, zoneType, zoneNumber, zone, haZone) {
+    if (!colorIndicator) {
+      return;
+    }
+    
+    // Clear existing colour classes
+    colorIndicator.className = 'zone-color-indicator';
+    
+    // Only show colour indicator if the zone has configuration
+    const isDisabledCoordinates = haZone && 
+      haZone.beginX === -6000 && haZone.endX === -6000 && 
+      haZone.beginY === -1560 && haZone.endY === -1560;
+    
+    const hasConfiguration = zone != null || (haZone && !isDisabledCoordinates && 
+      (haZone.beginX !== 0 || haZone.endX !== 0 || haZone.beginY !== 0 || haZone.endY !== 0));
+    
+    if (hasConfiguration) {
+      let colorClass = '';
+      if (zoneType === 'regular') {
+        if (zone) {
+          // User created zone - use purple
+          colorClass = 'user-zone';
+        } else {
+          // HA zone - use color based on zone number
+          colorClass = `ha-zone-${zoneNumber}`;
+        }
+      } else if (zoneType === 'exclusion') {
+        colorClass = 'exclusion-zone';
+      }
+      
+      if (colorClass) {
+        colorIndicator.classList.add(colorClass);
+      }
     }
   }
 
@@ -331,7 +626,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw user zones (interactive)
     userZones.forEach((zone, index) => {
       if (zone) { // Only draw non-null zones
-        drawZone(zone, index, "user");
+        // Don't draw the zone being created, use Ghost zone
+        if (!(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "regular")) {
+          drawZone(zone, index, "user");
+        }
       }
     });
 
@@ -343,9 +641,37 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw exclusion zones (interactive)
     exclusionZones.forEach((zone, index) => {
       if (zone) { // Only draw non-null zones
-        drawZone(zone, index, "exclusion");
+        // Don't draw the exclusion zone being created, use Ghost Zone
+        if (!(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "exclusion")) {
+          drawZone(zone, index, "exclusion");
+        }
       }
     });
+
+    // Draw corner handles for hovered zones
+    userZones.forEach((zone, index) => {
+      if (zone && !(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "regular")) {
+        drawCornerHandles(zone, index, "user");
+      }
+    });
+    
+    exclusionZones.forEach((zone, index) => {
+      if (zone && !(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "exclusion")) {
+        drawCornerHandles(zone, index, "exclusion");
+      }
+    });
+
+    // Draw animated zones that are being deleted
+    animatedZones.forEach((animation, key) => {
+      if (animation.type === 'disappear' && animation.zone) {
+        drawZone(animation.zone, animation.index, animation.zoneType);
+      }
+    });
+
+    // Draw ghost zone preview
+    if (isCreatingZone && ghostZone) {
+      drawGhostZone(ghostZone, currentZoneType);
+    }
 
     // Draw targets
     targets.forEach((target) => {
@@ -398,47 +724,209 @@ document.addEventListener("DOMContentLoaded", () => {
     const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
     const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
 
-    if (zoneType === "ha") {
-      const color = haZoneColors[index % haZoneColors.length];
-      ctx.fillStyle = color.fill;
-      ctx.strokeStyle = color.stroke;
-      ctx.lineWidth = 2;
-    } else if (zoneType === "user") {
-      ctx.fillStyle = "rgba(90, 34, 139, 0.1)";
-      ctx.strokeStyle = "purple";
-      ctx.lineWidth = 2;
-    } else if (zoneType === "haExclusion") {
-      ctx.fillStyle = "rgba(255, 255, 0, 0.1)";
-      ctx.strokeStyle = "yellow";
-      ctx.lineWidth = 2;
-    } else if (zoneType === "exclusion") {
-      ctx.fillStyle = "rgba(255, 165, 0, 0.1)"; // Orange with transparency
-      ctx.strokeStyle = "orange";
-      ctx.lineWidth = 2;
+    // Check if this zone is being animated
+    const animationKey = `${zoneType}-${index}`;
+    const animation = animatedZones.get(animationKey);
+    let transform = { scale: 1, opacity: 1 };
+    
+    if (animation) {
+      const elapsed = Date.now() - animation.startTime;
+      const progress = Math.min(elapsed / animation.duration, 1);
+      transform = getAnimationTransform(animation.type, progress);
     }
 
-    ctx.beginPath();
-    ctx.rect(x, y, width, height);
-    ctx.fill();
-    ctx.stroke();
-    ctx.closePath();
+    // Save canvas state for transform
+    ctx.save();
+    
+    // Apply animation transforms
+    if (transform.scale !== 1) {
+      const centerX = x + width / 2;
+      const centerY = y + height / 2;
+      ctx.translate(centerX, centerY);
+      ctx.scale(transform.scale, transform.scale);
+      ctx.translate(-centerX, -centerY);
+    }
+    
+    // Apply opacity
+    ctx.globalAlpha = transform.opacity;
 
-    // Set text color based on current theme
+    // Zone styling
+    const cornerRadius = 8;
     const isDarkMode = document.body.classList.contains("dark-mode");
-    ctx.fillStyle = isDarkMode ? "#e0e0e0" : "#333333";
-    ctx.font = "12px Open Sans";
+    
+    // Check if this zone is being hovered
+    const isHovered = hoveredZone && 
+                     hoveredZone.type === zoneType && 
+                     hoveredZone.index === index &&
+                     (zoneType === "user" || zoneType === "exclusion");
+    
+    // Define color schemes
+    let fillGradient, strokeColor, shadowColor, labelColor;
+    
+    if (zoneType === "ha") {
+      const colors = [
+        { fill: ["#3b82f6", "#1d4ed8"], stroke: "#1e40af", shadow: "#3b82f680" }, // Blue
+        { fill: ["#10b981", "#047857"], stroke: "#065f46", shadow: "#10b98180" }, // Green  
+        { fill: ["#f59e0b", "#d97706"], stroke: "#92400e", shadow: "#f59e0b80" }, // Amber
+        { fill: ["#ef4444", "#dc2626"], stroke: "#991b1b", shadow: "#ef444480" }, // Red
+      ];
+      const color = colors[index % colors.length];
+      fillGradient = color.fill;
+      strokeColor = color.stroke;
+      shadowColor = color.shadow;
+    } else if (zoneType === "user") {
+      fillGradient = ["#8b5cf6", "#7c3aed"]; // Purple gradient
+      strokeColor = "#6d28d9";
+      shadowColor = "#8b5cf680";
+    } else if (zoneType === "haExclusion") {
+      fillGradient = ["#f87171", "#ef4444"]; // red gradient
+      strokeColor = "#dc2626";
+      shadowColor = "#f8717180";
+    } else if (zoneType === "exclusion") {
+      fillGradient = ["#f87171", "#ef4444"]; // red gradient
+      strokeColor = "#dc2626";
+      shadowColor = "#f8717180";
+    }
 
+    // Create gradient fill with hover
+    const gradient = ctx.createLinearGradient(x, y, x, y + height);
+    const topOpacity = isHovered ? "30" : "20";
+    const bottomOpacity = isHovered ? "40" : "30";
+    gradient.addColorStop(0, fillGradient[0] + topOpacity); // Enhanced opacity when hovered
+    gradient.addColorStop(1, fillGradient[1] + bottomOpacity); // Enhanced opacity when hovered
+    
+    // Draw shadow effect with hover
+    ctx.shadowColor = shadowColor;
+    ctx.shadowBlur = isHovered ? 12 : 6;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = isHovered ? 3 : 2;
+
+    // Draw rounded rectangle with gradient fill
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, cornerRadius);
+    ctx.fill();
+    
+    // Reset shadow for border
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    
+    // Draw border with hover
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = isHovered ? 3 : 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, cornerRadius);
+    ctx.stroke();
+
+    // Add inner highlight
+    ctx.strokeStyle = fillGradient[0] + "40"; // 40% opacity highlight
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x + 1, y + 1, width - 2, height - 2, cornerRadius - 1);
+    ctx.stroke();
+
+    // Font for labels
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    
+    // Use system fonts for better cross-platform
+    ctx.font = "500 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    
     let zoneLabel;
     if (zoneType === "ha") {
       zoneLabel = `HA Zone ${index + 1}`;
     } else if (zoneType === "user") {
-      zoneLabel = `User Zone ${index + 1}`;
+      zoneLabel = `Zone ${index + 1}`;
     } else if (zoneType === "exclusion") {
-      zoneLabel = `Exclusion Zone ${index + 1}`;
+      zoneLabel = `Exclusion ${index + 1}`;
     } else if (zoneType === "haExclusion") {
-      zoneLabel = `HA Exclusion Zone ${index + 1}`;
+      zoneLabel = `HA Exclusion ${index + 1}`;
     }
-    ctx.fillText(zoneLabel, x + 5, y + 15);
+    
+    // Measure text for better positioning
+    const textMetrics = ctx.measureText(zoneLabel);
+    const textWidth = textMetrics.width;
+    const textHeight = 16;
+    const textPadding = 8;
+    const textX = x + 10;
+    const textY = y + textHeight / 2 + 6;
+    
+    // Draw text background
+    ctx.fillStyle = isDarkMode ? "rgba(0, 0, 0, 0.3)" : "rgba(255, 255, 255, 0.8)";
+    ctx.beginPath();
+    ctx.roundRect(textX - textPadding/2, textY - textHeight/2 + 1, textWidth + textPadding, textHeight - 2, 6);
+    ctx.fill();
+    
+    // Draw text
+    ctx.fillStyle = isDarkMode ? "#ffffff" : "#1a202c";
+    ctx.fillText(zoneLabel, textX, textY);
+    
+    // Restore canvas state
+    ctx.restore();
+  }
+
+  // Draw corner handles for hover
+  function drawCornerHandles(zone, index, zoneType) {
+    if (!hoveredZone || hoveredZone.type !== zoneType || hoveredZone.index !== index) return;
+    
+    const x = scaleX(Math.min(zone.beginX, zone.endX));
+    const y = scaleY(Math.min(zone.beginY, zone.endY));
+    const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
+    const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
+    
+    const baseHandleSize = 8;
+    const pulseEffect = 0.2 * Math.sin(Date.now() * 0.003);
+    const handleSize = baseHandleSize + pulseEffect;
+    const isDarkMode = document.body.classList.contains("dark-mode");
+    
+    // Define corner positions
+    const corners = [
+      { x: x, y: y, corner: "top-left" },
+      { x: x + width, y: y, corner: "top-right" },
+      { x: x, y: y + height, corner: "bottom-left" },
+      { x: x + width, y: y + height, corner: "bottom-right" }
+    ];
+    
+    ctx.save();
+    
+    corners.forEach(corner => {
+      const isHovered = hoveredCorner === corner.corner;
+      
+      // Draw glow effect for hovered corner
+      if (isHovered) {
+        ctx.shadowColor = isDarkMode ? "#ffffff60" : "#00000040";
+        ctx.shadowBlur = 8;
+      } else {
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
+      }
+      
+      // Draw corner handle
+      ctx.fillStyle = isHovered 
+        ? (isDarkMode ? "#ffffff" : "#1a202c")
+        : (isDarkMode ? "#ffffff80" : "#1a202c80");
+      
+      ctx.beginPath();
+      ctx.arc(corner.x, corner.y, handleSize / 2, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Draw inner dot
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = isHovered
+        ? (isDarkMode ? "#1a202c" : "#ffffff")
+        : (isDarkMode ? "#1a202c60" : "#ffffff60");
+      
+      ctx.beginPath();
+      ctx.arc(corner.x, corner.y, 2, 0, 2 * Math.PI);
+      ctx.fill();
+    });
+    
+    ctx.restore();
   }
 
   function drawTarget(target) {
@@ -473,6 +961,48 @@ document.addEventListener("DOMContentLoaded", () => {
   canvas.addEventListener("mousemove", onMouseMove);
   canvas.addEventListener("mouseup", onMouseUp);
   canvas.addEventListener("contextmenu", onRightClick);
+  canvas.addEventListener("mouseleave", () => {
+    // Clear hover states when mouse leaves canvas
+    if (hoveredZone || hoveredCorner) {
+      hoveredZone = null;
+      hoveredCorner = null;
+      canvas.style.cursor = "default";
+      drawVisualization();
+    }
+  });
+
+  // Keyboard event listener for canceling zone creation
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && isCreatingZone) {
+      // Cancel zone creation
+      if (currentZoneType === "regular" && draggingZone !== null) {
+        userZones[draggingZone] = null;
+      } else if (currentZoneType === "exclusion" && draggingZone !== null) {
+        exclusionZones[draggingZone] = null;
+      }
+      
+      // Clear creation state
+      ghostZone = null;
+      isCreatingZone = false;
+      isDragging = false;
+      draggingZone = null;
+      dragType = null;
+      
+      drawVisualization();
+    }
+  });
+
+  // Animation loop for hover effects
+  function animateHoverEffects() {
+    if (hoveredZone) {
+      // Redraw to update pulsing corner handles
+      drawVisualization();
+    }
+    requestAnimationFrame(animateHoverEffects);
+  }
+  
+  // Start the hover animation loop
+  animateHoverEffects();
 
   function onMouseDown(e) {
     const mousePos = getMousePos(canvas, e);
@@ -513,14 +1043,20 @@ document.addEventListener("DOMContentLoaded", () => {
         
         dragType = "create";
         draggingZone = targetIndex;
+        isCreatingZone = true;
         const startX = unscaleX(mousePos.x);
         const startY = unscaleY(mousePos.y);
-        userZones[targetIndex] = {
+        
+        // Create ghost zone for preview
+        ghostZone = {
           beginX: startX,
           beginY: startY,
           endX: startX,
           endY: startY,
         };
+        
+        // Reserve the slot but don't create the actual zone yet
+        userZones[targetIndex] = null;
         isDragging = true;
       } else if (currentZoneType === "exclusion") {
         // Create exclusion zone only for the selected zone number
@@ -539,14 +1075,20 @@ document.addEventListener("DOMContentLoaded", () => {
         
         dragType = "create";
         draggingZone = targetIndex;
+        isCreatingZone = true;
         const startX = unscaleX(mousePos.x);
         const startY = unscaleY(mousePos.y);
-        exclusionZones[targetIndex] = {
+        
+        // Create ghost zone for preview
+        ghostZone = {
           beginX: startX,
           beginY: startY,
           endX: startX,
           endY: startY,
         };
+        
+        // Reserve the slot but don't create the actual zone yet
+        exclusionZones[targetIndex] = null;
         isDragging = true;
       }
     }
@@ -554,16 +1096,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function onMouseMove(e) {
     const mousePos = getMousePos(canvas, e);
+    mousePosition = { x: mousePos.x, y: mousePos.y };
     const zoneInfo = getZoneAtPosition(mousePos);
+    
     if (!isDragging) {
-      // Update cursor style based on hover state
-      if (zoneInfo !== null) {
-        if (zoneInfo.zoneType === "user" || zoneInfo.zoneType === "exclusion") {
-          canvas.style.cursor = zoneInfo.corner ? "nwse-resize" : "move";
-        }
+      // Update hover states for interactive zones
+      let redrawNeeded = false;
+      const prevHoveredZone = hoveredZone;
+      const prevHoveredCorner = hoveredCorner;
+      
+      if (zoneInfo !== null && (zoneInfo.zoneType === "user" || zoneInfo.zoneType === "exclusion")) {
+        hoveredZone = { type: zoneInfo.zoneType, index: zoneInfo.index };
+        hoveredCorner = zoneInfo.corner;
+        canvas.style.cursor = zoneInfo.corner ? "nwse-resize" : "move";
       } else {
+        hoveredZone = null;
+        hoveredCorner = null;
         canvas.style.cursor = "crosshair";
       }
+      
+      // Check if hover state changed and redraw if needed
+      if (JSON.stringify(prevHoveredZone) !== JSON.stringify(hoveredZone) || 
+          prevHoveredCorner !== hoveredCorner) {
+        redrawNeeded = true;
+      }
+      
+      if (redrawNeeded) {
+        drawVisualization();
+      }
+      
       return;
     }
     let dx = unscaleX(mousePos.x) - unscaleX(dragOffset.x);
@@ -641,18 +1202,13 @@ document.addEventListener("DOMContentLoaded", () => {
         adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
       }
     } else if (dragType === "create") {
-      if (currentZoneType === "regular") {
-        const zone = userZones[draggingZone];
-        zone.endX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
-        zone.endY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
-        zone.endX = Math.round(zone.endX);
-        zone.endY = Math.round(zone.endY);
-      } else if (currentZoneType === "exclusion") {
-        const zone = exclusionZones[draggingZone];
-        zone.endX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
-        zone.endY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
-        zone.endX = Math.round(zone.endX);
-        zone.endY = Math.round(zone.endY);
+      const newEndX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
+      const newEndY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
+      
+      // Only update ghost zone for preview during creation
+      if (ghostZone) {
+        ghostZone.endX = Math.round(newEndX);
+        ghostZone.endY = Math.round(newEndY);
       }
     }
 
@@ -686,6 +1242,35 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function onMouseUp(e) {
+    // Check finished creating a zone
+    if (dragType === "create" && draggingZone !== null && ghostZone) {
+      // Create the actual zone from the ghost zone data
+      if (currentZoneType === "regular") {
+        userZones[draggingZone] = {
+          beginX: ghostZone.beginX,
+          beginY: ghostZone.beginY,
+          endX: ghostZone.endX,
+          endY: ghostZone.endY,
+        };
+      } else if (currentZoneType === "exclusion") {
+        exclusionZones[draggingZone] = {
+          beginX: ghostZone.beginX,
+          beginY: ghostZone.beginY,
+          endX: ghostZone.endX,
+          endY: ghostZone.endY,
+        };
+      }
+      
+      const zoneType = currentZoneType === "regular" ? "user" : "exclusion";
+      animateZoneCreation(zoneType, draggingZone);
+    }
+    
+    // Clear ghost zone and creation state
+    if (isCreatingZone) {
+      ghostZone = null;
+      isCreatingZone = false;
+    }
+    
     isDragging = false;
     draggingZone = null;
     dragType = null;
@@ -694,21 +1279,48 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function onRightClick(e) {
     e.preventDefault();
+    
+    // Cancel zone creation if in progress
+    if (isCreatingZone) {
+      // Remove the incomplete zone
+      if (currentZoneType === "regular" && draggingZone !== null) {
+        userZones[draggingZone] = null;
+      } else if (currentZoneType === "exclusion" && draggingZone !== null) {
+        exclusionZones[draggingZone] = null;
+      }
+      
+      // Clear creation state
+      ghostZone = null;
+      isCreatingZone = false;
+      isDragging = false;
+      draggingZone = null;
+      dragType = null;
+      
+      drawVisualization();
+      return;
+    }
+    
     const mousePos = getMousePos(canvas, e);
     const zoneInfo = getZoneAtPosition(mousePos);
     if (zoneInfo !== null) {
       const { index, zoneType } = zoneInfo;
       if (zoneType === "user") {
         if (confirm(`Delete User Zone ${index + 1}?`)) {
-          userZones[index] = null; // Set to null instead of removing
-          drawVisualization();
-          updateCoordinatesOutput();
+          const zone = userZones[index];
+          animateZoneDeletion("user", index, zone, () => {
+            userZones[index] = null; // Set to null instead of removing
+            updateCoordinatesOutput();
+            updateZoneTileDisplays();
+          });
         }
       } else if (zoneType === "exclusion") {
         if (confirm(`Delete Exclusion Zone ${index + 1}?`)) {
-          exclusionZones[index] = null; // Set to null instead of removing
-          drawVisualization();
-          updateCoordinatesOutput();
+          const zone = exclusionZones[index];
+          animateZoneDeletion("exclusion", index, zone, () => {
+            exclusionZones[index] = null; // Set to null instead of removing
+            updateCoordinatesOutput();
+            updateZoneTileDisplays();
+          });
         }
       }
     }
@@ -1464,6 +2076,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Draw the visualization
       drawVisualization();
       updateCoordinatesOutput();
+      updateZoneTileDisplays(); // Update zone tiles after fetching HA zones
 
       // Update Target Tracking Info Box
       updateTargetTrackingInfo();
@@ -1573,8 +2186,13 @@ document.addEventListener("DOMContentLoaded", () => {
       userZones = [];
       exclusionZones = [];
       persistentDots = []; // Optionally clear persistent dots after saving
+      
+      // Reload data to get the updated HA zones
+      await fetchLiveData();
+      
       drawVisualization();
       updateCoordinatesOutput();
+      updateZoneTileDisplays(); // Update the sidebar tiles after saving
     } catch (error) {
       console.error("Error saving zones:", error);
       alert("Failed to save zones.");
@@ -1592,11 +2210,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     entities.forEach((entity) => {
       const entityId = entity.id;
-      console.log(entityId);
       // Check for Regular Zones
       let match = entityId.match(regularZoneRegex);
       if (match) {
-        console.log(entityId);
         const [_, zoneNumber, position, axis] = match;
         const key = `zone_${zoneNumber}_${position}_${axis}`;
         zoneEntities[key] = entityId;
