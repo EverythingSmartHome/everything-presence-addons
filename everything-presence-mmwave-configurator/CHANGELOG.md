@@ -1,3 +1,9 @@
+### 1.2.0
+- Add second exclusion zone by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/68
+- Add cleaner and more functional UI by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/73
+- Add styling improvements, animations, tool-tip and improvements to zone displays by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/74
+- Fix not being able to delete exclusion zones by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/75
+
 ### 1.1.4
 - Adds support for a second exclusion zone with firmware 1.3.0 of Everything Presence Lite [@EverythingSmartHome](https://github.com/EverythingSmartHome/everything-presence-addons/pull/68)
 
