@@ -447,6 +447,7 @@ button:disabled {
   border: 2px solid var(--border-light);
   border-radius: var(--radius-sm);
   padding: var(--space-xs);
+  padding-left: calc(var(--space-xs) + 8px); /* Extra space for color indicator */
   cursor: pointer;
   transition: all var(--transition-fast);
   position: relative;
@@ -474,6 +475,45 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   margin-bottom: var(--space-sm);
+}
+
+/* Zone Color Indicator */
+.zone-color-indicator {
+  width: 4px;
+  height: 100%;
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-top-left-radius: var(--radius-sm);
+  border-bottom-left-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  opacity: 0; /* Hidden by default */
+}
+
+/* Zone Color Classes - matching canvas colors */
+.zone-color-indicator.ha-zone-1 { 
+  background: linear-gradient(to bottom, #3b82f6, #1d4ed8); 
+  opacity: 1; /* Show when colored */
+}
+.zone-color-indicator.ha-zone-2 { 
+  background: linear-gradient(to bottom, #10b981, #047857); 
+  opacity: 1; /* Show when colored */
+}
+.zone-color-indicator.ha-zone-3 { 
+  background: linear-gradient(to bottom, #f59e0b, #d97706); 
+  opacity: 1; /* Show when colored */
+}
+.zone-color-indicator.ha-zone-4 { 
+  background: linear-gradient(to bottom, #ef4444, #dc2626); 
+  opacity: 1; /* Show when colored */
+}
+.zone-color-indicator.user-zone { 
+  background: linear-gradient(to bottom, #8b5cf6, #7c3aed); 
+  opacity: 1; /* Show when colored */
+}
+.zone-color-indicator.exclusion-zone { 
+  background: linear-gradient(to bottom, #f87171, #ef4444); 
+  opacity: 1; /* Show when colored */
 }
 
 .zone-title {
@@ -553,6 +593,64 @@ button:disabled {
 .zone-status-text.enabled-not-configured {
   color: var(--danger-color);
   background-color: rgba(220, 53, 69, 0.1);
+}
+
+/* ==============================================
+   TOOLTIP STYLES
+   ============================================== */
+
+/* Tooltip container */
+.zone-tile {
+  position: relative;
+}
+
+/* Tooltip for disabled zones */
+.zone-tile.disabled::before {
+  content: "This zone is disabled in Home Assistant. To enable it, go to Settings → Devices & services → Entities, search for the zone entities, and enable them.";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: var(--gray-800);
+  color: var(--white);
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  line-height: 1.3;
+  white-space: normal;
+  width: 280px;
+  max-width: 90vw;
+  text-align: left;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
+  pointer-events: none;
+}
+
+/* Tooltip arrow */
+.zone-tile.disabled::after {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--gray-800);
+  margin-bottom: -6px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* Show tooltip on hover */
+.zone-tile.disabled:hover::before,
+.zone-tile.disabled:hover::after {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* Info Display (if used) */
@@ -704,6 +802,54 @@ button:disabled {
 }
 
 /* ==============================================
+   ZONE ANIMATION STYLES
+   ============================================== */
+
+@keyframes zoneAppear {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes zoneDisappear {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+/* Zone animation class that will be applied via JavaScript */
+.zone-creating {
+  animation: zoneAppear 0.3s ease-out forwards;
+}
+
+.zone-deleting {
+  animation: zoneDisappear 0.25s ease-in forwards;
+}
+
+/* Ghost zone preview styles (for canvas-based implementation) */
+.canvas-container.creating-zone {
+  cursor: crosshair !important;
+}
+
+/* ==============================================
    CANVAS CURSOR STYLES
    ============================================== */
 
@@ -816,6 +962,16 @@ body.dark-mode .zone-status-text {
 
 body.dark-mode .zone-status-text.disabled {
   background-color: var(--gray-300);
+}
+
+/* Dark mode tooltip */
+body.dark-mode .zone-tile.disabled::before {
+  background-color: var(--gray-700);
+  color: var(--gray-100);
+}
+
+body.dark-mode .zone-tile.disabled::after {
+  border-top-color: var(--gray-700);
 }
 
 /* ==============================================
