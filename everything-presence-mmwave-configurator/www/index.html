@@ -38,20 +38,32 @@
 
         <!-- Refresh Rate Controls -->
         <div class="control-group">
-          <label for="refreshRateInput" hidden>Refresh Rate (ms):</label>
-          <input type="number" id="refreshRateInput" value="500" min="100" step="100" hidden>
-          <button id="setRefreshRateButton" hidden>Set Refresh Rate</button>
-          <button id="toggleRefreshButton">Stop Refresh</button>
+          <div class="refresh-controls">
+            <div class="refresh-rate-input-group">
+              <label for="refreshRateInput">Refresh Rate (ms):</label>
+              <input type="number" id="refreshRateInput" value="500" min="100" step="100">
+            </div>
+            <div class="refresh-buttons">
+              <button id="setRefreshRateButton">Set Refresh Rate</button>
+              <button id="toggleRefreshButton">Stop Refresh</button>
+            </div>
+          </div>
         </div>
 
         <!-- Status Indicator -->
-        <div id="statusIndicator">Status: Not Refreshing</div>
+        <div id="statusIndicator">Status: Refreshing every 500 ms</div>
       </div>
 
       <!-- Display Target Tracking Information and Occupancy State -->
       <!-- Target Tracking Info Box -->
         <div id="target-tracking-info" class="info-box">
-          <h3>Target Tracking Information</h3>
+          <div class="collapsible-header" id="target-tracking-header">
+            <h3>Target Tracking Information</h3>
+            <button class="collapse-toggle" id="target-tracking-toggle" aria-label="Toggle target tracking information">
+              <span class="toggle-icon">▼</span>
+            </button>
+          </div>
+          <div class="collapsible-content" id="target-tracking-content">
           <table>
               <thead>
                   <tr>
@@ -98,6 +110,7 @@
                   </tr>
               </tbody>
           </table>
+          </div>
         </div>
 
 
@@ -107,17 +120,92 @@
         </div>
       </div> -->
 
-      <div class="control-group">
-        <label for="zone-type-select">Zone Type:</label>
-        <select id="zone-type-select">
-          <option value="regular" selected>Regular Zone</option>
-          <option value="exclusion">Exclusion Zone</option>
-        </select>
-      </div>
+      <!-- Canvas and Zone Selection Layout -->
+      <div id="canvas-zone-layout">
+        <!-- Visualization Canvas -->
+        <div id="canvas-container">
+          <canvas id="visualizationCanvas" width="960" height="600"></canvas>
+        </div>
 
-      <!-- Visualization Canvas -->
-      <div id="canvas-container">
-        <canvas id="visualizationCanvas" width="960" height="600"></canvas>
+        <!-- Zone Selection Sidebar -->
+        <div id="zone-selection-sidebar">
+          <h4>Zone Selection</h4>
+          <div id="zone-tiles-container">
+            <!-- Regular Zones -->
+            <div class="zone-tile" data-zone-type="regular" data-zone-number="1">
+              <div class="zone-tile-header">
+                <span class="zone-title">Zone 1</span>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="zone-1-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="zone-1-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="zone-1-status">Disabled</div>
+            </div>
+
+            <div class="zone-tile" data-zone-type="regular" data-zone-number="2">
+              <div class="zone-tile-header">
+                <span class="zone-title">Zone 2</span>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="zone-2-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="zone-2-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="zone-2-status">Disabled</div>
+            </div>
+
+            <div class="zone-tile" data-zone-type="regular" data-zone-number="3">
+              <div class="zone-tile-header">
+                <span class="zone-title">Zone 3</span>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="zone-3-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="zone-3-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="zone-3-status">Disabled</div>
+            </div>
+
+            <div class="zone-tile" data-zone-type="regular" data-zone-number="4">
+              <div class="zone-tile-header">
+                <span class="zone-title">Zone 4</span>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="zone-4-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="zone-4-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="zone-4-status">Disabled</div>
+            </div>
+
+            <!-- Exclusion Zones -->
+            <div class="zone-tile" data-zone-type="exclusion" data-zone-number="1">
+              <div class="zone-tile-header">
+                <span class="zone-title">Exclusion 1</span>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="exclusion-1-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="exclusion-1-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="exclusion-1-status">Disabled</div>
+            </div>
+
+            <div class="zone-tile" data-zone-type="exclusion" data-zone-number="2">
+              <div class="zone-tile-header">
+                <span class="zone-title">Exclusion 2</span>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="exclusion-2-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="exclusion-2-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="exclusion-2-status">Disabled</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="save-controls">

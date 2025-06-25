@@ -43,12 +43,131 @@ document.addEventListener("DOMContentLoaded", () => {
     { fill: "rgba(255, 255, 0, 0.1)", stroke: "yellow" },
   ];
 
-  const zoneTypeSelect = document.getElementById("zone-type-select");
+  // Zone selection system
   let currentZoneType = "regular";
+  let currentZoneNumber = 1;
+  let selectedZoneTile = null;
 
-  zoneTypeSelect.addEventListener("change", (event) => {
-    currentZoneType = event.target.value;
-  });
+  // Initialize zone tile selection
+  function setupZoneTileSelection() {
+    const zoneTiles = document.querySelectorAll('.zone-tile');
+    
+    // Set initial selection (Zone 1)
+    const initialTile = document.querySelector('.zone-tile[data-zone-type="regular"][data-zone-number="1"]');
+    if (initialTile) {
+      selectZoneTile(initialTile);
+    }
+
+    zoneTiles.forEach(tile => {
+      tile.addEventListener('click', () => {
+        selectZoneTile(tile);
+      });
+    });
+  }
+
+  function selectZoneTile(tile) {
+    // Remove previous selection
+    if (selectedZoneTile) {
+      selectedZoneTile.classList.remove('selected');
+    }
+
+    // Set new selection
+    selectedZoneTile = tile;
+    tile.classList.add('selected');
+    
+    // Update current zone type and number
+    currentZoneType = tile.dataset.zoneType;
+    currentZoneNumber = parseInt(tile.dataset.zoneNumber);
+  }
+
+  // Update zone tile displays with current data
+  function updateZoneTileDisplays() {
+    // Update regular zones
+    for (let i = 1; i <= 4; i++) {
+      updateZoneTileDisplay('regular', i);
+    }
+    
+    // Update exclusion zones
+    for (let i = 1; i <= 2; i++) {
+      updateZoneTileDisplay('exclusion', i);
+    }
+  }
+
+  function updateZoneTileDisplay(zoneType, zoneNumber) {
+    const tile = document.querySelector(`.zone-tile[data-zone-type="${zoneType}"][data-zone-number="${zoneNumber}"]`);
+    if (!tile) return;
+
+    const statusIndicator = tile.querySelector('.zone-status-indicator');
+    const statusText = tile.querySelector('.zone-status-text');
+    const xDisplay = tile.querySelector(`#${zoneType === 'regular' ? 'zone' : 'exclusion'}-${zoneNumber}-x-display`);
+    const yDisplay = tile.querySelector(`#${zoneType === 'regular' ? 'zone' : 'exclusion'}-${zoneNumber}-y-display`);
+
+    let zone = null;
+    let haZone = null;
+    
+    // Get zone data
+    if (zoneType === 'regular') {
+      zone = userZones[zoneNumber - 1];
+      haZone = haZones[zoneNumber - 1];
+    } else {
+      zone = exclusionZones[zoneNumber - 1];
+      haZone = haExclusionZones[zoneNumber - 1];
+    }
+
+    // Check if entities exist and are enabled in Home Assistant
+    const entityPrefix = zoneType === 'regular' ? `zone_${zoneNumber}` : `occupancy_mask_${zoneNumber}`;
+    const hasEnabledEntities = selectedEntities && selectedEntities.some(entity => 
+      entity.id.includes(entityPrefix) && entity.state !== 'unavailable' && entity.state !== 'unknown'
+    );
+
+    // Determine status
+    const isDisabledCoordinates = haZone && 
+      haZone.beginX === -6000 && haZone.endX === -6000 && 
+      haZone.beginY === -1560 && haZone.endY === -1560;
+
+    // Update coordinates display
+    if (zone) {
+      xDisplay.textContent = `${Math.round(zone.beginX)}, ${Math.round(zone.endX)}`;
+      yDisplay.textContent = `${Math.round(zone.beginY)}, ${Math.round(zone.endY)}`;
+    } else if (haZone && !isDisabledCoordinates) {
+      xDisplay.textContent = `${Math.round(haZone.beginX)}, ${Math.round(haZone.endX)}`;
+      yDisplay.textContent = `${Math.round(haZone.beginY)}, ${Math.round(haZone.endY)}`;
+    } else {
+      xDisplay.textContent = '—';
+      yDisplay.textContent = '—';
+    }
+    
+    // Determine overall status based on entity availability and configuration
+    const isEntityDisabled = !hasEnabledEntities || !haZone;
+    const isConfigured = zone != null || (haZone && !isDisabledCoordinates && 
+      (haZone.beginX !== 0 || haZone.endX !== 0 || haZone.beginY !== 0 || haZone.endY !== 0));
+    
+    // Update status indicator
+    statusIndicator.className = 'zone-status-indicator';
+    if (isEntityDisabled) {
+      // Grey: Entity is disabled in Home Assistant
+      statusIndicator.classList.add('disabled');
+    } else if (isConfigured) {
+      // Green: Entity is enabled and zone is configured
+      statusIndicator.classList.add('enabled-configured');
+    } else {
+      // Red: Entity is enabled but zone has default coordinates (not configured)
+      statusIndicator.classList.add('enabled-not-configured');
+    }
+
+    // Update status text
+    statusText.className = 'zone-status-text';
+    if (isEntityDisabled) {
+      statusText.textContent = 'Entity Disabled';
+      statusText.classList.add('disabled');
+    } else if (isConfigured) {
+      statusText.textContent = 'No Presence';
+      statusText.classList.add('no-presence');
+    } else {
+      statusText.textContent = 'Not Configured';
+      statusText.classList.add('enabled-not-configured');
+    }
+  }
 
   const saveZonesButton = document.getElementById("saveZonesButton");
 
@@ -59,6 +178,44 @@ document.addEventListener("DOMContentLoaded", () => {
   // ==========================
   let isPersistenceEnabled = false; // Flag to toggle persistence
   let persistentDots = []; // Array to store persistent dots
+
+  // ==========================
+  //   === Collapsible Sections ===
+  // ==========================
+  function setupCollapsibleSections() {
+    const targetTrackingInfo = document.getElementById("target-tracking-info");
+    const targetTrackingHeader = document.getElementById("target-tracking-header");
+    const targetTrackingToggle = document.getElementById("target-tracking-toggle");
+
+    // Set to collapsed by default
+    targetTrackingInfo.classList.add("collapsed");
+
+    // Add click handler to header and toggle button
+    const toggleCollapse = () => {
+      targetTrackingInfo.classList.toggle("collapsed");
+      
+      // Update aria-expanded for accessibility
+      const isCollapsed = targetTrackingInfo.classList.contains("collapsed");
+      targetTrackingToggle.setAttribute("aria-expanded", !isCollapsed);
+      
+      // Save state to localStorage
+      localStorage.setItem("targetTrackingCollapsed", isCollapsed);
+    };
+
+    targetTrackingHeader.addEventListener("click", toggleCollapse);
+    targetTrackingToggle.addEventListener("click", (e) => {
+      e.stopPropagation(); // Prevent double-trigger from header click
+      toggleCollapse();
+    });
+
+    // Restore saved state
+    const savedState = localStorage.getItem("targetTrackingCollapsed");
+    if (savedState !== null) {
+      const isCollapsed = savedState === "true";
+      targetTrackingInfo.classList.toggle("collapsed", isCollapsed);
+      targetTrackingToggle.setAttribute("aria-expanded", !isCollapsed);
+    }
+  }
 
   // Add a button for toggling persistence
   const persistenceToggleButton = document.getElementById("persistenceToggleButton");
@@ -173,7 +330,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Draw user zones (interactive)
     userZones.forEach((zone, index) => {
-      drawZone(zone, index, "user");
+      if (zone) { // Only draw non-null zones
+        drawZone(zone, index, "user");
+      }
     });
 
     // Draw HA Exclusion zones (non-interactive)
@@ -183,7 +342,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Draw exclusion zones (interactive)
     exclusionZones.forEach((zone, index) => {
-      drawZone(zone, index, "exclusion");
+      if (zone) { // Only draw non-null zones
+        drawZone(zone, index, "exclusion");
+      }
     });
 
     // Draw targets
@@ -199,6 +360,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isPersistenceEnabled) {
       drawPersistentDots();
     }
+
+    // Update zone tile displays
+    updateZoneTileDisplays();
   }
 
   function drawRadarBackground() {
@@ -333,39 +497,57 @@ document.addEventListener("DOMContentLoaded", () => {
       isDragging = true;
     } else {
       if (currentZoneType === "regular") {
-        // Start creating a new user zone if less than 4 user zones
-        if (userZones.length < 4) {
-          dragType = "create";
-          draggingZone = userZones.length;
-          const startX = unscaleX(mousePos.x);
-          const startY = unscaleY(mousePos.y);
-          userZones.push({
-            beginX: startX,
-            beginY: startY,
-            endX: startX,
-            endY: startY,
-          });
-          isDragging = true;
-        } else {
-          alert("Maximum of 4 user zones allowed.");
+        // Create zone only for the selected zone number
+        const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
+        
+        // Check if zone already exists at this index
+        if (userZones[targetIndex]) {
+          alert(`Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
+          return;
         }
+        
+        // Ensure userZones array has enough slots
+        while (userZones.length <= targetIndex) {
+          userZones.push(null);
+        }
+        
+        dragType = "create";
+        draggingZone = targetIndex;
+        const startX = unscaleX(mousePos.x);
+        const startY = unscaleY(mousePos.y);
+        userZones[targetIndex] = {
+          beginX: startX,
+          beginY: startY,
+          endX: startX,
+          endY: startY,
+        };
+        isDragging = true;
       } else if (currentZoneType === "exclusion") {
-        const maxExclusionZones = 2;
-        if (exclusionZones.length < maxExclusionZones) {
-          dragType = "create";
-          draggingZone = exclusionZones.length;
-          const startX = unscaleX(mousePos.x);
-          const startY = unscaleY(mousePos.y);
-          exclusionZones.push({
-            beginX: startX,
-            beginY: startY,
-            endX: startX,
-            endY: startY,
-          });
-          isDragging = true;
-        } else {
-          alert(`Maximum of ${maxExclusionZones} exclusion zones allowed.`);
+        // Create exclusion zone only for the selected zone number
+        const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
+        
+        // Check if exclusion zone already exists at this index
+        if (exclusionZones[targetIndex]) {
+          alert(`Exclusion Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
+          return;
         }
+        
+        // Ensure exclusionZones array has enough slots
+        while (exclusionZones.length <= targetIndex) {
+          exclusionZones.push(null);
+        }
+        
+        dragType = "create";
+        draggingZone = targetIndex;
+        const startX = unscaleX(mousePos.x);
+        const startY = unscaleY(mousePos.y);
+        exclusionZones[targetIndex] = {
+          beginX: startX,
+          beginY: startY,
+          endX: startX,
+          endY: startY,
+        };
+        isDragging = true;
       }
     }
   }
@@ -518,13 +700,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const { index, zoneType } = zoneInfo;
       if (zoneType === "user") {
         if (confirm(`Delete User Zone ${index + 1}?`)) {
-          userZones.splice(index, 1);
+          userZones[index] = null; // Set to null instead of removing
           drawVisualization();
           updateCoordinatesOutput();
         }
       } else if (zoneType === "exclusion") {
         if (confirm(`Delete Exclusion Zone ${index + 1}?`)) {
-          exclusionZones.splice(index, 1);
+          exclusionZones[index] = null; // Set to null instead of removing
           drawVisualization();
           updateCoordinatesOutput();
         }
@@ -580,6 +762,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Check exclusion zones first (higher priority)
     for (let i = exclusionZones.length - 1; i >= 0; i--) {
       const zone = exclusionZones[i];
+      if (!zone) continue; // Skip null zones
+      
       const x = scaleX(Math.min(zone.beginX, zone.endX));
       const y = scaleY(Math.min(zone.beginY, zone.endY));
       const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
@@ -638,6 +822,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Check user zones next
     for (let i = userZones.length - 1; i >= 0; i--) {
       const zone = userZones[i];
+      if (!zone) continue; // Skip null zones
+      
       const x = scaleX(Math.min(zone.beginX, zone.endX));
       const y = scaleY(Math.min(zone.beginY, zone.endY));
       const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
@@ -687,14 +873,20 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateCoordinatesOutput() {
     let output = "User Zones:\n";
     userZones.forEach((zone, index) => {
-      output += `Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX},
+      if (zone) { // Only output non-null zones
+        output += `Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX},
        Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
+      }
     });
 
-    if (exclusionZones.length > 0) {
+    // Check if any exclusion zones exist
+    const hasExclusionZones = exclusionZones.some(zone => zone !== null);
+    if (hasExclusionZones) {
       output += "\nExclusion Zones:\n";
       exclusionZones.forEach((zone, index) => {
-        output += `Exclusion Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX}, Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
+        if (zone) { // Only output non-null zones
+          output += `Exclusion Zone ${index + 1} X Begin: ${zone.beginX}, X End: ${zone.endX}, Y Begin: ${zone.beginY}, Y End: ${zone.endY}\n`;
+        }
       });
     }
 
@@ -731,21 +923,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function setupDarkModeToggle() {
     const prefersDarkScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const documentRoot = document.documentElement;
 
     const savedMode = localStorage.getItem("darkMode");
 
     if (savedMode === "enabled") {
+      documentRoot.classList.add("dark-mode");
       document.body.classList.add("dark-mode");
       darkModeToggle.textContent = "🌞";
     } else if (savedMode === "disabled") {
+      documentRoot.classList.remove("dark-mode");
       document.body.classList.remove("dark-mode");
       darkModeToggle.textContent = "🌙";
     } else if (prefersDarkScheme.matches) {
+      documentRoot.classList.add("dark-mode");
       document.body.classList.add("dark-mode");
       darkModeToggle.textContent = "🌞";
     }
 
     darkModeToggle.addEventListener("click", () => {
+      documentRoot.classList.toggle("dark-mode");
       document.body.classList.toggle("dark-mode");
 
       // Update button text and save preference
@@ -773,7 +970,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 {% set model = device_attr(device, 'model') %}
                 {% set manufacturer = device_attr(device, 'manufacturer') %}
                 {% if manufacturer == 'EverythingSmartTechnology' %}
-                    {% if model == 'Everything_Presence_Lite' or model == 'Everything Presence Lite' %}
+                    {% if model == 'Everything_Presence_Lite' or model == 'Everything Presence Lite' or model == 'Everything Presence Pro' or model == 'Everything_Presence_Pro'%}
                         {% set device_name = device_attr(device, 'name_by_user') or device_attr(device, 'name') %}
                         {% set devices.list = devices.list + [{'id': device, 'name': device_name}] %}
                     {% endif %}
@@ -1073,26 +1270,44 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Convert zones object to an array
+    // Convert zones object to arrays
     const reconstructedRegularZones = [];
     const reconstructedExclusionZones = [];
 
     Object.keys(zones).forEach((key) => {
       const zone = zones[key];
       if (key.startsWith("occupancy_mask")) {
-        reconstructedExclusionZones.push({
+        // Extract zone number
+        const zoneNumber = parseInt(key.match(/occupancy_mask_(\d+)/)[1]);
+        const zoneIndex = zoneNumber - 1; // Convert to 0-based index
+        
+        // Ensure array has enough slots
+        while (reconstructedExclusionZones.length <= zoneIndex) {
+          reconstructedExclusionZones.push(null);
+        }
+        
+        reconstructedExclusionZones[zoneIndex] = {
           beginX: zone.beginX || 0,
           beginY: zone.beginY || 0,
           endX: zone.endX || 0,
           endY: zone.endY || 0,
-        });
+        };
       } else if (key.startsWith("zone")) {
-        reconstructedRegularZones.push({
+        // Extract zone number
+        const zoneNumber = parseInt(key.match(/zone_(\d+)/)[1]);
+        const zoneIndex = zoneNumber - 1; // Convert to 0-based index
+        
+        // Ensure array has enough slots
+        while (reconstructedRegularZones.length <= zoneIndex) {
+          reconstructedRegularZones.push(null);
+        }
+        
+        reconstructedRegularZones[zoneIndex] = {
           beginX: zone.beginX || 0,
           beginY: zone.beginY || 0,
           endX: zone.endX || 0,
           endY: zone.endY || 0,
-        });
+        };
       }
     });
 
@@ -1268,6 +1483,8 @@ document.addEventListener("DOMContentLoaded", () => {
     handleDeviceSelection();
     setupDarkModeToggle();
     setupRefreshRateControls();
+    setupCollapsibleSections();
+    setupZoneTileSelection();
   }
 
   // ==========================
