@@ -356,6 +356,13 @@ button:disabled {
   min-width: 140px;
 }
 
+#save-control-group {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 /* ==============================================
    COMPONENT-SPECIFIC STYLES
    ============================================== */
@@ -470,6 +477,18 @@ button:disabled {
   box-shadow: var(--shadow-md);
 }
 
+.zone-tile.edit-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.zone-tile.edit-disabled:hover {
+  background-color: var(--gray-50);
+  border-color: var(--border-light);
+  transform: none;
+  box-shadow: none;
+}
+
 .zone-tile-header {
   display: flex;
   align-items: center;
@@ -514,6 +533,32 @@ button:disabled {
 .zone-color-indicator.exclusion-zone { 
   background: linear-gradient(to bottom, #f87171, #ef4444); 
   opacity: 1; /* Show when colored */
+}
+
+/* Editing Status Indicator */
+#editing-status {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: white;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+#editing-status.has-changes {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  #editing-status {
+    background: linear-gradient(135deg, #1e40af, #1e3a8a);
+    border-color: rgba(30, 64, 175, 0.3);
+  }
+  
+  #editing-status.has-changes {
+    background: linear-gradient(135deg, #d97706, #b45309);
+    border-color: rgba(217, 119, 6, 0.3);
+  }
 }
 
 .zone-title {
