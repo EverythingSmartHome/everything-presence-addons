@@ -47,6 +47,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentZoneType = "regular";
   let currentZoneNumber = 1;
   let selectedZoneTile = null;
+  
+  // Edit mode system
+  let isEditMode = false;
 
   // Animation system
   let animatedZones = new Map(); // Track zones with animations
@@ -266,9 +269,41 @@ document.addEventListener("DOMContentLoaded", () => {
 
     zoneTiles.forEach(tile => {
       tile.addEventListener('click', () => {
-        selectZoneTile(tile);
+        if (isEditMode) {
+          selectZoneTile(tile);
+        } else {
+          alert('Enter Edit Mode to select zones for drawing.\n\nClick "Edit Zones" to start editing.');
+        }
       });
     });
+  }
+
+  // Update editing status indicator
+  function updateEditingStatus() {
+    const statusDiv = document.getElementById('editing-status');
+    const statusText = document.getElementById('editing-status-text');
+    
+    const hasUserZones = userZones.some(zone => zone !== null && zone !== undefined);
+    const hasUserExclusionZones = exclusionZones.some(zone => zone !== null && zone !== undefined);
+    const hasChanges = hasUserZones || hasUserExclusionZones;
+    
+    if (isEditMode) {
+      statusDiv.style.display = 'block';
+      if (hasChanges) {
+        const zoneCount = userZones.filter(zone => zone !== null && zone !== undefined).length;
+        const exclusionCount = exclusionZones.filter(zone => zone !== null && zone !== undefined).length;
+        const totalCount = zoneCount + exclusionCount;
+        
+        statusDiv.className = 'has-changes';
+        statusText.textContent = `Edit Mode: ${totalCount} unsaved zone${totalCount !== 1 ? 's' : ''} • Click "Save Zones" to apply changes`;
+      } else {
+        statusDiv.className = '';
+        statusText.textContent = 'Edit Mode: You can now draw, modify, or delete zones • Click "Save Zones" when finished';
+      }
+    } else {
+      statusDiv.style.display = 'none';
+      statusDiv.className = '';
+    }
   }
 
   function selectZoneTile(tile) {
@@ -330,6 +365,40 @@ document.addEventListener("DOMContentLoaded", () => {
     // Update exclusion zones
     for (let i = 1; i <= 2; i++) {
       updateZoneTileDisplay('exclusion', i);
+    }
+    
+    // Update edit mode visual states
+    updateZoneTileEditModeStates();
+  }
+  
+  // Update zone tile visual states based on edit mode
+  function updateZoneTileEditModeStates() {
+    const zoneTiles = document.querySelectorAll('.zone-tile');
+    zoneTiles.forEach(tile => {
+      if (isEditMode) {
+        tile.classList.remove('edit-disabled');
+      } else {
+        tile.classList.add('edit-disabled');
+        // Remove selection when exiting edit mode
+        tile.classList.remove('selected');
+      }
+    });
+  }
+  
+  // Update button states based on edit mode
+  function updateButtonStates() {
+    const editButton = document.getElementById('editZonesButton');
+    const saveButton = document.getElementById('saveZonesButton');
+    const resetButton = document.getElementById('resetZonesButton');
+    
+    if (isEditMode) {
+      editButton.textContent = 'Exit Edit Mode';
+      saveButton.disabled = false;
+      resetButton.disabled = false;
+    } else {
+      editButton.textContent = 'Edit Zones';
+      saveButton.disabled = true;
+      resetButton.disabled = true;
     }
   }
 
@@ -618,10 +687,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw radar background
     drawRadarBackground();
 
-    // Draw HA zones (non-interactive)
-    haZones.forEach((zone, index) => {
-      drawZone(zone, index, "ha");
-    });
+    // Draw HA zones in view mode
+    if (!isEditMode) {
+      haZones.forEach((zone, index) => {
+        drawZone(zone, index, "ha");
+      });
+    }
 
     // Draw user zones (interactive)
     userZones.forEach((zone, index) => {
@@ -633,10 +704,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
-    // Draw HA Exclusion zones (non-interactive)
-    haExclusionZones.forEach((zone, index) => {
-      drawZone(zone, index, "haExclusion");
-    });
+    // Draw HA Exclusion zones in view mode
+    if (!isEditMode) {
+      haExclusionZones.forEach((zone, index) => {
+        drawZone(zone, index, "haExclusion");
+      });
+    }
 
     // Draw exclusion zones (interactive)
     exclusionZones.forEach((zone, index) => {
@@ -1005,6 +1078,11 @@ document.addEventListener("DOMContentLoaded", () => {
   animateHoverEffects();
 
   function onMouseDown(e) {
+    // Block zone editing if not in edit mode
+    if (!isEditMode) {
+      return;
+    }
+    
     const mousePos = getMousePos(canvas, e);
     const zoneInfo = getZoneAtPosition(mousePos);
 
@@ -1105,14 +1183,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const prevHoveredZone = hoveredZone;
       const prevHoveredCorner = hoveredCorner;
       
-      if (zoneInfo !== null && (zoneInfo.zoneType === "user" || zoneInfo.zoneType === "exclusion")) {
+      if (isEditMode && zoneInfo !== null && (zoneInfo.zoneType === "user" || zoneInfo.zoneType === "exclusion")) {
         hoveredZone = { type: zoneInfo.zoneType, index: zoneInfo.index };
         hoveredCorner = zoneInfo.corner;
         canvas.style.cursor = zoneInfo.corner ? "nwse-resize" : "move";
       } else {
         hoveredZone = null;
         hoveredCorner = null;
-        canvas.style.cursor = "crosshair";
+        canvas.style.cursor = isEditMode ? "crosshair" : "default";
       }
       
       // Check if hover state changed and redraw if needed
@@ -1149,8 +1227,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (newBeginY < -offsetY) {
           dy += -offsetY - newBeginY;
         }
-        if (newEndY > 7500) {
-          dy += 7500 - newEndY;
+        if (newEndY > 6000) {
+          dy += 6000 - newEndY;
         }
 
         zone.beginX += dx;
@@ -1179,8 +1257,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (newBeginY < -offsetY) {
           dy += -offsetY - newBeginY;
         }
-        if (newEndY > 7500) {
-          dy += 7500 - newEndY;
+        if (newEndY > 6000) {
+          dy += 6000 - newEndY;
         }
 
         zone.beginX += dx;
@@ -1196,14 +1274,15 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (dragType === "resize") {
       if (draggingZoneType === "user") {
         const zone = userZones[draggingZone];
-        adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
+        adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy, "regular");
       } else if (draggingZoneType === "exclusion") {
         const zone = exclusionZones[draggingZone];
-        adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy);
+        adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy, "exclusion");
       }
     } else if (dragType === "create") {
       const newEndX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
-      const newEndY = Math.max(-offsetY, Math.min(7500, unscaleY(mousePos.y)));
+      // Limit zones max length to 6000
+      const newEndY = Math.max(-offsetY, Math.min(6000, unscaleY(mousePos.y)));
       
       // Only update ghost zone for preview during creation
       if (ghostZone) {
@@ -1263,6 +1342,7 @@ document.addEventListener("DOMContentLoaded", () => {
       
       const zoneType = currentZoneType === "regular" ? "user" : "exclusion";
       animateZoneCreation(zoneType, draggingZone);
+      updateEditingStatus();
     }
     
     // Clear ghost zone and creation state
@@ -1275,10 +1355,17 @@ document.addEventListener("DOMContentLoaded", () => {
     draggingZone = null;
     dragType = null;
     resizeCorner = null;
+    
+    updateEditingStatus();
   }
 
   function onRightClick(e) {
     e.preventDefault();
+    
+    // Block right-click actions if not in edit mode
+    if (!isEditMode) {
+      return;
+    }
     
     // Cancel zone creation if in progress
     if (isCreatingZone) {
@@ -1311,6 +1398,7 @@ document.addEventListener("DOMContentLoaded", () => {
             userZones[index] = null; // Set to null instead of removing
             updateCoordinatesOutput();
             updateZoneTileDisplays();
+            updateEditingStatus();
           });
         }
       } else if (zoneType === "exclusion") {
@@ -1320,17 +1408,21 @@ document.addEventListener("DOMContentLoaded", () => {
             exclusionZones[index] = null; // Set to null instead of removing
             updateCoordinatesOutput();
             updateZoneTileDisplays();
+            updateEditingStatus();
           });
         }
       }
     }
   }
 
-  function adjustZoneCornerWithConstraints(zone, corner, dx, dy) {
+  function adjustZoneCornerWithConstraints(zone, corner, dx, dy, zoneType = "regular") {
     let newBeginX = zone.beginX;
     let newEndX = zone.endX;
     let newBeginY = zone.beginY;
     let newEndY = zone.endY;
+
+    // Limit zones to max of 6000
+    const maxY = 6000;
 
     if (corner === "top-left") {
       newBeginX += dx;
@@ -1347,12 +1439,12 @@ document.addEventListener("DOMContentLoaded", () => {
       newBeginX += dx;
       newEndY += dy;
       newBeginX = Math.max(-6000, Math.min(newBeginX, zone.endX));
-      newEndY = Math.min(7500, Math.max(newEndY, zone.beginY));
+      newEndY = Math.min(maxY, Math.max(newEndY, zone.beginY));
     } else if (corner === "bottom-right") {
       newEndX += dx;
       newEndY += dy;
       newEndX = Math.min(6000, Math.max(newEndX, zone.beginX));
-      newEndY = Math.min(7500, Math.max(newEndY, zone.beginY));
+      newEndY = Math.min(maxY, Math.max(newEndY, zone.beginY));
     }
 
     // Apply the new positions
@@ -2098,6 +2190,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupRefreshRateControls();
     setupCollapsibleSections();
     setupZoneTileSelection();
+    updateButtonStates();
   }
 
   // ==========================
@@ -2200,12 +2293,17 @@ document.addEventListener("DOMContentLoaded", () => {
       exclusionZones = [];
       persistentDots = []; // Optionally clear persistent dots after saving
       
+      // Exit edit mode
+      isEditMode = false;
+      
       // Reload data to get the updated HA zones
       await fetchLiveData();
       
       drawVisualization();
       updateCoordinatesOutput();
       updateZoneTileDisplays(); // Update the sidebar tiles after saving
+      updateEditingStatus(); // Clear the editing status
+      updateButtonStates();
     } catch (error) {
       console.error("Error saving zones:", error);
       alert("Failed to save zones.");
@@ -2399,9 +2497,15 @@ document.addEventListener("DOMContentLoaded", () => {
           exclusionZones = importedZones.haExclusionZones;
         }
 
+        // Enter edit mode since we have user zones
+        isEditMode = true;
+        
         drawVisualization();
         updateCoordinatesOutput();
-        alert("Zones Imported! Zones must be saved to apply!");
+        updateZoneTileDisplays();
+        updateEditingStatus();
+        updateButtonStates();
+        alert("Zones Imported! You are now in Edit Mode. Click 'Save Zones' to apply the imported zones.");
       };
 
       reader.readAsText(input.files[0]);
@@ -2412,43 +2516,144 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ==========================
-  // === Reset Zones ===
-  // === by charmines ===
+  // === Reset Changes ===
+  // === Clear user zones without affecting HA ===
   // ==========================
-  document.getElementById("resetZonesButton").addEventListener("click", resetZones);
-  function resetZones() {
+  document.getElementById("resetZonesButton").addEventListener("click", resetChanges);
+  function resetChanges() {
+    const hasUserZones = userZones.some(zone => zone !== null && zone !== undefined);
+    const hasUserExclusionZones = exclusionZones.some(zone => zone !== null && zone !== undefined);
+    
+    if (!hasUserZones && !hasUserExclusionZones) {
+      alert("No changes to reset. The canvas is already clear.");
+      return;
+    }
+    
     if (
       confirm(
-        "Are you sure you want to reset zones?\nThis will clear user zones but will not change applied (HA) zones"
+        "Are you sure you want to reset all changes?\n\n" +
+        "This will clear all unsaved zones but will not affect zones saved in Home Assistant."
       )
     ) {
       userZones = [];
       exclusionZones = [];
+      
+      // Exit edit mode
+      isEditMode = false;
+      
       drawVisualization();
       updateCoordinatesOutput();
+      updateZoneTileDisplays();
+      updateEditingStatus();
+      updateButtonStates();
+      
+      alert("Changes reset. Edit mode has been exited.");
     }
   }
 
   // ==========================
-  // === HA -> User Zones ===
-  // === by charmines ===
+  // === Edit Zones ===
+  // === Load HA zones for editing ===
   // ==========================
-  document.getElementById("haUserZonesButton").addEventListener("click", haUserZones);
-  async function haUserZones() {
-    for await (const zone of haZones) {
-      if (zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)
-        break;
-      const zoneIndex = haZones.indexOf(zone);
-      userZones[zoneIndex] = zone;
+  document.getElementById("editZonesButton").addEventListener("click", editZones);
+  async function editZones() {
+    // If already in edit mode, exit it
+    if (isEditMode) {
+      const hasUserZones = userZones.some(zone => zone !== null && zone !== undefined);
+      const hasUserExclusionZones = exclusionZones.some(zone => zone !== null && zone !== undefined);
+      
+      if (hasUserZones || hasUserExclusionZones) {
+        const confirmExit = confirm(
+          "You have unsaved changes that will be lost.\n\n" +
+          "Do you want to exit Edit Mode and discard your changes?"
+        );
+        if (!confirmExit) {
+          return;
+        }
+      }
+      
+      // Exit edit mode
+      isEditMode = false;
+      userZones = [];
+      exclusionZones = [];
+      drawVisualization();
+      updateCoordinatesOutput();
+      updateZoneTileDisplays();
+      updateEditingStatus();
+      updateButtonStates();
+      return;
     }
-    for await (const zone of haExclusionZones) {
-      if (zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)
-        break;
-      const zoneIndex = haExclusionZones.indexOf(zone);
-      exclusionZones[zoneIndex] = zone;
+    
+    // Check if there are existing user zones that would be overwritten
+    const hasUserZones = userZones.some(zone => zone !== null && zone !== undefined);
+    const hasUserExclusionZones = exclusionZones.some(zone => zone !== null && zone !== undefined);
+    
+    if (hasUserZones || hasUserExclusionZones) {
+      const confirmOverwrite = confirm(
+        "You have unsaved changes that will be lost.\n\n" +
+        "Do you want to discard your current changes and load the zones from Home Assistant for editing?"
+      );
+      if (!confirmOverwrite) {
+        return;
+      }
     }
-    drawVisualization();
-    updateCoordinatesOutput();
+    
+    // Count how many HA zones being loading
+    let loadedCount = 0;
+    
+    // Clear existing user zones
+    userZones = [];
+    exclusionZones = [];
+    
+    // Load HA regular zones into editable user zones
+    for (let i = 0; i < haZones.length; i++) {
+      const zone = haZones[i];
+      // Only load zones that have valid coordinates (not disabled/empty zones)
+      if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
+        // Ensure userZones array has enough slots
+        while (userZones.length <= i) {
+          userZones.push(null);
+        }
+        userZones[i] = {
+          beginX: zone.beginX,
+          beginY: zone.beginY,
+          endX: zone.endX,
+          endY: zone.endY,
+        };
+        loadedCount++;
+      }
+    }
+    
+    // Load HA exclusion zones into editable exclusion zones
+    for (let i = 0; i < haExclusionZones.length; i++) {
+      const zone = haExclusionZones[i];
+      // Only load zones that have valid coordinates (not disabled/empty zones)
+      if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
+        // Ensure exclusionZones array has enough slots
+        while (exclusionZones.length <= i) {
+          exclusionZones.push(null);
+        }
+        exclusionZones[i] = {
+          beginX: zone.beginX,
+          beginY: zone.beginY,
+          endX: zone.endX,
+          endY: zone.endY,
+        };
+        loadedCount++;
+      }
+    }
+    
+         // Enter edit mode
+     isEditMode = true;
+     
+     // Update the UI
+     drawVisualization();
+     updateCoordinatesOutput();
+     updateZoneTileDisplays();
+     updateEditingStatus();
+     updateButtonStates();
+    
+    
   }
 
   // ==========================
