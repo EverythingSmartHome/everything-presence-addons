@@ -1,3 +1,11 @@
+### 1.2.1
+- Implement zone edit mode @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/77
+- Fix zones being longer than max supported size @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/77
+- Fix zones saving when outside max dimensions @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/77
+- Fix exclusion zones not being deletable @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/77
+- Fix zones being deleted if outside max width by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/77
+- Improve mobile responsiveness by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/78
+
 ### 1.2.0
 - Add second exclusion zone by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/68
 - Add cleaner and more functional UI by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/73
