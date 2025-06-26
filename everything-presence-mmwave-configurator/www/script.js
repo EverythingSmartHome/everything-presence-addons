@@ -289,20 +289,30 @@ document.addEventListener("DOMContentLoaded", () => {
     
     if (isEditMode) {
       statusDiv.style.display = 'block';
+      statusDiv.offsetHeight;
+      statusDiv.classList.add('show');
+      
       if (hasChanges) {
         const zoneCount = userZones.filter(zone => zone !== null && zone !== undefined).length;
         const exclusionCount = exclusionZones.filter(zone => zone !== null && zone !== undefined).length;
         const totalCount = zoneCount + exclusionCount;
         
-        statusDiv.className = 'has-changes';
-        statusText.textContent = `Edit Mode: ${totalCount} unsaved zone${totalCount !== 1 ? 's' : ''} • Click "Save Zones" to apply changes`;
+        statusDiv.classList.add('has-changes');
+        statusText.textContent = `${totalCount} unsaved zone${totalCount !== 1 ? 's' : ''} • Click "Save Zones" to apply`;
       } else {
-        statusDiv.className = '';
-        statusText.textContent = 'Edit Mode: You can now draw, modify, or delete zones • Click "Save Zones" when finished';
+        statusDiv.classList.remove('has-changes');
+        statusText.textContent = 'Edit Mode: Draw, modify, or delete zones • Click "Save Zones" when finished';
       }
     } else {
-      statusDiv.style.display = 'none';
-      statusDiv.className = '';
+      statusDiv.classList.remove('show');
+      statusDiv.classList.remove('has-changes');
+      
+      // Hide completely
+      setTimeout(() => {
+        if (!statusDiv.classList.contains('show')) {
+          statusDiv.style.display = 'none';
+        }
+      }, 300);
     }
   }
 
@@ -589,8 +599,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const button = document.createElement("button");
     button.id = "persistenceToggleButton";
     button.textContent = "Enable Persistence";
-    // Style the button as needed
-    button.style.marginLeft = "10px";
     // Append to a suitable container, e.g., next to saveZonesButton
     saveZonesButton.parentElement.appendChild(button);
   }
@@ -690,7 +698,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw HA zones in view mode
     if (!isEditMode) {
       haZones.forEach((zone, index) => {
-        drawZone(zone, index, "ha");
+        // Only draw zones that have actual coordinates (not default 0,0,0,0)
+        if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
+          drawZone(zone, index, "ha");
+        }
       });
     }
 
@@ -707,7 +718,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw HA Exclusion zones in view mode
     if (!isEditMode) {
       haExclusionZones.forEach((zone, index) => {
-        drawZone(zone, index, "haExclusion");
+        // Only draw zones that have actual coordinates (not default 0,0,0,0)
+        if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
+          drawZone(zone, index, "haExclusion");
+        }
       });
     }
 
@@ -1034,6 +1048,11 @@ document.addEventListener("DOMContentLoaded", () => {
   canvas.addEventListener("mousemove", onMouseMove);
   canvas.addEventListener("mouseup", onMouseUp);
   canvas.addEventListener("contextmenu", onRightClick);
+  
+  // Touch event listeners for mobile
+  canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+  canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+  canvas.addEventListener("touchend", onTouchEnd, { passive: false });
   canvas.addEventListener("mouseleave", () => {
     // Clear hover states when mouse leaves canvas
     if (hoveredZone || hoveredCorner) {
@@ -1415,6 +1434,98 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Touch event handlers for mobile
+  let touchTimer = null;
+  let touchStartPos = null;
+  
+  function onTouchStart(e) {
+    e.preventDefault(); // Prevent scrolling and zooming
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      touchStartPos = { x: touch.clientX, y: touch.clientY };
+      
+      // Set up long press detection for mobile zone deletion
+      touchTimer = setTimeout(() => {
+        if (isEditMode) {
+          const mousePos = getMousePos(canvas, touch);
+          const zoneInfo = getZoneAtPosition(mousePos);
+          if (zoneInfo !== null) {
+            const { index, zoneType } = zoneInfo;
+            if (zoneType === "user") {
+              if (confirm(`Delete User Zone ${index + 1}?`)) {
+                const zone = userZones[index];
+                animateZoneDeletion("user", index, zone, () => {
+                  userZones[index] = null;
+                  updateCoordinatesOutput();
+                  updateZoneTileDisplays();
+                  updateEditingStatus();
+                });
+              }
+            } else if (zoneType === "exclusion") {
+              if (confirm(`Delete Exclusion Zone ${index + 1}?`)) {
+                const zone = exclusionZones[index];
+                animateZoneDeletion("exclusion", index, zone, () => {
+                  exclusionZones[index] = null;
+                  updateCoordinatesOutput();
+                  updateZoneTileDisplays();
+                  updateEditingStatus();
+                });
+              }
+            }
+          }
+        }
+      }, 800); // 800ms long press
+      
+      const mouseEvent = new MouseEvent('mousedown', {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+        button: 0
+      });
+      onMouseDown(mouseEvent);
+    }
+  }
+
+  function onTouchMove(e) {
+    e.preventDefault(); // Prevent scrolling
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      
+      // Cancel long press if user moves finger too much
+      if (touchTimer && touchStartPos) {
+        const dx = Math.abs(touch.clientX - touchStartPos.x);
+        const dy = Math.abs(touch.clientY - touchStartPos.y);
+        if (dx > 10 || dy > 10) { // 10px tolerance
+          clearTimeout(touchTimer);
+          touchTimer = null;
+        }
+      }
+      
+      const mouseEvent = new MouseEvent('mousemove', {
+        clientX: touch.clientX,
+        clientY: touch.clientY
+      });
+      onMouseMove(mouseEvent);
+    }
+  }
+
+  function onTouchEnd(e) {
+    e.preventDefault();
+    
+    // Clear long press timer
+    if (touchTimer) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
+    }
+    touchStartPos = null;
+    
+    const mouseEvent = new MouseEvent('mouseup', {
+      clientX: 0,
+      clientY: 0,
+      button: 0
+    });
+    onMouseUp(mouseEvent);
+  }
+
   function adjustZoneCornerWithConstraints(zone, corner, dx, dy, zoneType = "regular") {
     let newBeginX = zone.beginX;
     let newEndX = zone.endX;
@@ -1456,10 +1567,50 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function getMousePos(canvas, evt) {
     const rect = canvas.getBoundingClientRect();
+    
+    // Calculate the ratio between the canvas internal size and display size
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    // Get raw coordinates and scale them to match canvas coordinate system
+    const rawX = evt.clientX - rect.left;
+    const rawY = evt.clientY - rect.top;
+    
     return {
-      x: evt.clientX - rect.left,
-      y: evt.clientY - rect.top,
+      x: rawX * scaleX,
+      y: rawY * scaleY,
     };
+  }
+
+  // Add responsive canvas sizing function
+  function updateCanvasSize() {
+    const container = document.getElementById('canvas-container');
+    const containerRect = container.getBoundingClientRect();
+    
+    // Calculate optimal canvas size based on container
+    let targetWidth = Math.min(960, containerRect.width * 0.95);
+    let targetHeight = (targetWidth * 600) / 960; // Maintain aspect ratio
+    
+    // For mobile devices
+    if (window.innerWidth <= 480) {
+      targetWidth = Math.min(containerRect.width * 0.98, 400);
+      targetHeight = (targetWidth * 600) / 960;
+    } else if (window.innerWidth <= 1200) {
+      targetWidth = Math.min(containerRect.width * 0.95, 600);
+      targetHeight = (targetWidth * 600) / 960;
+    }
+    
+    // Update canvas display size
+    canvas.style.width = targetWidth + 'px';
+    canvas.style.height = targetHeight + 'px';
+    
+    // Keep internal resolution at 960x600 for consistent coordinate system
+    // This way scale functions work correctly
+    canvas.width = 960;
+    canvas.height = 600;
+    
+    // Redraw after resize
+    drawVisualization();
   }
 
   function getZoneAtPosition(pos) {
@@ -2025,27 +2176,66 @@ document.addEventListener("DOMContentLoaded", () => {
   // === Target Tracking ===
   // ==========================
   function updateTargetTrackingInfo() {
-    // Assuming targets array has 3 targets
+    updateTargetCards();
+  }
+
+  function updateTargetCards() {
+    const container = document.querySelector('#target-tracking-info .collapsible-content');
+    
+    // Remove existing cards
+    const existingCards = container.querySelectorAll('.target-card');
+    existingCards.forEach(card => card.remove());
+    
+    // Create cards for each target
     targets.forEach((target) => {
       const targetNumber = target.number;
       if (targetNumber >= 1 && targetNumber <= 3) {
-        document.getElementById(`target-${targetNumber}-status`).textContent =
-          target.active ? "Active" : "Inactive";
-        document.getElementById(`target-${targetNumber}-x`).textContent =
-          target.x;
-        document.getElementById(`target-${targetNumber}-y`).textContent =
-          target.y;
-        document.getElementById(`target-${targetNumber}-speed`).textContent =
-          target.speed;
-        document.getElementById(
-          `target-${targetNumber}-resolution`,
-        ).textContent = target.resolution;
-        document.getElementById(`target-${targetNumber}-angle`).textContent =
-          target.angle;
-        document.getElementById(`target-${targetNumber}-distance`).textContent =
-          target.distance;
+        const card = createTargetCard(target);
+        container.appendChild(card);
       }
     });
+  }
+
+  function createTargetCard(target) {
+    const card = document.createElement('div');
+    card.className = 'target-card';
+    
+    card.innerHTML = `
+      <div class="target-header">
+        <div class="target-name">Target ${target.number}</div>
+        <div class="target-status ${target.active ? 'active' : 'inactive'}">
+          ${target.active ? 'Active' : 'Inactive'}
+        </div>
+      </div>
+      <div class="target-grid">
+        <div class="target-item">
+          <div class="target-label">X Coordinate</div>
+          <div class="target-value">${target.x} mm</div>
+        </div>
+        <div class="target-item">
+          <div class="target-label">Y Coordinate</div>
+          <div class="target-value">${target.y} mm</div>
+        </div>
+        <div class="target-item">
+          <div class="target-label">Speed</div>
+          <div class="target-value">${target.speed} mm/s</div>
+        </div>
+        <div class="target-item">
+          <div class="target-label">Resolution</div>
+          <div class="target-value">${target.resolution}</div>
+        </div>
+        <div class="target-item">
+          <div class="target-label">Angle</div>
+          <div class="target-value">${target.angle}°</div>
+        </div>
+        <div class="target-item">
+          <div class="target-label">Distance</div>
+          <div class="target-value">${target.distance} mm</div>
+        </div>
+      </div>
+    `;
+    
+    return card;
   }
 
   // ==========================
@@ -2180,6 +2370,226 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function setupMobileFullscreen() {
+    const fullscreenButton = document.getElementById('fullscreen-button');
+    const canvasContainer = document.getElementById('canvas-container');
+    const canvas = document.getElementById('visualizationCanvas');
+    
+    if (!fullscreenButton) return;
+    
+    let isFullscreen = false;
+    let orientationHintShown = false;
+    
+    // Show orientation hint
+    function showOrientationHint() {
+      if (orientationHintShown) return;
+      orientationHintShown = true;
+      
+      // Create a temporary overlay hint
+      const hint = document.createElement('div');
+      hint.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        z-index: 10000;
+        text-align: center;
+        font-size: 16px;
+        max-width: 300px;
+        backdrop-filter: blur(10px);
+      `;
+      hint.innerHTML = `
+        <div style="margin-bottom: 15px; font-size: 24px;">📱 ↻</div>
+        <div style="font-weight: 600; margin-bottom: 8px;">Rotate to Landscape</div>
+        <div style="font-size: 14px; opacity: 0.9;">For better zone editing experience</div>
+        <div style="margin-top: 10px; font-size: 12px; opacity: 0.7;">This hint will auto-hide in 4 seconds</div>
+      `;
+      
+      document.body.appendChild(hint);
+      
+      setTimeout(() => {
+        if (hint.parentNode) {
+          hint.parentNode.removeChild(hint);
+        }
+        orientationHintShown = false;
+      }, 4000);
+    }
+    
+    function isLandscape() {
+      if (screen.orientation) {
+        return screen.orientation.angle === 90 || screen.orientation.angle === -90 || screen.orientation.angle === 270;
+      }
+      return window.innerWidth > window.innerHeight;
+    }
+    
+    // Update fullscreen button icon
+    function updateFullscreenIcon() {
+      const icon = fullscreenButton.querySelector('.fullscreen-icon');
+      icon.textContent = isFullscreen ? '⛷' : '⛶'; // Exit vs Enter fullscreen icons
+      fullscreenButton.setAttribute('aria-label', 
+        isFullscreen ? 'Exit fullscreen mode' : 'Enter fullscreen mode'
+      );
+    }
+    
+    // Enter fullscreen mode
+    async function enterFullscreen() {
+      try {
+        // Request fullscreen
+        if (canvasContainer.requestFullscreen) {
+          await canvasContainer.requestFullscreen();
+        } else if (canvasContainer.webkitRequestFullscreen) {
+          await canvasContainer.webkitRequestFullscreen();
+        } else if (canvasContainer.mozRequestFullScreen) {
+          await canvasContainer.mozRequestFullScreen();
+        } else if (canvasContainer.msRequestFullscreen) {
+          await canvasContainer.msRequestFullscreen();
+        }
+        
+        // Request landscape orientation
+        if (screen.orientation && screen.orientation.lock) {
+          try {
+            await screen.orientation.lock('landscape-primary');
+            console.log('Locked to landscape-primary');
+          } catch (e) {
+            try {
+              // Fallback to general landscape
+              await screen.orientation.lock('landscape');
+              console.log('Locked to landscape');
+            } catch (e2) {
+              console.log('Orientation lock failed:', e2);
+              // Show user message to rotate manually
+              showOrientationHint();
+            }
+          }
+        } else {
+          console.log('Screen orientation API not available');
+          showOrientationHint();
+        }
+        
+        // Apply fullscreen styles
+        canvasContainer.classList.add('fullscreen');
+        isFullscreen = true;
+        updateFullscreenIcon();
+        
+        setTimeout(() => {
+          if (!isLandscape()) {
+            showOrientationHint();
+          }
+        }, 500);
+        
+        // Resize canvas for fullscreen
+        setTimeout(() => {
+          updateCanvasSize();
+        }, 100);
+        
+      } catch (error) {
+        console.log('Failed to enter fullscreen:', error);
+      }
+    }
+    
+    // Exit fullscreen mode
+    async function exitFullscreen() {
+      try {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+          await document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+          await document.msExitFullscreen();
+        }
+      } catch (error) {
+        console.log('Failed to exit fullscreen:', error);
+      }
+    }
+    
+    // Handle fullscreen button
+    fullscreenButton.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      if (isFullscreen) {
+        exitFullscreen();
+      } else {
+        enterFullscreen();
+      }
+    });
+    
+    // Handle fullscreen change events
+    const fullscreenChangeHandler = () => {
+      const isCurrentlyFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      );
+      
+      if (!isCurrentlyFullscreen && isFullscreen) {
+        canvasContainer.classList.remove('fullscreen');
+        isFullscreen = false;
+        updateFullscreenIcon();
+        
+        // Restore original canvas size
+        updateCanvasSize();
+        
+        if (screen.orientation && screen.orientation.unlock) {
+          try {
+            screen.orientation.unlock();
+          } catch (e) {
+            console.log('Orientation unlock not supported or failed:', e);
+          }
+        }
+      }
+    };
+    
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', fullscreenChangeHandler);
+    document.addEventListener('webkitfullscreenchange', fullscreenChangeHandler);
+    document.addEventListener('mozfullscreenchange', fullscreenChangeHandler);
+    document.addEventListener('MSFullscreenChange', fullscreenChangeHandler);
+    
+    // Handle orientation changes in fullscreen
+    window.addEventListener('orientationchange', () => {
+      if (isFullscreen) {
+        setTimeout(() => {
+          updateCanvasSize();
+          if (isLandscape()) {
+            console.log('Device is now in landscape orientation');
+          }
+        }, 500);
+      }
+    });
+    
+    // Listen for screen orientation changes
+    if (screen.orientation) {
+      screen.orientation.addEventListener('change', () => {
+        if (isFullscreen) {
+          setTimeout(() => {
+            updateCanvasSize();
+            console.log('Orientation changed to:', screen.orientation.angle + '°');
+          }, 300);
+        }
+      });
+    }
+    
+    // Handle window resize in fullscreen
+    window.addEventListener('resize', () => {
+      if (isFullscreen) {
+        setTimeout(() => {
+          updateCanvasSize();
+        }, 100);
+      }
+    });
+    
+    // Initialize icon
+    updateFullscreenIcon();
+  }
+
   // ==========================
   // === Initialize the App ===
   // ==========================
@@ -2190,6 +2600,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupRefreshRateControls();
     setupCollapsibleSections();
     setupZoneTileSelection();
+    setupMobileFullscreen();
     updateButtonStates();
   }
 
@@ -2725,4 +3136,17 @@ document.addEventListener("DOMContentLoaded", () => {
   // === Initialize the App ===
   // ==========================
   init();
+  
+  // Initialize responsive canvas sizing after DOM setup
+  updateCanvasSize();
+  
+  // Add resize handler for responsive canvas and target tracking
+  window.addEventListener('resize', () => {
+    // Debounce resize events
+    clearTimeout(window.resizeTimeout);
+    window.resizeTimeout = setTimeout(() => {
+      updateCanvasSize();
+      updateTargetTrackingInfo(); // Update target display format on resize
+    }, 150);
+  });
 });

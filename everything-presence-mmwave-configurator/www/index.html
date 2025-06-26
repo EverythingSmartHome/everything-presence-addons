@@ -3,6 +3,9 @@
 
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Everything Presence Lite - Zone Configurator</title>
   <link rel="stylesheet" href="styles.css">
   <!-- Include Google Fonts -->
@@ -125,6 +128,16 @@
         <!-- Visualization Canvas -->
         <div id="canvas-container">
           <canvas id="visualizationCanvas" width="960" height="600"></canvas>
+          
+          <!-- Edit Mode Status Overlay - floating in top-right corner -->
+          <div id="editing-status" style="display: none;">
+            <span id="editing-status-text"></span>
+          </div>
+          
+          <!-- Mobile Fullscreen Button - only shows on mobile -->
+          <button id="fullscreen-button" class="mobile-only" aria-label="Enter fullscreen mode">
+            <span class="fullscreen-icon">⛶</span>
+          </button>
         </div>
 
         <!-- Zone Selection Sidebar -->
@@ -215,9 +228,6 @@
       </div>
 
       <div id="save-controls">
-      <div id="editing-status" style="margin-bottom: 10px; padding: 8px; border-radius: 4px; font-weight: 500; display: none;">
-        <span id="editing-status-text"></span>
-      </div>
       <div id="save-control-group">
         <button id="editZonesButton">Edit Zones</button>
         <button id="saveZonesButton" disabled>Save Zones</button>
