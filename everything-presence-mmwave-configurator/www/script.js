@@ -12,6 +12,507 @@ document.addEventListener("DOMContentLoaded", () => {
   let userZones = [];
   let exclusionZones = [];
 
+  // ==========================
+  // WebSocket Client Manager
+  // ==========================
+  class DirectHAWebSocketManager {
+    constructor() {
+      this.ws = null;
+      this.connected = false;
+      this.authenticated = false;
+      this.reconnectAttempts = 0;
+      this.maxReconnectAttempts = 5;
+      this.reconnectDelay = 2000;
+      this.entityStates = new Map();
+      this.updateTimeout = null;
+      this.messageId = 1;
+      this.subscriptionId = null;
+      this.supervisorToken = null;
+      this.useWebSocket = true; // Feature flag
+    }
+
+    async connect() {
+      try {
+        console.log('🔗 Attempting WebSocket connection via backend proxy');
+        
+        // Test if backend can provide WebSocket proxy
+        const testResult = await this.testBackendWebSocket();
+        
+        if (testResult.success) {
+          this.connectViaBackendProxy();
+        } else {
+          console.log('Backend WebSocket proxy not available, falling back to REST API');
+          this.fallbackToPolling();
+        }
+        
+      } catch (error) {
+        console.error('Failed to initialize WebSocket:', error);
+        this.fallbackToPolling();
+      }
+    }
+
+    async testBackendWebSocket() {
+      console.log('✅ Backend WebSocket proxy available via /ws route');
+      return { success: true, message: 'Backend WebSocket proxy available' };
+    }
+
+    connectViaBackendProxy() {
+      // Calculate WebSocket URL for backend proxy
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const basePath = window.location.pathname.replace(/\/[^\/]*$/, '/');
+      const wsUrl = `${protocol}//${window.location.host}${basePath}ws`;
+      
+      try {
+        this.ws = new WebSocket(wsUrl);
+        this.setupBackendProxyEventHandlers();
+      } catch (error) {
+        console.error('Failed to create backend proxy WebSocket:', error);
+        this.fallbackToPolling();
+      }
+    }
+
+    setupBackendProxyEventHandlers() {
+      this.ws.onopen = () => {
+        this.connected = true;
+        this.authenticated = true;
+        this.reconnectAttempts = 0;
+        this.updateConnectionStatus();
+        this.subscribeToEntityUpdates();
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          
+          if (message.type === 'event') {
+            this.handleEntityUpdate(message.event);
+          } else if (message.type === 'result') {
+            this.handleResult(message);
+          } else {
+            console.log('Backend proxy message:', message.type);
+          }
+        } catch (error) {
+          console.error('Error parsing backend proxy message:', error);
+        }
+      };
+
+      this.ws.onclose = (event) => {
+        this.connected = false;
+        this.authenticated = false;
+        this.updateConnectionStatus();
+        
+        // Try to reconnect
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          setTimeout(() => this.connectViaBackendProxy(), this.reconnectDelay);
+        } else {
+          this.fallbackToPolling();
+        }
+      };
+
+      this.ws.onerror = (error) => {
+        console.error('Backend WebSocket proxy error:', error);
+        this.updateConnectionStatus();
+      };
+    }
+
+    setupEventHandlers() {
+      this.ws.onopen = () => {
+        this.connected = true;
+        this.reconnectAttempts = 0;
+        this.updateConnectionStatus();
+      };
+
+      this.ws.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        this.handleMessage(message);
+      };
+
+      this.ws.onclose = (event) => {
+        this.connected = false;
+        this.authenticated = false;
+        this.updateConnectionStatus();
+        
+        // Error code 1006 usually means the connection was refused
+        if (event.code === 1006) {
+          this.fallbackToPolling();
+          return;
+        }
+        
+        // Try to reconnect
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          setTimeout(() => this.connect(), this.reconnectDelay);
+        } else {
+          this.fallbackToPolling();
+        }
+      };
+
+      this.ws.onerror = (error) => {
+        console.error('HA WebSocket error:', error);
+        this.updateConnectionStatus();
+      };
+    }
+
+    handleMessage(message) {
+      // This method is only used for direct connections (not backend proxy)
+      if (message.type === 'auth_required') {
+        console.error('Direct WebSocket connection requires authentication - falling back to REST API');
+        this.fallbackToPolling();
+      } else if (message.type === 'auth_ok') {
+        this.authenticated = true;
+        this.updateConnectionStatus();
+        this.subscribeToEntityUpdates();
+      } else if (message.type === 'auth_invalid') {
+        console.error('HA WebSocket authentication failed - falling back to REST API');
+        this.fallbackToPolling();
+      } else if (message.type === 'event') {
+        this.handleEntityUpdate(message.event);
+      } else if (message.type === 'result') {
+        this.handleResult(message);
+      }
+    }
+
+    sendMessage(message) {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (message.type !== 'auth') {
+          message.id = this.messageId++;
+        }
+        this.ws.send(JSON.stringify(message));
+        return message.id;
+      }
+      return null;
+    }
+
+    subscribeToEntityUpdates() {
+      if (!this.authenticated) return;
+      
+      // Subscribe to state_changed events for EPL entities
+      const subscriptionMessage = {
+        type: 'subscribe_events',
+        event_type: 'state_changed'
+      };
+      
+      this.subscriptionId = this.sendMessage(subscriptionMessage);
+      console.log('Subscribed to HA state changes');
+      
+      // Request initial states
+      this.requestInitialStates();
+    }
+
+    requestInitialStates() {
+      if (!this.authenticated || selectedEntities.length === 0) return;
+      
+      // Get current states for all EPL entities
+      this.sendMessage({
+        type: 'get_states'
+      });
+    }
+
+    handleResult(message) {
+      if (message.success && Array.isArray(message.result)) {
+        // Clear existing entity states
+        this.entityStates.clear();
+        
+        // Filter to relevant entities and store them
+        const relevantEntityIds = selectedEntities.map(e => e.id);
+        message.result
+          .filter(entity => relevantEntityIds.includes(entity.entity_id))
+          .forEach(entity => {
+            this.entityStates.set(entity.entity_id, entity);
+          });
+
+        // Process initial data
+        this.processEntityData();
+      }
+    }
+
+    handleEntityUpdate(event) {
+      if (event.event_type !== 'state_changed') return;
+      
+      const entityId = event.data.entity_id;
+      const newState = event.data.new_state;
+      
+      // Check if this is one of EPL entities
+      if (this.isRelevantEntity(entityId) && newState) {
+        // Update the entity state
+        this.entityStates.set(entityId, newState);
+
+        // Debounce
+        if (this.updateTimeout) {
+          clearTimeout(this.updateTimeout);
+        }
+        
+        this.updateTimeout = setTimeout(() => {
+          this.processEntityData();
+        }, 50); // 50ms debounce
+      }
+    }
+
+    isRelevantEntity(entityId) {
+      return selectedEntities.some(entity => entity.id === entityId);
+    }
+
+    processEntityData() {
+      // Convert Map to array format
+      const entityStates = Array.from(this.entityStates.entries()).map(([entityId, data]) => ({
+        entity_id: entityId,
+        state: data.state,
+        attributes: data.attributes,
+        last_changed: data.last_changed,
+        last_updated: data.last_updated
+      }));
+
+      // Processing logic
+      try {
+        const reconstructed = reconstructZones(entityStates);
+        haZones = reconstructed.regularZones;
+        haExclusionZones = reconstructed.exclusionZones;
+
+        // Process targets
+        this.processTargets(entityStates);
+
+        // Update detection range and installation angle
+        this.updateDetectionSettings(entityStates);
+
+        // Handle persistence
+        this.handlePersistence();
+
+        // Update UI
+        drawVisualization();
+        updateCoordinatesOutput();
+        updateZoneTileDisplays();
+        updateTargetTrackingInfo();
+
+      } catch (error) {
+        console.error('Error processing entity data:', error);
+      }
+    }
+
+    processTargets(entityStates) {
+      const targetNumbers = [1, 2, 3];
+      const updatedTargets = targetNumbers.map((targetNumber) => {
+        // Find corresponding entities for the target
+        const activeEntity = selectedEntities.find((entity) =>
+          entity.id.includes(`target_${targetNumber}_active`)
+        );
+        const xEntity = selectedEntities.find((entity) =>
+          entity.id.includes(`target_${targetNumber}_x`)
+        );
+        const yEntity = selectedEntities.find((entity) =>
+          entity.id.includes(`target_${targetNumber}_y`)
+        );
+        const speedEntity = selectedEntities.find((entity) =>
+          entity.id.includes(`target_${targetNumber}_speed`)
+        );
+        const resolutionEntity = selectedEntities.find((entity) =>
+          entity.id.includes(`target_${targetNumber}_resolution`)
+        );
+        const angleEntity = selectedEntities.find((entity) =>
+          entity.id.includes(`target_${targetNumber}_angle`)
+        );
+        const distanceEntity = selectedEntities.find((entity) =>
+          entity.id.includes(`target_${targetNumber}_distance`)
+        );
+
+        // Extract data from entityStates
+        const activeData = entityStates.find(
+          (entity) => entity.entity_id === (activeEntity ? activeEntity.id : "")
+        );
+        const xData = entityStates.find(
+          (entity) => entity.entity_id === (xEntity ? xEntity.id : "")
+        );
+        const yData = entityStates.find(
+          (entity) => entity.entity_id === (yEntity ? yEntity.id : "")
+        );
+        const speedData = entityStates.find(
+          (entity) => entity.entity_id === (speedEntity ? speedEntity.id : "")
+        );
+        const resolutionData = entityStates.find(
+          (entity) => entity.entity_id === (resolutionEntity ? resolutionEntity.id : "")
+        );
+        const angleData = entityStates.find(
+          (entity) => entity.entity_id === (angleEntity ? angleEntity.id : "")
+        );
+        const distanceData = entityStates.find(
+          (entity) => entity.entity_id === (distanceEntity ? distanceEntity.id : "")
+        );
+
+        return {
+          number: targetNumber,
+          active: activeData && activeData.state === "on",
+          x: getEntityStateMM(xData),
+          y: getEntityStateMM(yData),
+          speed: getEntityStateMM(speedData),
+          resolution: resolutionData ? resolutionData.state : "N/A",
+          angle: angleData ? parseFloat(angleData.state) || 0 : 0,
+          distance: getEntityStateMM(distanceData),
+        };
+      });
+
+      targets = updatedTargets;
+    }
+
+    updateDetectionSettings(entityStates) {
+      const newDetectionRange = entityStates.find(
+        (entity) => entity.entity_id.endsWith(`max_distance`)
+      )?.state ?? 600;
+      detectionRange = newDetectionRange * 10; // Convert from cm to mm
+
+      let newInstallationAngle = Number(
+        entityStates.find((entity) =>
+          entity.entity_id.endsWith(`installation_angle`),
+        )?.state ?? 0,
+      );
+
+      if (installationAngle != newInstallationAngle) {
+        installationAngle = newInstallationAngle;
+        calculateOffsetY();
+      }
+    }
+
+    handlePersistence() {
+      if (isPersistenceEnabled) {
+        targets.forEach((target) => {
+          if (target.active) {
+            const lastDot = persistentDots[persistentDots.length - 1];
+            if (!lastDot || lastDot.x !== target.x || lastDot.y !== target.y) {
+              persistentDots.push({ x: target.x, y: target.y });
+              if (persistentDots.length > 1000) {
+                persistentDots.shift(); // Remove oldest dot
+              }
+            }
+          }
+        });
+      }
+    }
+
+    updateConnectionStatus() {
+      let statusText = '';
+      let statusClass = '';
+
+      if (this.connected && this.authenticated) {
+        statusText = 'Status: Connected (Real-time)';
+        statusClass = 'connected';
+      } else if (this.connected && !this.authenticated) {
+        statusText = 'Status: Connected, Authentication Failed';
+        statusClass = 'warning';
+      } else {
+        statusText = 'Status: Disconnected (Polling)';
+        statusClass = 'disconnected';
+      }
+
+      const statusIndicator = document.getElementById('statusIndicator');
+      if (statusIndicator) {
+        statusIndicator.textContent = statusText;
+        statusIndicator.className = statusClass;
+      }
+
+      this.updateRefreshControlsVisibility();
+    }
+
+     updateRefreshControlsVisibility() {
+       const refreshControls = document.querySelector('.refresh-controls');
+       const refreshRateInput = document.getElementById('refreshRateInput');
+       const setRefreshRateButton = document.getElementById('setRefreshRateButton');
+
+       if (this.useWebSocket && this.isConnected()) {
+         // Hide refresh rate controls when using WebSockets
+         if (refreshControls) {
+           refreshControls.style.opacity = '0.5';
+           refreshControls.style.pointerEvents = 'none';
+         }
+         if (refreshRateInput) refreshRateInput.disabled = true;
+         if (setRefreshRateButton) setRefreshRateButton.disabled = true;
+       } else {
+         // Show refresh rate controls when using REST API
+         if (refreshControls) {
+           refreshControls.style.opacity = '1';
+           refreshControls.style.pointerEvents = 'auto';
+         }
+         if (refreshRateInput) refreshRateInput.disabled = false;
+         if (setRefreshRateButton) setRefreshRateButton.disabled = false;
+       }
+     }
+
+    fallbackToPolling() {
+      console.log('Using REST API polling');
+      this.useWebSocket = false;
+      this.disconnect();
+      
+      // Start polling
+      if (selectedEntities.length > 0) {
+        startLiveRefresh();
+      }
+    }
+
+    disconnect() {
+      if (this.ws) {
+        this.ws.close();
+        this.ws = null;
+      }
+      this.connected = false;
+      this.authenticated = false;
+      this.updateConnectionStatus();
+    }
+
+    onDeviceSelected() {
+      if (this.connected && this.authenticated && selectedEntities.length > 0) {
+        this.requestInitialStates();
+      }
+    }
+
+
+
+    isConnected() {
+      return this.connected && this.authenticated;
+    }
+  }
+
+  // Global WebSocket manager instance
+  const wsManager = new DirectHAWebSocketManager();
+
+  // ==========================
+  // WebSocket Toggle Controls
+  // ==========================
+  function setupWebSocketToggle() {
+    const wsToggleButton = document.getElementById('websocket-toggle');
+    if (!wsToggleButton) return;
+
+    wsToggleButton.addEventListener('click', () => {
+      if (wsManager.useWebSocket) {
+        // Switch to REST API mode
+        wsManager.useWebSocket = false;
+        wsManager.disconnect();
+        wsToggleButton.textContent = '📡';
+        wsToggleButton.style.backgroundColor = 'var(--warning-color)';
+        wsToggleButton.title = 'Easter egg: Currently using REST API - Click to switch to WebSocket';
+        
+        // Start REST API polling if entities are selected
+        if (selectedEntities.length > 0 && isRefreshing) {
+          startLiveRefresh();
+        }
+      } else {
+        // Switch to WebSocket mode
+        wsManager.useWebSocket = true;
+        wsToggleButton.textContent = '🔗';
+        wsToggleButton.style.backgroundColor = 'var(--primary-color)';
+        wsToggleButton.title = 'Easter egg: Currently using WebSocket - Click to switch to REST API';
+        
+        // Stop REST API polling and start WebSocket
+        stopLiveRefresh();
+        wsManager.connect();
+      }
+    });
+
+    // Set initial button state
+    wsToggleButton.textContent = wsManager.useWebSocket ? '🔗' : '📡';
+    wsToggleButton.style.backgroundColor = wsManager.useWebSocket ? 'var(--primary-color)' : 'var(--warning-color)';
+    wsToggleButton.title = wsManager.useWebSocket ? 
+      'Easter egg: Currently using WebSocket - Click to switch to REST API' : 
+      'Easter egg: Currently using REST API - Click to switch to WebSocket';
+  }
+
   // Variables for live refresh
   const refreshRateInput = document.getElementById("refreshRateInput");
   const setRefreshRateButton = document.getElementById("setRefreshRateButton");
@@ -1796,6 +2297,12 @@ document.addEventListener("DOMContentLoaded", () => {
       darkModeToggle.textContent = "🌞";
     }
 
+    // Easter egg variables
+    let clickCount = 0;
+    let clickTimer = null;
+    const clickWindow = 3000; // 3 seconds
+    const triggersNeeded = 5; // 5 clicks to reveal easter egg
+
     darkModeToggle.addEventListener("click", () => {
       documentRoot.classList.toggle("dark-mode");
       document.body.classList.toggle("dark-mode");
@@ -1809,9 +2316,81 @@ document.addEventListener("DOMContentLoaded", () => {
         localStorage.setItem("darkMode", "disabled");
       }
 
+      // Easter egg logic
+      clickCount++;
+      
+      // Clear previous timer and set new one
+      if (clickTimer) clearTimeout(clickTimer);
+      
+      clickTimer = setTimeout(() => {
+        clickCount = 0; // Reset count after time window
+      }, clickWindow);
+
+      // Check if button should be revealed
+      if (clickCount >= triggersNeeded) {
+        revealEasterEgg();
+        clickCount = 0; // Reset counter
+        if (clickTimer) clearTimeout(clickTimer);
+      }
+
       // Redraw visualization to reflect theme change
       drawVisualization();
     });
+  }
+
+  // Button reveal function
+  function revealEasterEgg() {
+    const easterEggButton = document.querySelector('.easter-egg-toggle');
+    if (easterEggButton && !easterEggButton.classList.contains('revealed')) {
+      easterEggButton.classList.add('revealed');
+      
+      // Store button state
+      localStorage.setItem('easterEggRevealed', 'true');
+      
+      // Show notification
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        z-index: 10000;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+      `;
+      notification.textContent = '🎉 Easter egg unlocked! Connection mode toggle revealed!';
+      document.body.appendChild(notification);
+      
+      // Animate in
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+      
+      // Remove after 4 seconds
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          document.body.removeChild(notification);
+        }, 300);
+      }, 4000);
+    }
+  }
+
+  // Check if button was previously revealed
+  function checkEasterEggState() {
+    const isRevealed = localStorage.getItem('easterEggRevealed') === 'true';
+    if (isRevealed) {
+      const easterEggButton = document.querySelector('.easter-egg-toggle');
+      if (easterEggButton) {
+        easterEggButton.classList.add('revealed');
+      }
+    }
   }
 
   // ==========================
@@ -1881,11 +2460,39 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
+        // Notify backend about selected entities for WebSocket
+        await notifyBackendOfSelectedEntities();
+
         startLiveRefresh();
       } catch (e) {
         console.error("Error parsing entities JSON:", e);
         alert("Failed to parse entities data.");
       }
+    }
+  }
+
+  // Function to notify backend about selected entities for WebSocket
+  async function notifyBackendOfSelectedEntities() {
+    try {
+      const entityIds = selectedEntities.map(e => e.id);
+      const response = await fetch('api/selected-entities', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          entity_ids: entityIds
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`✅ Backend updated with ${result.count} selected entities for WebSocket filtering`);
+      } else {
+        console.warn('❌ Failed to notify backend of selected entities');
+      }
+    } catch (error) {
+      console.warn('❌ Error notifying backend of selected entities:', error);
     }
   }
 
@@ -1980,6 +2587,9 @@ document.addEventListener("DOMContentLoaded", () => {
         persistentDots = []; // Clear persistent dots when a new device is selected
         drawVisualization();
         updateCoordinatesOutput();
+        
+        // Notify WebSocket manager about device selection
+        wsManager.onDeviceSelected();
       }
     });
   }
@@ -2037,6 +2647,16 @@ document.addEventListener("DOMContentLoaded", () => {
   let isRefreshing = false; // To track refresh state
 
   function startLiveRefresh() {
+    // If WebSocket is available and connected, use it instead
+    if (wsManager.useWebSocket && wsManager.isConnected()) {
+      wsManager.onDeviceSelected(); // Request initial data
+      statusIndicator.textContent = "Status: Connected (Real-time)";
+      isRefreshing = true;
+      toggleRefreshButton.textContent = "Stop Refresh";
+      return;
+    }
+
+    // Fallback to REST API polling
     if (refreshIntervalId !== null) {
       clearInterval(refreshIntervalId);
     }
@@ -2050,12 +2670,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     refreshIntervalId = setInterval(fetchLiveData, refreshInterval);
 
-    statusIndicator.textContent = `Status: Refreshing every ${refreshInterval} ms`;
+    statusIndicator.textContent = `Status: Refreshing every ${refreshInterval} ms (REST API)`;
     isRefreshing = true;
     toggleRefreshButton.textContent = "Stop Refresh";
   }
 
   function stopLiveRefresh() {
+    // Stop WebSocket updates (but keep connection alive)
+    if (wsManager.useWebSocket && wsManager.isConnected()) {
+      statusIndicator.textContent = "Status: Connected (Paused)";
+      isRefreshing = false;
+      toggleRefreshButton.textContent = "Start Refresh";
+      return;
+    }
+
+    // Stop REST API polling
     if (refreshIntervalId !== null) {
       clearInterval(refreshIntervalId);
       refreshIntervalId = null;
@@ -2597,11 +3226,16 @@ document.addEventListener("DOMContentLoaded", () => {
     await fetchDevices(); // Fetch and populate devices
     handleDeviceSelection();
     setupDarkModeToggle();
+    checkEasterEggState(); // Check if easter egg was previously revealed
     setupRefreshRateControls();
     setupCollapsibleSections();
     setupZoneTileSelection();
     setupMobileFullscreen();
+    setupWebSocketToggle();
     updateButtonStates();
+    
+    // Initialize WebSocket connection
+    wsManager.connect();
   }
 
   // ==========================
@@ -2690,13 +3324,39 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       for (let i = 0; i < regularZonesToSave.length; i++) {
         const zone = regularZonesToSave[i];
-        await saveZoneToHA(i + 1, zone, zoneEntities);
+        const zoneNumber = i + 1;
+        
+        // Check if entities exist for this zone before trying to save
+        const zonePrefix = `zone_${zoneNumber}`;
+        const hasEntities = zoneEntities[`${zonePrefix}_begin_x`] && 
+                           zoneEntities[`${zonePrefix}_begin_y`] && 
+                           zoneEntities[`${zonePrefix}_end_x`] && 
+                           zoneEntities[`${zonePrefix}_end_y`];
+        
+        if (hasEntities) {
+          await saveZoneToHA(zoneNumber, zone, zoneEntities);
+        } else {
+          console.log(`Skipping zone ${zoneNumber} - entities not available (likely disabled in HA)`);
+        }
       }
 
       // Send the exclusion zone
       for (let i = 0; i < exclusionZonesToSave.length; i++) {
         const zone = exclusionZonesToSave[i];
-        await saveExclusionZoneToHA(i + 1, zone, zoneEntities);
+        const zoneNumber = i + 1;
+        
+        // Check if entities exist for this exclusion zone before trying to save
+        const zonePrefix = `occupancy_mask_${zoneNumber}`;
+        const hasEntities = zoneEntities[`${zonePrefix}_begin_x`] && 
+                           zoneEntities[`${zonePrefix}_begin_y`] && 
+                           zoneEntities[`${zonePrefix}_end_x`] && 
+                           zoneEntities[`${zonePrefix}_end_y`];
+        
+        if (hasEntities) {
+          await saveExclusionZoneToHA(zoneNumber, zone, zoneEntities);
+        } else {
+          console.log(`Skipping exclusion zone ${zoneNumber} - entities not available (likely disabled in HA)`);
+        }
       }
 
       alert("Zones saved successfully!");
@@ -3074,8 +3734,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const baseUrl = "api/services/number/set_value";
 
     const zonePrefix = `occupancy_mask_${zoneNumber}`;
-    console.log("Saving Exclusion Zone:", zonePrefix);
-    console.log("Zone Entities:", zoneEntities);
 
     const roundToNearestTen = (num) => {
       return (Math.round(num / 10) * 10).toFixed(1);
