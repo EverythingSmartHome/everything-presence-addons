@@ -431,8 +431,6 @@ button:disabled {
   margin-right: var(--space-xs);
 }
 
-/* Note: Removed duplicate green circle animation - the emoji indicator is sufficient */
-
 /* Dark mode status indicator adjustments */
 body.dark-mode #statusIndicator.connected {
   background-color: rgba(40, 167, 69, 0.2);
@@ -1307,7 +1305,7 @@ body.dark-mode #dark-mode-toggle:hover {
   transform: scale(1);
 }
 
-/* Subtle pulse animation when revealed */
+/* Pulse when revealed */
 .easter-egg-toggle.revealed:hover {
   animation: easterEggPulse 2s infinite;
 }
