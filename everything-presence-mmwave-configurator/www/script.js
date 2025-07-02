@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Variables for device selection
   const deviceSelect = document.getElementById("device-select");
   let selectedEntities = [];
+  let settingsEntities = [];
   let targets = [];
   let haZones = [];
   let haExclusionZones = [];
@@ -33,15 +34,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     async connect() {
       try {
-        console.log('🔗 Attempting WebSocket connection via backend proxy');
-        
         // Test if backend can provide WebSocket proxy
         const testResult = await this.testBackendWebSocket();
         
         if (testResult.success) {
           this.connectViaBackendProxy();
         } else {
-          console.log('Backend WebSocket proxy not available, falling back to REST API');
           this.fallbackToPolling();
         }
         
@@ -52,7 +50,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async testBackendWebSocket() {
-      console.log('✅ Backend WebSocket proxy available via /ws route');
       return { success: true, message: 'Backend WebSocket proxy available' };
     }
 
@@ -77,7 +74,11 @@ document.addEventListener("DOMContentLoaded", () => {
         this.authenticated = true;
         this.reconnectAttempts = 0;
         this.updateConnectionStatus();
-        this.subscribeToEntityUpdates();
+        
+        // delay to ensure backend WebSocket is ready
+        setTimeout(() => {
+          this.subscribeToEntityUpdates();
+        }, 200);
       };
 
       this.ws.onmessage = (event) => {
@@ -194,7 +195,6 @@ document.addEventListener("DOMContentLoaded", () => {
       };
       
       this.subscriptionId = this.sendMessage(subscriptionMessage);
-      console.log('Subscribed to HA state changes');
       
       // Request initial states
       this.requestInitialStates();
@@ -224,6 +224,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Process initial data
         this.processEntityData();
+      } else if (!message.success) {
+        console.error('HA operation failed:', message.error);
       }
     }
 
@@ -250,7 +252,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     isRelevantEntity(entityId) {
-      return selectedEntities.some(entity => entity.id === entityId);
+      return selectedEntities.some(entity => entity.id === entityId) ||
+             settingsEntities.some(entity => entity.id === entityId);
     }
 
     processEntityData() {
@@ -436,7 +439,6 @@ document.addEventListener("DOMContentLoaded", () => {
      }
 
     fallbackToPolling() {
-      console.log('Using REST API polling');
       this.useWebSocket = false;
       this.disconnect();
       
@@ -1154,6 +1156,12 @@ document.addEventListener("DOMContentLoaded", () => {
   function getEntityStateMM(entity) {
     const state = entity ? parseFloat(entity.state) || 0 : 0;
     let result = state;
+    
+    // Check if entity and attributes exist before accessing unit_of_measurement
+    if (!entity || !entity.attributes || !entity.attributes.unit_of_measurement) {
+      return Math.round(result);
+    }
+    
     // cm, in, ft, km, m, mi, nmi, yd are supported in home assistant
     switch (entity.attributes.unit_of_measurement) {
       case "mm":
@@ -2450,7 +2458,14 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         const entities = JSON.parse(result);
         const requiredEntities = filterRequiredEntities(entities);
+        const deviceSettingsEntities = filterSettingsEntities(entities);
+        
         selectedEntities = requiredEntities.map((entityId) => ({
+          id: entityId,
+          name: entityId,
+        }));
+
+        settingsEntities = deviceSettingsEntities.map((entityId) => ({
           id: entityId,
           name: entityId,
         }));
@@ -2460,8 +2475,13 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
+        // Show settings button if settings entities are available
+        updateSettingsButtonVisibility();
+
         // Notify backend about selected entities for WebSocket
         await notifyBackendOfSelectedEntities();
+
+        await new Promise(resolve => setTimeout(resolve, 100));
 
         startLiveRefresh();
       } catch (e) {
@@ -2474,25 +2494,29 @@ document.addEventListener("DOMContentLoaded", () => {
   // Function to notify backend about selected entities for WebSocket
   async function notifyBackendOfSelectedEntities() {
     try {
-      const entityIds = selectedEntities.map(e => e.id);
+      const zoneEntityIds = selectedEntities.map(e => e.id);
+      const settingsEntityIds = settingsEntities.map(e => e.id);
+      const allEntityIds = [...zoneEntityIds, ...settingsEntityIds];
+      
       const response = await fetch('api/selected-entities', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          entity_ids: entityIds
+          entity_ids: allEntityIds
         })
       });
       
       if (response.ok) {
-        const result = await response.json();
-        console.log(`✅ Backend updated with ${result.count} selected entities for WebSocket filtering`);
+        return true;
       } else {
-        console.warn('❌ Failed to notify backend of selected entities');
+        console.warn('Failed to notify backend of selected entities:', response.status);
+        return false;
       }
     } catch (error) {
-      console.warn('❌ Error notifying backend of selected entities:', error);
+      console.warn('Error notifying backend of selected entities:', error);
+      return false;
     }
   }
 
@@ -2570,6 +2594,622 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Function to filter settings entities for device configuration
+  function filterSettingsEntities(entities) {
+    const settingsSuffixes = [
+      // Basic Device Configuration
+      "inverse_mounting", 
+      "upside_down_mounting", // Alternative naming
+      "inverted_mounting", // Alternative naming
+      "aggressive_target_clearing",
+      
+      // Timing & Detection Settings
+      "off_delay",
+      "timeout",
+      "zone_1_off_delay",
+      "zone_2_off_delay", 
+      "zone_3_off_delay",
+      "zone_4_off_delay",
+      "aggressive_timeout",
+      
+      // Range & Distance Settings
+      "max_distance",
+      "installation_angle",
+      
+      // Sensor Calibration
+      "illuminance_offset_ui",
+      "illuminance_offset",
+      
+      // LED Controls
+      "esp32_led",
+      "status_led",
+    ];
+
+    const filtered = entities.filter((entityId) => {
+      return settingsSuffixes.some((suffix) => entityId.endsWith(suffix));
+    });
+
+    return filtered;
+  }
+
+  // ==========================
+  // === Settings Management ===
+  // ==========================
+  
+  // Update settings button visibility based on available settings entities
+  function updateSettingsButtonVisibility() {
+    const settingsButton = document.getElementById('settings-button');
+    if (settingsEntities.length > 0) {
+      settingsButton.style.display = 'flex';
+    } else {
+      settingsButton.style.display = 'none';
+    }
+  }
+
+  // Settings entity descriptions and labels
+  const settingsConfig = {
+    // Basic Device Configuration
+    inverse_mounting: {
+      label: "Upside Down Mounting", 
+      description: "Enable if the sensor is physically mounted upside down. The sensor firmware will automatically correct coordinate calculations.",
+      type: "switch",
+      category: "Detection Area",
+      order: 1
+    },
+    upside_down_mounting: {
+      label: "Upside Down Mounting", 
+      description: "Enable if the sensor is physically mounted upside down. The sensor firmware will automatically correct coordinate calculations.",
+      type: "switch",
+      category: "Detection Area",
+      order: 1
+    },
+    inverted_mounting: {
+      label: "Upside Down Mounting", 
+      description: "Enable if the sensor is physically mounted upside down. The sensor firmware will automatically correct coordinate calculations.",
+      type: "switch",
+      category: "Detection Area",
+      order: 1
+    },
+    aggressive_target_clearing: {
+      label: "Stale Target Reset",
+      description: "Automatically clear targets that haven't updated recently",
+      type: "switch", 
+      category: "Basic Configuration",
+      order: 4
+    },
+
+    // Timing & Detection Settings
+    off_delay: {
+      label: "Global Off Delay",
+      description: "Global delay before marking occupancy as off (0-300 seconds)",
+      type: "number",
+      category: "Detection Timing",
+      min: 0,
+      max: 300,
+      step: 1,
+      unit: "s",
+      order: 1
+    },
+    timeout: {
+      label: "Occupancy Off Delay",
+      description: "Delay before marking occupancy as off (0-300 seconds)",
+      type: "number",
+      category: "Detection Timing",
+      min: 0,
+      max: 300,
+      step: 1,
+      unit: "s",
+      order: 2
+    },
+    zone_1_off_delay: {
+      label: "Zone 1 Off Delay",
+      description: "Delay before Zone 1 occupancy turns off (0-300 seconds)",
+      type: "number",
+      category: "Detection Timing", 
+      min: 0,
+      max: 300,
+      step: 1,
+      unit: "s",
+      order: 3
+    },
+    zone_2_off_delay: {
+      label: "Zone 2 Off Delay",
+      description: "Delay before Zone 2 occupancy turns off (0-300 seconds)",
+      type: "number",
+      category: "Detection Timing",
+      min: 0,
+      max: 300,
+      step: 1,
+      unit: "s",
+      order: 4
+    },
+    zone_3_off_delay: {
+      label: "Zone 3 Off Delay",
+      description: "Delay before Zone 3 occupancy turns off (0-300 seconds)",
+      type: "number",
+      category: "Detection Timing",
+      min: 0,
+      max: 300,
+      step: 1,
+      unit: "s",
+      order: 5
+    },
+    zone_4_off_delay: {
+      label: "Zone 4 Off Delay",
+      description: "Delay before Zone 4 occupancy turns off (0-300 seconds)",
+      type: "number",
+      category: "Detection Timing",
+      min: 0,
+      max: 300,
+      step: 1,
+      unit: "s",
+      order: 6
+    },
+    aggressive_timeout: {
+      label: "Aggressive Timeout",
+      description: "Timeout for aggressive target clearing (1-10 seconds)",
+      type: "number",
+      category: "Detection Timing",
+      min: 1,
+      max: 10,
+      step: 1,
+      unit: "s",
+      order: 7
+    },
+
+    // Detection Area Settings
+    max_distance: {
+      label: "Max Detection Distance",
+      description: "Maximum detection range of the sensor (0-600 centimeters)",
+      type: "number",
+      category: "Detection Area",
+      min: 0,
+      max: 600,
+      step: 10,
+      unit: "cm",
+      order: 2
+    },
+    installation_angle: {
+      label: "Installation Angle",
+      description: "Mounting angle of the sensor (-45° to +45°)",
+      type: "number",
+      category: "Detection Area",
+      min: -45,
+      max: 45,
+      step: 1,
+      unit: "°",
+      order: 3
+    },
+
+    // Sensor Calibration
+    illuminance_offset_ui: {
+      label: "Illuminance Offset",
+      description: "Offset value for illuminance sensor readings (-100 to +100 lux)",
+      type: "number",
+      category: "Sensor Calibration",
+      min: -100,
+      max: 100,
+      step: 5,
+      unit: "lx",
+      order: 1
+    },
+    illuminance_offset: {
+      label: "Illuminance Offset (Alt)",
+      description: "Alternative illuminance sensor offset (-100 to +100 lux)",
+      type: "number",
+      category: "Sensor Calibration",
+      min: -100,
+      max: 100,
+      step: 5,
+      unit: "lx",
+      order: 2
+    },
+
+    // LED & Display Controls
+    esp32_led: {
+      label: "ESP32 LED",
+      description: "Control the onboard ESP32 status LED",
+      type: "light",
+      category: "LED Controls",
+      order: 1
+    },
+    status_led: {
+      label: "Status LED",
+      description: "Control the device status LED",
+      type: "light",
+      category: "LED Controls",
+      order: 2
+    }
+  };
+
+  // Store original values for cancel
+  let originalSettingsValues = {};
+
+  // Open settings modal
+  function openSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    
+    // Fetch current entity states and populate modal
+    populateSettingsModal();
+    
+    // Show modal
+    modal.style.display = 'flex';
+    
+    // Click outside to close
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        closeSettingsModal();
+      }
+    });
+  }
+
+  // Close settings modal
+  function closeSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    modal.style.display = 'none';
+  }
+
+  // Populate settings modal with current entity states
+  async function populateSettingsModal() {
+    const sectionsContainer = document.getElementById('settings-sections');
+    sectionsContainer.innerHTML = '';
+    
+    // Store values
+    originalSettingsValues = {};
+    
+    try {
+      // Fetch current states for all settings entities
+      const entityStates = await Promise.all(
+        settingsEntities.map(entity => fetchEntityState(entity.id))
+      );
+      
+      // Group entities by category
+      const categories = {};
+      
+      settingsEntities.forEach((entity, index) => {
+        const entityState = entityStates[index];
+        if (!entityState) return;
+        
+        // Extract entity for lookup
+        const suffix = entity.id.split('.').pop().split('_').slice(-2).join('_');
+        const fullSuffix = entity.id.split('.').pop();
+        
+        let config = settingsConfig[suffix] || settingsConfig[fullSuffix];
+        
+        if (!config) {
+          for (const [key, value] of Object.entries(settingsConfig)) {
+            if (entity.id.endsWith(key)) {
+              config = value;
+              break;
+            }
+          }
+        }
+        
+        if (!config) {
+          // Default config for unknown entities
+          const domain = entity.id.split('.')[0];
+          let defaultType = 'number';
+          
+          if (domain === 'switch') {
+            defaultType = 'switch';
+          } else if (domain === 'light') {
+            defaultType = 'light';
+          } else if (entityState.attributes?.device_class === 'switch') {
+            defaultType = 'switch';
+          }
+          
+          config = {
+            label: entity.id.split('.').pop().replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            description: `Control ${entity.id.split('.').pop()}`,
+            type: defaultType,
+            category: 'Other Settings'
+          };
+        }
+        
+        const category = config.category;
+        if (!categories[category]) {
+          categories[category] = [];
+        }
+        
+        categories[category].push({
+          entity,
+          entityState,
+          config
+        });
+        
+        // Store original value for cancel functionality
+        originalSettingsValues[entity.id] = entityState.state;
+      });
+      
+      // Define category order for sorting
+      const categoryOrder = {
+        'Detection Area': 1,
+        'Basic Configuration': 2,
+        'Detection Timing': 3,
+        'Range Settings': 4,
+        'Sensor Calibration': 5,
+        'Movement Sensitivity': 6,
+        'Still Sensitivity': 7,
+        'LED Controls': 8,
+        'Other Settings': 99
+      };
+
+      // Sort categories by priority then create sections
+      const sortedCategories = Object.entries(categories).sort(([a], [b]) => {
+        const orderA = categoryOrder[a] || 50;
+        const orderB = categoryOrder[b] || 50;
+        return orderA - orderB;
+      });
+
+      sortedCategories.forEach(([categoryName, entities]) => {
+        // Sort entities within each category by their order
+        entities.sort((a, b) => {
+          const orderA = a.config.order || 999;
+          const orderB = b.config.order || 999;
+          return orderA - orderB;
+        });
+        
+        const section = createSettingsSection(categoryName, entities);
+        sectionsContainer.appendChild(section);
+      });
+      
+    } catch (error) {
+      console.error('Error fetching settings entities:', error);
+      sectionsContainer.innerHTML = '<p>Error loading settings. Please try again.</p>';
+    }
+  }
+
+  // Create a settings section
+  function createSettingsSection(categoryName, entities) {
+    const section = document.createElement('div');
+    section.className = 'settings-section';
+    
+    const title = document.createElement('div');
+    title.className = 'settings-section-title';
+    title.textContent = categoryName;
+    section.appendChild(title);
+    
+    entities.forEach(({ entity, entityState, config }) => {
+      const item = createSettingsItem(entity, entityState, config);
+      section.appendChild(item);
+    });
+    
+    return section;
+  }
+
+  // Create individual settings item
+  function createSettingsItem(entity, entityState, config) {
+    const item = document.createElement('div');
+    item.className = 'settings-item';
+    
+    const info = document.createElement('div');
+    info.className = 'settings-item-info';
+    
+    const label = document.createElement('div');
+    label.className = 'settings-item-label';
+    label.textContent = config.label;
+    info.appendChild(label);
+    
+    const description = document.createElement('div');
+    description.className = 'settings-item-description';
+    description.textContent = config.description;
+    info.appendChild(description);
+    
+    const control = document.createElement('div');
+    control.className = 'settings-item-control';
+    
+    if (config.type === 'switch' || config.type === 'light') {
+      const toggleWrapper = document.createElement('label');
+      toggleWrapper.className = 'toggle-switch';
+      
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = entityState.state === 'on';
+      checkbox.dataset.entityId = entity.id;
+      checkbox.dataset.type = config.type;
+      
+      const slider = document.createElement('span');
+      slider.className = 'toggle-slider';
+      
+      toggleWrapper.appendChild(checkbox);
+      toggleWrapper.appendChild(slider);
+      control.appendChild(toggleWrapper);
+      
+    } else if (config.type === 'number') {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'settings-number-input';
+      input.value = parseFloat(entityState.state) || 0;
+      input.min = config.min || 0;
+      input.max = config.max || 100;
+      input.step = config.step || 1;
+      input.dataset.entityId = entity.id;
+      input.dataset.type = 'number';
+      
+      // Add validation event listeners
+      const validateInput = () => {
+        const value = parseFloat(input.value);
+        const min = parseFloat(input.min);
+        const max = parseFloat(input.max);
+        
+        if (isNaN(value) || value < min || value > max) {
+          input.classList.add('invalid');
+          input.title = `Value must be between ${min} and ${max}`;
+        } else {
+          input.classList.remove('invalid');
+          input.title = '';
+        }
+      };
+      
+      input.addEventListener('input', validateInput);
+      input.addEventListener('blur', validateInput);
+      
+      // Initial validation
+      setTimeout(validateInput, 0);
+      
+      control.appendChild(input);
+      
+      if (config.unit) {
+        const unit = document.createElement('span');
+        unit.textContent = config.unit;
+        unit.style.marginLeft = 'var(--space-sm)';
+        unit.style.color = 'var(--text-secondary)';
+        unit.style.fontSize = 'var(--font-size-sm)';
+        control.appendChild(unit);
+      }
+    }
+    
+    item.appendChild(info);
+    item.appendChild(control);
+    
+    return item;
+  }
+
+  // Save settings
+  async function saveSettings() {
+    const modal = document.getElementById('settings-modal');
+    const inputs = modal.querySelectorAll('input[data-entity-id]');
+    
+    // Validate all inputs
+    let hasValidationErrors = false;
+    const invalidInputs = [];
+    
+    inputs.forEach(input => {
+      if (input.dataset.type === 'number') {
+        const value = parseFloat(input.value);
+        const min = parseFloat(input.min);
+        const max = parseFloat(input.max);
+        
+        if (isNaN(value) || value < min || value > max) {
+          input.classList.add('invalid');
+          hasValidationErrors = true;
+          invalidInputs.push({
+            input,
+            entityId: input.dataset.entityId,
+            value,
+            min,
+            max
+          });
+        } else {
+          input.classList.remove('invalid');
+        }
+      }
+    });
+    
+    // show a message on validation errors and don't save
+    if (hasValidationErrors) {
+      const errorMessages = invalidInputs.map(({ input, value, min, max }) => {
+        const label = input.closest('.settings-item').querySelector('.settings-item-label').textContent;
+        return `• ${label}: ${isNaN(value) ? 'Invalid number' : `Must be between ${min} and ${max}`}`;
+      }).join('\n');
+      
+      alert(`Please fix the following validation errors before saving:\n\n${errorMessages}`);
+      return;
+    }
+    
+    const saveButton = document.getElementById('settings-save');
+    const originalText = saveButton.textContent;
+    saveButton.textContent = 'Saving...';
+    saveButton.disabled = true;
+    
+    try {
+      const promises = [];
+      
+      inputs.forEach(input => {
+        const entityId = input.dataset.entityId;
+        const type = input.dataset.type;
+        
+        if (type === 'switch') {
+          const isChecked = input.checked;
+          const currentState = originalSettingsValues[entityId];
+          
+          if ((isChecked && currentState !== 'on') || (!isChecked && currentState !== 'off')) {
+            const endpoint = isChecked ? 'api/services/switch/turn_on' : 'api/services/switch/turn_off';
+            promises.push(
+              fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_id: entityId })
+              })
+            );
+          }
+        } else if (type === 'light') {
+          const isChecked = input.checked;
+          const currentState = originalSettingsValues[entityId];
+          
+          if ((isChecked && currentState !== 'on') || (!isChecked && currentState !== 'off')) {
+            const endpoint = isChecked ? 'api/services/light/turn_on' : 'api/services/light/turn_off';
+            promises.push(
+              fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_id: entityId })
+              })
+            );
+          }
+        } else if (type === 'number') {
+          const value = parseFloat(input.value);
+          const currentValue = parseFloat(originalSettingsValues[entityId]);
+          
+          if (value !== currentValue) {
+            promises.push(
+              fetch('api/services/number/set_value', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  entity_id: entityId,
+                  value: value
+                })
+              })
+            );
+          }
+        }
+      });
+      
+      if (promises.length > 0) {
+        await Promise.all(promises);
+        console.log('Settings saved successfully');
+      }
+      
+      closeSettingsModal();
+      
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert('Failed to save settings. Please try again.');
+    } finally {
+      saveButton.textContent = originalText;
+      saveButton.disabled = false;
+    }
+  }
+
+  // Function to cancel settings changes
+  function cancelSettings() {
+    closeSettingsModal();
+  }
+
+  // Setup settings button event listener
+  function setupSettingsModal() {
+    const settingsButton = document.getElementById('settings-button');
+    const settingsClose = document.getElementById('settings-close');
+    const settingsSave = document.getElementById('settings-save');
+    const settingsCancel = document.getElementById('settings-cancel');
+    
+    settingsButton.addEventListener('click', openSettingsModal);
+    settingsClose.addEventListener('click', closeSettingsModal);
+    settingsSave.addEventListener('click', saveSettings);
+    settingsCancel.addEventListener('click', cancelSettings);
+    
+    // Handle ESC key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const modal = document.getElementById('settings-modal');
+        if (modal.style.display === 'flex') {
+          closeSettingsModal();
+        }
+      }
+    });
+  }
+
   // ==========================
   // === Handle Device Selection ===
   // ==========================
@@ -2590,6 +3230,11 @@ document.addEventListener("DOMContentLoaded", () => {
         
         // Notify WebSocket manager about device selection
         wsManager.onDeviceSelected();
+      } else {
+        // Clear entities and hide settings button when no device selected
+        selectedEntities = [];
+        settingsEntities = [];
+        updateSettingsButtonVisibility();
       }
     });
   }
@@ -3232,6 +3877,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupZoneTileSelection();
     setupMobileFullscreen();
     setupWebSocketToggle();
+    setupSettingsModal();
     updateButtonStates();
     
     // Initialize WebSocket connection

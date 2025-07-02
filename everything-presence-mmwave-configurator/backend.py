@@ -24,14 +24,12 @@ HA_URL = os.getenv('HA_URL')
 HA_TOKEN = os.getenv('HA_TOKEN')
 
 if SUPERVISOR_TOKEN:
-    logging.error('Running as a Home Assistant Add-on.')
     HOME_ASSISTANT_API = 'http://supervisor/core/api'
     headers = {
         'Authorization': f'Bearer {SUPERVISOR_TOKEN}',
         'Content-Type': 'application/json',
     }
 elif HA_URL and HA_TOKEN:
-    logging.error('Running as a standalone docker container.')
     HOME_ASSISTANT_API = HA_URL.rstrip('/') + '/api'
     headers = {
         'Authorization': f'Bearer {HA_TOKEN}',
@@ -44,17 +42,39 @@ else:
 def check_connectivity():
     """Function to check connectivity with Home Assistant API."""
     try:
-        logging.info("Checking connectivity with Home Assistant API...")
         response = requests.get(f'{HOME_ASSISTANT_API}/', headers=headers, timeout=10)
-        if response.status_code == 200:
-            logging.info("Successfully connected to Home Assistant API.")
-        else:
+        
+        if response.status_code != 200:
             logging.error(f"Failed to connect to Home Assistant API. Status Code: {response.status_code}")
-            logging.error(f"Response: {response.text}")
+            logging.error(f"Response: {response.text[:200]}")
     except requests.exceptions.RequestException as e:
-        logging.error(f"Exception occurred while connecting to Home Assistant API: {e}")
-    
-    logging.info("✅ Flask backend initialized successfully")
+        logging.error(f"Exception connecting to Home Assistant API: {e}")
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to test HA connectivity"""
+    try:
+        logging.error("🩺 Health check requested")
+        response = requests.get(f'{HOME_ASSISTANT_API}/', headers=headers, timeout=5)
+        
+        return jsonify({
+            "backend_status": "running",
+            "ha_api_url": f"{HOME_ASSISTANT_API}/",
+            "ha_response_status": response.status_code,
+            "ha_response_type": response.headers.get('Content-Type', 'unknown'),
+            "supervisor_token_available": bool(SUPERVISOR_TOKEN),
+            "ha_url_override": bool(HA_URL),
+            "ha_token_override": bool(HA_TOKEN)
+        })
+    except Exception as e:
+        return jsonify({
+            "backend_status": "running", 
+            "error": str(e),
+            "ha_api_url": f"{HOME_ASSISTANT_API}/",
+            "supervisor_token_available": bool(SUPERVISOR_TOKEN),
+            "ha_url_override": bool(HA_URL),
+            "ha_token_override": bool(HA_TOKEN)
+        }), 500
 
 @app.route('/api/template', methods=['POST'])
 def execute_template():
@@ -74,16 +94,25 @@ def execute_template():
             json={"template": template},
             timeout=10
         )
-
+        
         if response.status_code == 200:
             return Response(response.content, status=200, content_type=response.headers.get('Content-Type', 'application/json'))
         else:
             logging.error(f"Failed to execute template. Status Code: {response.status_code}")
-            logging.error(f"Response: {response.text}")
-            return jsonify({"error": "Failed to execute template"}), response.status_code
+            return jsonify({
+                "error": f"HA API returned {response.status_code}",
+                "details": response.text[:200],
+                "content_type": response.headers.get('Content-Type', 'unknown')
+            }), response.status_code
+    except requests.exceptions.ConnectionError as e:
+        logging.error(f"Connection error to HA API: {e}")
+        return jsonify({"error": "Cannot connect to Home Assistant API", "details": str(e)}), 502
+    except requests.exceptions.Timeout as e:
+        logging.error(f"Timeout connecting to HA API: {e}")
+        return jsonify({"error": "Timeout connecting to Home Assistant API", "details": str(e)}), 504
     except Exception as e:
         logging.error(f"Exception occurred while executing template: {e}")
-        return jsonify({"error": "Exception occurred while executing template"}), 500
+        return jsonify({"error": "Exception occurred while executing template", "details": str(e)}), 500
 
 @app.route('/api/entities/<entity_id>', methods=['GET'])
 def get_entity_state(entity_id):
@@ -122,6 +151,128 @@ def set_value():
     except Exception as e:
         return jsonify({"error": "An error occurred while setting the value.", "details": str(e)}), 500
 
+@app.route('/api/services/switch/turn_on', methods=['POST'])
+def switch_turn_on():
+    try:
+        data = request.json
+        entity_id = data.get('entity_id')
+
+        if not entity_id:
+            return jsonify({"error": "Missing entity_id"}), 400
+
+        payload = {
+            "entity_id": entity_id
+        }
+        
+        # Make the POST request to Home Assistant API
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/switch/turn_on', headers=headers, json=payload)
+
+        if response.status_code == 200:
+            return jsonify({"message": f"Switch {entity_id} turned on successfully."}), 200
+        else:
+            return jsonify({"error": f"Failed to turn on switch {entity_id}.", "details": response.text}), response.status_code
+
+    except Exception as e:
+        return jsonify({"error": "An error occurred while turning on the switch.", "details": str(e)}), 500
+
+@app.route('/api/services/switch/turn_off', methods=['POST'])
+def switch_turn_off():
+    try:
+        data = request.json
+        entity_id = data.get('entity_id')
+
+        if not entity_id:
+            return jsonify({"error": "Missing entity_id"}), 400
+
+        payload = {
+            "entity_id": entity_id
+        }
+        
+        # Make the POST request to Home Assistant API
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/switch/turn_off', headers=headers, json=payload)
+
+        if response.status_code == 200:
+            return jsonify({"message": f"Switch {entity_id} turned off successfully."}), 200
+        else:
+            return jsonify({"error": f"Failed to turn off switch {entity_id}.", "details": response.text}), response.status_code
+
+    except Exception as e:
+        return jsonify({"error": "An error occurred while turning off the switch.", "details": str(e)}), 500
+
+@app.route('/api/services/select/select_option', methods=['POST'])
+def select_option():
+    try:
+        data = request.json
+        entity_id = data.get('entity_id')
+        option = data.get('option')
+
+        if not entity_id or option is None:
+            return jsonify({"error": "Missing entity_id or option"}), 400
+
+        payload = {
+            "entity_id": entity_id,
+            "option": option
+        }
+        
+        # Make the POST request to Home Assistant API
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/select/select_option', headers=headers, json=payload)
+
+        if response.status_code == 200:
+            return jsonify({"message": f"Select entity {entity_id} updated successfully."}), 200
+        else:
+            return jsonify({"error": f"Failed to update select entity {entity_id}.", "details": response.text}), response.status_code
+
+    except Exception as e:
+        return jsonify({"error": "An error occurred while updating the select entity.", "details": str(e)}), 500
+
+@app.route('/api/services/light/turn_on', methods=['POST'])
+def light_turn_on():
+    try:
+        data = request.json
+        entity_id = data.get('entity_id')
+
+        if not entity_id:
+            return jsonify({"error": "Missing entity_id"}), 400
+
+        payload = {
+            "entity_id": entity_id
+        }
+        
+        # Make the POST request to Home Assistant API
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/light/turn_on', headers=headers, json=payload)
+
+        if response.status_code == 200:
+            return jsonify({"message": f"Light {entity_id} turned on successfully."}), 200
+        else:
+            return jsonify({"error": f"Failed to turn on light {entity_id}.", "details": response.text}), response.status_code
+
+    except Exception as e:
+        return jsonify({"error": "An error occurred while turning on the light.", "details": str(e)}), 500
+
+@app.route('/api/services/light/turn_off', methods=['POST'])
+def light_turn_off():
+    try:
+        data = request.json
+        entity_id = data.get('entity_id')
+
+        if not entity_id:
+            return jsonify({"error": "Missing entity_id"}), 400
+
+        payload = {
+            "entity_id": entity_id
+        }
+        
+        # Make the POST request to Home Assistant API
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/light/turn_off', headers=headers, json=payload)
+
+        if response.status_code == 200:
+            return jsonify({"message": f"Light {entity_id} turned off successfully."}), 200
+        else:
+            return jsonify({"error": f"Failed to turn off light {entity_id}.", "details": response.text}), response.status_code
+
+    except Exception as e:
+        return jsonify({"error": "An error occurred while turning off the light.", "details": str(e)}), 500
+
 # Removed unused /api/supervisor/token route - no longer needed with backend WebSocket proxy
 
 # Removed unused /api/test-websocket route - debugging endpoint no longer needed
@@ -137,7 +288,7 @@ def set_selected_entities():
         data = request.get_json()
         entity_ids = data.get('entity_ids', [])
         selected_entity_ids = set(entity_ids)
-        logging.info(f"Updated selected entities: {len(selected_entity_ids)} entities for device")
+        
         return jsonify({'success': True, 'count': len(selected_entity_ids)})
     except Exception as e:
         logging.error(f"Error setting selected entities: {e}")
@@ -186,6 +337,12 @@ def is_mmwave_entity(entity_id):
         "occupancy_mask_1_end_x", "occupancy_mask_1_end_y",
         "occupancy_mask_2_begin_x", "occupancy_mask_2_begin_y",
         "occupancy_mask_2_end_x", "occupancy_mask_2_end_y",
+        
+        # Settings Entities
+        "bluetooth_switch", "inverse_mounting", "aggressive_target_clearing",
+        "off_delay", "zone_1_off_delay", "zone_2_off_delay", "zone_3_off_delay", "zone_4_off_delay",
+        "aggressive_timeout", "illuminance_offset_ui", "illuminance_offset",
+        "esp32_led", "status_led",
     ]
     
     return any(entity_id.endswith(suffix) for suffix in required_suffixes)
@@ -198,11 +355,6 @@ def websocket_proxy(ws):
     import threading
     import queue
     
-    logging.info("WebSocket client connected - starting HA proxy")
-    
-    # Store selected entities that the frontend requires
-    selected_entity_ids = set()
-    
     # Create communication queues
     to_ha_queue = queue.Queue()
     from_ha_queue = queue.Queue()
@@ -210,7 +362,6 @@ def websocket_proxy(ws):
     proxy_active = True
     
     def ha_on_open(ha_ws_instance):
-        logging.info("Connected to HA WebSocket, sending auth")
         supervisor_token = os.environ.get('SUPERVISOR_TOKEN')
         if supervisor_token:
             auth_message = {
@@ -218,9 +369,12 @@ def websocket_proxy(ws):
                 "access_token": supervisor_token
             }
             ha_ws_instance.send(json.dumps(auth_message))
+        else:
+            logging.error("No supervisor token available for WebSocket auth")
     
     def ha_on_message(ha_ws_instance, message):
         # Filter and forward HA messages to frontend
+        global selected_entity_ids  # Must be declared at the beginning of the function
         try:
             # Parse message
             import json
@@ -228,20 +382,15 @@ def websocket_proxy(ws):
             
             # Handle authentication
             if data.get('type') == 'auth_required':
-                logging.info("HA requested auth - sending supervisor token")
                 return
             elif data.get('type') == 'auth_ok':
-                logging.info("✅ HA WebSocket authenticated successfully - proxy ready")
                 return
             elif data.get('type') == 'auth_invalid':
-                logging.error("❌ HA WebSocket authentication failed")
+                logging.error("HA WebSocket authentication failed")
                 return
             
             # Filter state results to only selected device entities
             if data.get('type') == 'result' and isinstance(data.get('result'), list):
-                # Get the global selected entities set
-                global selected_entity_ids
-                
                 # Filter entities to only include the ones selected by frontend
                 filtered_entities = []
                 for entity in data.get('result', []):
@@ -254,7 +403,6 @@ def websocket_proxy(ws):
                     filtered_data = data.copy()
                     filtered_data['result'] = filtered_entities
                     from_ha_queue.put(json.dumps(filtered_data))
-                    logging.info(f"Filtered to {len(filtered_entities)} selected entities from {len(data.get('result', []))} total")
                 return
             
             # Filter state_changed events to only selected device entities
@@ -267,6 +415,10 @@ def websocket_proxy(ws):
             
             # Forward other message types
             if data.get('type') in ['result']:
+                # Log subscription errors
+                if not data.get('success') and 'id' in data:
+                    error_info = data.get('error', {})
+                    logging.error(f"HA subscription failed for ID {data.get('id')}: {error_info}")
                 from_ha_queue.put(message)
                 
         except Exception as e:
@@ -277,7 +429,9 @@ def websocket_proxy(ws):
         logging.error(f"HA WebSocket error: {error}")
     
     def ha_on_close(ha_ws_instance, close_status_code, close_msg):
-        logging.error(f"HA WebSocket closed: {close_status_code} - {close_msg}")
+        # Only log non-normal closures as errors
+        if close_status_code and close_status_code != 1000:
+            logging.error(f"HA WebSocket closed unexpectedly: {close_status_code} - {close_msg}")
         nonlocal proxy_active
         proxy_active = False
     
@@ -300,15 +454,8 @@ def websocket_proxy(ws):
                 message = to_ha_queue.get(timeout=1)
                 if ha_ws and ha_ws.sock and ha_ws.sock.connected:
                     ha_ws.send(message)
-
-                    
-                    # Track entity subscriptions to know which entities frontend wants
-                    try:
-                        data = json.loads(message) if isinstance(message, str) else message
-                        if data.get('type') == 'get_states':
-                            logging.info("Frontend requested initial states - will filter to device entities")
-                    except:
-                        pass
+                else:
+                    logging.error("Cannot send to HA - WebSocket not connected")
                         
             except queue.Empty:
                 continue
@@ -344,7 +491,9 @@ def websocket_proxy(ws):
 
             except Exception as e:
                 if "timeout" not in str(e).lower():
-                    logging.error(f"Error receiving from frontend: {e}")
+                    # Don't log normal WebSocket closures (1000) as errors
+                    if "Connection closed: 1000" not in str(e):
+                        logging.error(f"Error receiving from frontend: {e}")
                     break
     
     except Exception as e:
@@ -355,18 +504,10 @@ def websocket_proxy(ws):
         proxy_active = False
         if ha_ws:
             ha_ws.close()
-        logging.info("WebSocket proxy connection closed")
 
 if __name__ == '__main__':
-    logging.error("Starting REST API server with direct HA WebSocket support from frontend")
-    
     # Start connectivity check
     threading.Thread(target=check_connectivity).start()
     
-    # Run simple Flask server
-    logging.error("Starting Flask server on port 5000")
-    logging.error("Available routes:")
-    for rule in app.url_map.iter_rules():
-        logging.error(f"  {rule.endpoint}: {rule.methods} {rule.rule}")
-    logging.error("About to start app.run() - Flask should be accessible on port 5000")
+    # Run Flask server
     app.run(host='0.0.0.0', port=5000, debug=False)

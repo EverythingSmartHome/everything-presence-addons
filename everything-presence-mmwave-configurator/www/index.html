@@ -31,9 +31,12 @@
         <!-- Device Selection Drop-Down -->
         <div class="control-group">
           <label for="device-select">Select Device:</label>
-          <select id="device-select">
-            <option value="" disabled selected>Loading devices...</option>
-          </select>
+          <div class="device-select-group">
+            <select id="device-select">
+              <option value="" disabled selected>Loading devices...</option>
+            </select>
+            <button id="settings-button" style="display: none;" title="Device Settings">⚙️</button>
+          </div>
         </div>
 
         <!-- Entity Selection Drop-Down -->
@@ -244,6 +247,25 @@
 
       <!-- Coordinates Output -->
       <div id="coordinatesOutput"></div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay" style="display: none;">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Device Settings</h3>
+          <button id="settings-close" class="close-button">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="settings-sections">
+            <!-- Settings will be dynamically populated here -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="settings-save" class="btn-primary">Save Settings</button>
+          <button id="settings-cancel" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
     </div>
 
     <footer>
