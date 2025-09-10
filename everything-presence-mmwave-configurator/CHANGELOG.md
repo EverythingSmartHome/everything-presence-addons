@@ -1,6 +1,7 @@
 ### 1.2.2
 - Fix: Allow drawing zones at default coordinates without being flagged as existing. @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/86
 - Feature: Add delete button to zone side tiles (shown in Edit Mode) to delete user/exclusion zones. @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/87
+- Feature: Implement WebSockets for better performance by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/80
 
 ### 1.2.1
 - Implement zone edit mode @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/77
