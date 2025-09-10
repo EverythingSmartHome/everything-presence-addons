@@ -13,6 +13,14 @@ document.addEventListener("DOMContentLoaded", () => {
   let userZones = [];
   let exclusionZones = [];
 
+  // Helpers to detect default/disabled coordinates
+  function isZeroCoords(z) {
+    return z && z.beginX === 0 && z.endX === 0 && z.beginY === 0 && z.endY === 0;
+  }
+  function isDefaultDisabledCoords(z) {
+    return z && z.beginX === -6000 && z.endX === -6000 && z.beginY === -1560 && z.endY === -1560;
+  }
+
   // ==========================
   // WebSocket Client Manager
   // ==========================
@@ -1637,7 +1645,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
         
         // Check if zone already exists at this index
-        if (userZones[targetIndex]) {
+        const haZone = haZones[targetIndex];
+        const haZoneConfigured = haZone && !isZeroCoords(haZone) && !isDefaultDisabledCoords(haZone);
+        if (userZones[targetIndex] || haZoneConfigured) {
           alert(`Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
           return;
         }
@@ -1669,7 +1679,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
         
         // Check if exclusion zone already exists at this index
-        if (exclusionZones[targetIndex]) {
+        const haExcl = haExclusionZones[targetIndex];
+        const haExclConfigured = haExcl && !isZeroCoords(haExcl) && !isDefaultDisabledCoords(haExcl);
+        if (exclusionZones[targetIndex] || haExclConfigured) {
           alert(`Exclusion Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
           return;
         }
@@ -4322,11 +4334,16 @@ document.addEventListener("DOMContentLoaded", () => {
     userZones = [];
     exclusionZones = [];
     
+    // Helper to detect zones that are effectively "default/disabled"
+    const isZeroCoords = (z) => z && z.beginX === 0 && z.endX === 0 && z.beginY === 0 && z.endY === 0;
+    const isDefaultDisabledCoords = (z) => z && z.beginX === -6000 && z.endX === -6000 && z.beginY === -1560 && z.endY === -1560;
+
     // Load HA regular zones into editable user zones
     for (let i = 0; i < haZones.length; i++) {
       const zone = haZones[i];
-      // Only load zones that have valid coordinates (not disabled/empty zones)
-      if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
+      // Only load zones that have valid coordinates
+      // Skip zones with default/disabled sentinel values so they can be created by the user
+      if (zone && !isZeroCoords(zone) && !isDefaultDisabledCoords(zone)) {
         // Ensure userZones array has enough slots
         while (userZones.length <= i) {
           userZones.push(null);
@@ -4345,7 +4362,7 @@ document.addEventListener("DOMContentLoaded", () => {
     for (let i = 0; i < haExclusionZones.length; i++) {
       const zone = haExclusionZones[i];
       // Only load zones that have valid coordinates (not disabled/empty zones)
-      if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
+      if (zone && !isZeroCoords(zone) && !isDefaultDisabledCoords(zone)) {
         // Ensure exclusionZones array has enough slots
         while (exclusionZones.length <= i) {
           exclusionZones.push(null);
