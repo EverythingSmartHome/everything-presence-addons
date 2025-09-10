@@ -360,13 +360,22 @@ def websocket_proxy(ws):
     from_ha_queue = queue.Queue()
     ha_ws = None
     proxy_active = True
+
+    supervisor_token = os.environ.get('SUPERVISOR_TOKEN')
+    ha_url = os.environ.get('HA_URL')
+    ha_token = os.environ.get('HA_TOKEN')
     
     def ha_on_open(ha_ws_instance):
-        supervisor_token = os.environ.get('SUPERVISOR_TOKEN')
         if supervisor_token:
             auth_message = {
                 "type": "auth",
                 "access_token": supervisor_token
+            }
+            ha_ws_instance.send(json.dumps(auth_message))
+        elif ha_url and ha_token:
+            auth_message = {
+                "type": "auth",
+                "access_token": ha_token
             }
             ha_ws_instance.send(json.dumps(auth_message))
         else:
@@ -434,9 +443,23 @@ def websocket_proxy(ws):
             logging.error(f"HA WebSocket closed unexpectedly: {close_status_code} - {close_msg}")
         nonlocal proxy_active
         proxy_active = False
+
+    websocket_url = ''
+    if supervisor_token:
+        websocket_url = 'ws://supervisor/core/websocket'
+    elif ha_url and ha_token:
+        # This slightly odd replace statement allows us to transform
+        # http://hostname to ws://hostname
+        # https://hostname to wss://hostname
+        # It's a bit inflexible because it hard requires the http(s),
+        # but that's how the example is written either way
+        websocket_url = ha_url.replace("http", "ws", 1) + '/api/websocket'
+    else:
+        logging.error("No supervisor token or HA_URL available for websocket proxy")
+    
     
     # Start HA WebSocket connection
-    ha_ws = websocket.WebSocketApp('ws://supervisor/core/websocket',
+    ha_ws = websocket.WebSocketApp(websocket_url,
                                    on_open=ha_on_open,
                                    on_message=ha_on_message,
                                    on_error=ha_on_error,
