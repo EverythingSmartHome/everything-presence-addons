@@ -612,6 +612,36 @@ body.dark-mode #statusIndicator.disconnected {
   margin-bottom: var(--space-sm);
 }
 
+/* Small delete button inside zone tiles */
+.zone-delete-btn {
+  display: none; /* only visible in edit mode */
+  margin-left: var(--space-xs);
+  padding: 4px 6px;
+  min-height: auto;
+  line-height: 1;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--danger-color);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+body.is-edit-mode .zone-delete-btn {
+  display: inline-flex;
+}
+
+.zone-delete-btn:hover {
+  background-color: rgba(220, 53, 69, 0.1);
+  border-color: rgba(220, 53, 69, 0.2);
+}
+
+.zone-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Zone Color Indicator */
 .zone-color-indicator {
   width: 4px;
