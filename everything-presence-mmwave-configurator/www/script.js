@@ -771,6 +771,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Initialize zone tile selection
   function setupZoneTileSelection() {
     const zoneTiles = document.querySelectorAll('.zone-tile');
+    const deleteButtons = document.querySelectorAll('.zone-delete-btn');
     
     // Set initial selection (Zone 1)
     const initialTile = document.querySelector('.zone-tile[data-zone-type="regular"][data-zone-number="1"]');
@@ -784,6 +785,46 @@ document.addEventListener("DOMContentLoaded", () => {
           selectZoneTile(tile);
         } else {
           alert('Enter Edit Mode to select zones for drawing.\n\nClick "Edit Zones" to start editing.');
+        }
+      });
+    });
+
+    // Delete buttons in zone sidebar
+    deleteButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!isEditMode) {
+          alert('Enter Edit Mode to delete zones.\n\nClick "Edit Zones" to start editing.');
+          return;
+        }
+        const tile = e.currentTarget.closest('.zone-tile');
+        if (!tile) return;
+        const zoneType = tile.getAttribute('data-zone-type');
+        const zoneNumber = parseInt(tile.getAttribute('data-zone-number'));
+        const index = zoneNumber - 1;
+
+        if (zoneType === 'regular') {
+          const zone = userZones[index];
+          if (!zone) return;
+          if (confirm(`Delete Zone ${zoneNumber}?`)) {
+            animateZoneDeletion('user', index, zone, () => {
+              userZones[index] = null;
+              updateCoordinatesOutput();
+              updateZoneTileDisplays();
+              updateEditingStatus();
+            });
+          }
+        } else if (zoneType === 'exclusion') {
+          const zone = exclusionZones[index];
+          if (!zone) return;
+          if (confirm(`Delete Exclusion ${zoneNumber}?`)) {
+            animateZoneDeletion('exclusion', index, zone, () => {
+              exclusionZones[index] = null;
+              updateCoordinatesOutput();
+              updateZoneTileDisplays();
+              updateEditingStatus();
+            });
+          }
         }
       });
     });
@@ -1016,6 +1057,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Update colour indicator to match canvas
     updateZoneColorIndicator(colorIndicator, zoneType, zoneNumber, zone, haZone);
+
+    // Manage delete button
+    const deleteBtn = tile.querySelector('.zone-delete-btn');
+    if (deleteBtn) {
+      const hasEditableZone = !!zone; // enable only when a user zone is present in this slot
+      deleteBtn.disabled = !isEditMode || !hasEditableZone;
+      deleteBtn.title = zoneType === 'regular' ? `Delete Zone ${zoneNumber}` : `Delete Exclusion ${zoneNumber}`;
+      deleteBtn.setAttribute('aria-label', deleteBtn.title);
+    }
   }
 
   function updateZoneColorIndicator(colorIndicator, zoneType, zoneNumber, zone, haZone) {
@@ -1645,9 +1695,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
         
         // Check if zone already exists at this index
-        const haZone = haZones[targetIndex];
-        const haZoneConfigured = haZone && !isZeroCoords(haZone) && !isDefaultDisabledCoords(haZone);
-        if (userZones[targetIndex] || haZoneConfigured) {
+        if (userZones[targetIndex]) {
           alert(`Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
           return;
         }
@@ -1679,9 +1727,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
         
         // Check if exclusion zone already exists at this index
-        const haExcl = haExclusionZones[targetIndex];
-        const haExclConfigured = haExcl && !isZeroCoords(haExcl) && !isDefaultDisabledCoords(haExcl);
-        if (exclusionZones[targetIndex] || haExclConfigured) {
+        if (exclusionZones[targetIndex]) {
           alert(`Exclusion Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
           return;
         }
@@ -4228,6 +4274,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Enter edit mode since we have user zones
         isEditMode = true;
+        document.body.classList.add('is-edit-mode');
         
         drawVisualization();
         updateCoordinatesOutput();
@@ -4269,6 +4316,8 @@ document.addEventListener("DOMContentLoaded", () => {
       
       // Exit edit mode
       isEditMode = false;
+      document.body.classList.remove('is-edit-mode');
+      document.body.classList.remove('is-edit-mode');
       
       drawVisualization();
       updateCoordinatesOutput();
@@ -4303,6 +4352,7 @@ document.addEventListener("DOMContentLoaded", () => {
       
       // Exit edit mode
       isEditMode = false;
+      document.body.classList.remove('is-edit-mode');
       userZones = [];
       exclusionZones = [];
       drawVisualization();
@@ -4379,6 +4429,7 @@ document.addEventListener("DOMContentLoaded", () => {
     
          // Enter edit mode
      isEditMode = true;
+     document.body.classList.add('is-edit-mode');
      
      // Update the UI
      drawVisualization();
