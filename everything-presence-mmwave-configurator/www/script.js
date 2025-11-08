@@ -1,3 +1,15 @@
+// Converted to an ES module via main.js loader
+import { createScaler } from './src/geometry/scaling.js';
+import { hitTestCorner, hitTestRect } from './src/geometry/rect.js';
+import { notifySelectedEntities, createTicker } from './src/io/live.js';
+import { createWSManager } from './src/io/ws.js';
+import { fetchEntityState } from './src/io/rest.js';
+import { drawRadarBackground as renderRadar, drawGrid as renderGrid } from './src/draw/background.js';
+import { drawCornerHandles as renderHandles } from './src/draw/handles.js';
+import { drawTarget as renderTarget, drawPersistentDots as renderDots } from './src/draw/targets.js';
+import { drawZone as renderZone } from './src/draw/zones.js';
+import { drawGhostZone as renderGhostZone } from './src/draw/ghost.js';
+
 document.addEventListener("DOMContentLoaded", () => {
   // Canvas and context
   const canvas = document.getElementById("visualizationCanvas");
@@ -21,466 +33,113 @@ document.addEventListener("DOMContentLoaded", () => {
     return z && z.beginX === -6000 && z.endX === -6000 && z.beginY === -1560 && z.endY === -1560;
   }
 
-  // ==========================
-  // WebSocket Client Manager
-  // ==========================
-  class DirectHAWebSocketManager {
-    constructor() {
-      this.ws = null;
-      this.connected = false;
-      this.authenticated = false;
-      this.reconnectAttempts = 0;
-      this.maxReconnectAttempts = 5;
-      this.reconnectDelay = 2000;
-      this.entityStates = new Map();
-      this.updateTimeout = null;
-      this.messageId = 1;
-      this.subscriptionId = null;
-      this.supervisorToken = null;
-      this.useWebSocket = true; // Feature flag
+  // Global WebSocket manager instance (via IO module)
+  function updateConnectionUI(connected, authenticated) {
+    let statusText = '';
+    let statusClass = '';
+    // If using WebSocket mode, reflect WS status
+    if (wsManager.useWebSocket) {
+      if (connected && authenticated) { statusText = 'Status: Connected (Real-time)'; statusClass = 'connected'; }
+      else if (connected && !authenticated) { statusText = 'Status: Connected, Authentication Failed'; statusClass = 'warning'; }
+      else { statusText = 'Status: Disconnected (Polling)'; statusClass = 'disconnected'; }
+    } else {
+      // REST mode: show current polling state
+      statusText = isRefreshing
+        ? `Status: Refreshing every ${refreshInterval} ms (REST API)`
+        : 'Status: Not Refreshing';
+      statusClass = isRefreshing ? 'connected' : 'disconnected';
     }
 
-    async connect() {
-      try {
-        // Test if backend can provide WebSocket proxy
-        const testResult = await this.testBackendWebSocket();
-        
-        if (testResult.success) {
-          this.connectViaBackendProxy();
-        } else {
-          this.fallbackToPolling();
-        }
-        
-      } catch (error) {
-        console.error('Failed to initialize WebSocket:', error);
-        this.fallbackToPolling();
-      }
-    }
+    const statusIndicator = document.getElementById('statusIndicator');
+    if (statusIndicator) { statusIndicator.textContent = statusText; statusIndicator.className = statusClass; }
 
-    async testBackendWebSocket() {
-      return { success: true, message: 'Backend WebSocket proxy available' };
-    }
-
-    connectViaBackendProxy() {
-      // Calculate WebSocket URL for backend proxy
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const basePath = window.location.pathname.replace(/\/[^\/]*$/, '/');
-      const wsUrl = `${protocol}//${window.location.host}${basePath}ws`;
-      
-      try {
-        this.ws = new WebSocket(wsUrl);
-        this.setupBackendProxyEventHandlers();
-      } catch (error) {
-        console.error('Failed to create backend proxy WebSocket:', error);
-        this.fallbackToPolling();
-      }
-    }
-
-    setupBackendProxyEventHandlers() {
-      this.ws.onopen = () => {
-        this.connected = true;
-        this.authenticated = true;
-        this.reconnectAttempts = 0;
-        this.updateConnectionStatus();
-        
-        // delay to ensure backend WebSocket is ready
-        setTimeout(() => {
-          this.subscribeToEntityUpdates();
-        }, 200);
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          
-          if (message.type === 'event') {
-            this.handleEntityUpdate(message.event);
-          } else if (message.type === 'result') {
-            this.handleResult(message);
-          } else {
-            console.log('Backend proxy message:', message.type);
-          }
-        } catch (error) {
-          console.error('Error parsing backend proxy message:', error);
-        }
-      };
-
-      this.ws.onclose = (event) => {
-        this.connected = false;
-        this.authenticated = false;
-        this.updateConnectionStatus();
-        
-        // Try to reconnect
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.reconnectAttempts++;
-          setTimeout(() => this.connectViaBackendProxy(), this.reconnectDelay);
-        } else {
-          this.fallbackToPolling();
-        }
-      };
-
-      this.ws.onerror = (error) => {
-        console.error('Backend WebSocket proxy error:', error);
-        this.updateConnectionStatus();
-      };
-    }
-
-    setupEventHandlers() {
-      this.ws.onopen = () => {
-        this.connected = true;
-        this.reconnectAttempts = 0;
-        this.updateConnectionStatus();
-      };
-
-      this.ws.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        this.handleMessage(message);
-      };
-
-      this.ws.onclose = (event) => {
-        this.connected = false;
-        this.authenticated = false;
-        this.updateConnectionStatus();
-        
-        // Error code 1006 usually means the connection was refused
-        if (event.code === 1006) {
-          this.fallbackToPolling();
-          return;
-        }
-        
-        // Try to reconnect
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.reconnectAttempts++;
-          setTimeout(() => this.connect(), this.reconnectDelay);
-        } else {
-          this.fallbackToPolling();
-        }
-      };
-
-      this.ws.onerror = (error) => {
-        console.error('HA WebSocket error:', error);
-        this.updateConnectionStatus();
-      };
-    }
-
-    handleMessage(message) {
-      // This method is only used for direct connections (not backend proxy)
-      if (message.type === 'auth_required') {
-        console.error('Direct WebSocket connection requires authentication - falling back to REST API');
-        this.fallbackToPolling();
-      } else if (message.type === 'auth_ok') {
-        this.authenticated = true;
-        this.updateConnectionStatus();
-        this.subscribeToEntityUpdates();
-      } else if (message.type === 'auth_invalid') {
-        console.error('HA WebSocket authentication failed - falling back to REST API');
-        this.fallbackToPolling();
-      } else if (message.type === 'event') {
-        this.handleEntityUpdate(message.event);
-      } else if (message.type === 'result') {
-        this.handleResult(message);
-      }
-    }
-
-    sendMessage(message) {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        if (message.type !== 'auth') {
-          message.id = this.messageId++;
-        }
-        this.ws.send(JSON.stringify(message));
-        return message.id;
-      }
-      return null;
-    }
-
-    subscribeToEntityUpdates() {
-      if (!this.authenticated) return;
-      
-      // Subscribe to state_changed events for EPL entities
-      const subscriptionMessage = {
-        type: 'subscribe_events',
-        event_type: 'state_changed'
-      };
-      
-      this.subscriptionId = this.sendMessage(subscriptionMessage);
-      
-      // Request initial states
-      this.requestInitialStates();
-    }
-
-    requestInitialStates() {
-      if (!this.authenticated || selectedEntities.length === 0) return;
-      
-      // Get current states for all EPL entities
-      this.sendMessage({
-        type: 'get_states'
-      });
-    }
-
-    handleResult(message) {
-      if (message.success && Array.isArray(message.result)) {
-        // Clear existing entity states
-        this.entityStates.clear();
-        
-        // Filter to relevant entities and store them
-        const relevantEntityIds = selectedEntities.map(e => e.id);
-        message.result
-          .filter(entity => relevantEntityIds.includes(entity.entity_id))
-          .forEach(entity => {
-            this.entityStates.set(entity.entity_id, entity);
-          });
-
-        // Process initial data
-        this.processEntityData();
-      } else if (!message.success) {
-        console.error('HA operation failed:', message.error);
-      }
-    }
-
-    handleEntityUpdate(event) {
-      if (event.event_type !== 'state_changed') return;
-      
-      const entityId = event.data.entity_id;
-      const newState = event.data.new_state;
-      
-      // Check if this is one of EPL entities
-      if (this.isRelevantEntity(entityId) && newState) {
-        // Update the entity state
-        this.entityStates.set(entityId, newState);
-
-        // Debounce
-        if (this.updateTimeout) {
-          clearTimeout(this.updateTimeout);
-        }
-        
-        this.updateTimeout = setTimeout(() => {
-          this.processEntityData();
-        }, 50); // 50ms debounce
-      }
-    }
-
-    isRelevantEntity(entityId) {
-      return selectedEntities.some(entity => entity.id === entityId) ||
-             settingsEntities.some(entity => entity.id === entityId);
-    }
-
-    processEntityData() {
-      // Convert Map to array format
-      const entityStates = Array.from(this.entityStates.entries()).map(([entityId, data]) => ({
-        entity_id: entityId,
-        state: data.state,
-        attributes: data.attributes,
-        last_changed: data.last_changed,
-        last_updated: data.last_updated
-      }));
-
-      // Processing logic
-      try {
-        const reconstructed = reconstructZones(entityStates);
-        haZones = reconstructed.regularZones;
-        haExclusionZones = reconstructed.exclusionZones;
-
-        // Process targets
-        this.processTargets(entityStates);
-
-        // Update detection range and installation angle
-        this.updateDetectionSettings(entityStates);
-
-        // Handle persistence
-        this.handlePersistence();
-
-        // Update UI
-        drawVisualization();
-        updateCoordinatesOutput();
-        updateZoneTileDisplays();
-        updateTargetTrackingInfo();
-
-      } catch (error) {
-        console.error('Error processing entity data:', error);
-      }
-    }
-
-    processTargets(entityStates) {
-      const targetNumbers = [1, 2, 3];
-      const updatedTargets = targetNumbers.map((targetNumber) => {
-        // Find corresponding entities for the target
-        const activeEntity = selectedEntities.find((entity) =>
-          entity.id.includes(`target_${targetNumber}_active`)
-        );
-        const xEntity = selectedEntities.find((entity) =>
-          entity.id.includes(`target_${targetNumber}_x`)
-        );
-        const yEntity = selectedEntities.find((entity) =>
-          entity.id.includes(`target_${targetNumber}_y`)
-        );
-        const speedEntity = selectedEntities.find((entity) =>
-          entity.id.includes(`target_${targetNumber}_speed`)
-        );
-        const resolutionEntity = selectedEntities.find((entity) =>
-          entity.id.includes(`target_${targetNumber}_resolution`)
-        );
-        const angleEntity = selectedEntities.find((entity) =>
-          entity.id.includes(`target_${targetNumber}_angle`)
-        );
-        const distanceEntity = selectedEntities.find((entity) =>
-          entity.id.includes(`target_${targetNumber}_distance`)
-        );
-
-        // Extract data from entityStates
-        const activeData = entityStates.find(
-          (entity) => entity.entity_id === (activeEntity ? activeEntity.id : "")
-        );
-        const xData = entityStates.find(
-          (entity) => entity.entity_id === (xEntity ? xEntity.id : "")
-        );
-        const yData = entityStates.find(
-          (entity) => entity.entity_id === (yEntity ? yEntity.id : "")
-        );
-        const speedData = entityStates.find(
-          (entity) => entity.entity_id === (speedEntity ? speedEntity.id : "")
-        );
-        const resolutionData = entityStates.find(
-          (entity) => entity.entity_id === (resolutionEntity ? resolutionEntity.id : "")
-        );
-        const angleData = entityStates.find(
-          (entity) => entity.entity_id === (angleEntity ? angleEntity.id : "")
-        );
-        const distanceData = entityStates.find(
-          (entity) => entity.entity_id === (distanceEntity ? distanceEntity.id : "")
-        );
-
-        return {
-          number: targetNumber,
-          active: activeData && activeData.state === "on",
-          x: getEntityStateMM(xData),
-          y: getEntityStateMM(yData),
-          speed: getEntityStateMM(speedData),
-          resolution: resolutionData ? resolutionData.state : "N/A",
-          angle: angleData ? parseFloat(angleData.state) || 0 : 0,
-          distance: getEntityStateMM(distanceData),
-        };
-      });
-
-      targets = updatedTargets;
-    }
-
-    updateDetectionSettings(entityStates) {
-      const newDetectionRange = entityStates.find(
-        (entity) => entity.entity_id.endsWith(`max_distance`)
-      )?.state ?? 600;
-      detectionRange = newDetectionRange * 10; // Convert from cm to mm
-
-      let newInstallationAngle = Number(
-        entityStates.find((entity) =>
-          entity.entity_id.endsWith(`installation_angle`),
-        )?.state ?? 0,
-      );
-
-      if (installationAngle != newInstallationAngle) {
-        installationAngle = newInstallationAngle;
-        calculateOffsetY();
-      }
-    }
-
-    handlePersistence() {
-      if (isPersistenceEnabled) {
-        targets.forEach((target) => {
-          if (target.active) {
-            const lastDot = persistentDots[persistentDots.length - 1];
-            if (!lastDot || lastDot.x !== target.x || lastDot.y !== target.y) {
-              persistentDots.push({ x: target.x, y: target.y });
-              if (persistentDots.length > 1000) {
-                persistentDots.shift(); // Remove oldest dot
-              }
-            }
-          }
-        });
-      }
-    }
-
-    updateConnectionStatus() {
-      let statusText = '';
-      let statusClass = '';
-
-      if (this.connected && this.authenticated) {
-        statusText = 'Status: Connected (Real-time)';
-        statusClass = 'connected';
-      } else if (this.connected && !this.authenticated) {
-        statusText = 'Status: Connected, Authentication Failed';
-        statusClass = 'warning';
-      } else {
-        statusText = 'Status: Disconnected (Polling)';
-        statusClass = 'disconnected';
-      }
-
-      const statusIndicator = document.getElementById('statusIndicator');
-      if (statusIndicator) {
-        statusIndicator.textContent = statusText;
-        statusIndicator.className = statusClass;
-      }
-
-      this.updateRefreshControlsVisibility();
-    }
-
-     updateRefreshControlsVisibility() {
-       const refreshControls = document.querySelector('.refresh-controls');
-       const refreshRateInput = document.getElementById('refreshRateInput');
-       const setRefreshRateButton = document.getElementById('setRefreshRateButton');
-
-       if (this.useWebSocket && this.isConnected()) {
-         // Hide refresh rate controls when using WebSockets
-         if (refreshControls) {
-           refreshControls.style.opacity = '0.5';
-           refreshControls.style.pointerEvents = 'none';
-         }
-         if (refreshRateInput) refreshRateInput.disabled = true;
-         if (setRefreshRateButton) setRefreshRateButton.disabled = true;
-       } else {
-         // Show refresh rate controls when using REST API
-         if (refreshControls) {
-           refreshControls.style.opacity = '1';
-           refreshControls.style.pointerEvents = 'auto';
-         }
-         if (refreshRateInput) refreshRateInput.disabled = false;
-         if (setRefreshRateButton) setRefreshRateButton.disabled = false;
-       }
-     }
-
-    fallbackToPolling() {
-      this.useWebSocket = false;
-      this.disconnect();
-      
-      // Start polling
-      if (selectedEntities.length > 0) {
-        startLiveRefresh();
-      }
-    }
-
-    disconnect() {
-      if (this.ws) {
-        this.ws.close();
-        this.ws = null;
-      }
-      this.connected = false;
-      this.authenticated = false;
-      this.updateConnectionStatus();
-    }
-
-    onDeviceSelected() {
-      if (this.connected && this.authenticated && selectedEntities.length > 0) {
-        this.requestInitialStates();
-      }
-    }
-
-
-
-    isConnected() {
-      return this.connected && this.authenticated;
+    const refreshControls = document.querySelector('.refresh-controls');
+    const refreshRateInputEl = document.getElementById('refreshRateInput');
+    const setRefreshRateButtonEl = document.getElementById('setRefreshRateButton');
+    if (wsManager.useWebSocket && wsManager.isConnected()) {
+      if (refreshControls) { refreshControls.style.opacity = '0.5'; refreshControls.style.pointerEvents = 'none'; }
+      if (refreshRateInputEl) refreshRateInputEl.disabled = true;
+      if (setRefreshRateButtonEl) setRefreshRateButtonEl.disabled = true;
+    } else {
+      if (refreshControls) { refreshControls.style.opacity = '1'; refreshControls.style.pointerEvents = 'auto'; }
+      if (refreshRateInputEl) refreshRateInputEl.disabled = false;
+      if (setRefreshRateButtonEl) setRefreshRateButtonEl.disabled = false;
     }
   }
 
-  // Global WebSocket manager instance
-  const wsManager = new DirectHAWebSocketManager();
+  function processEntityStates(entityStates) {
+    try {
+      const reconstructed = reconstructZones(entityStates);
+      haZones = reconstructed.regularZones;
+      haExclusionZones = reconstructed.exclusionZones;
+      processTargets(entityStates);
+      updateDetectionSettings(entityStates);
+      handlePersistence();
+      drawVisualization();
+      updateCoordinatesOutput();
+      updateZoneTileDisplays();
+      updateTargetTrackingInfo();
+    } catch (error) { console.error('Error processing entity data:', error); }
+  }
+
+  function processTargets(entityStates) {
+    const targetNumbers = [1, 2, 3];
+    const updatedTargets = targetNumbers.map((targetNumber) => {
+      const activeEntity = selectedEntities.find((entity) => entity.id.includes(`target_${targetNumber}_active`));
+      const xEntity = selectedEntities.find((entity) => entity.id.includes(`target_${targetNumber}_x`));
+      const yEntity = selectedEntities.find((entity) => entity.id.includes(`target_${targetNumber}_y`));
+      const speedEntity = selectedEntities.find((entity) => entity.id.includes(`target_${targetNumber}_speed`));
+      const resolutionEntity = selectedEntities.find((entity) => entity.id.includes(`target_${targetNumber}_resolution`));
+      const angleEntity = selectedEntities.find((entity) => entity.id.includes(`target_${targetNumber}_angle`));
+      const distanceEntity = selectedEntities.find((entity) => entity.id.includes(`target_${targetNumber}_distance`));
+
+      const activeData = entityStates.find((e) => e.entity_id === (activeEntity ? activeEntity.id : ''));
+      const xData = entityStates.find((e) => e.entity_id === (xEntity ? xEntity.id : ''));
+      const yData = entityStates.find((e) => e.entity_id === (yEntity ? yEntity.id : ''));
+      const speedData = entityStates.find((e) => e.entity_id === (speedEntity ? speedEntity.id : ''));
+      const resolutionData = entityStates.find((e) => e.entity_id === (resolutionEntity ? resolutionEntity.id : ''));
+      const angleData = entityStates.find((e) => e.entity_id === (angleEntity ? angleEntity.id : ''));
+      const distanceData = entityStates.find((e) => e.entity_id === (distanceEntity ? distanceEntity.id : ''));
+
+      return {
+        number: targetNumber,
+        active: activeData && activeData.state === 'on',
+        x: getEntityStateMM(xData),
+        y: getEntityStateMM(yData),
+        speed: getEntityStateMM(speedData),
+        resolution: resolutionData ? resolutionData.state : 'N/A',
+        angle: angleData ? parseFloat(angleData.state) || 0 : 0,
+        distance: getEntityStateMM(distanceData),
+      };
+    });
+    targets = updatedTargets;
+  }
+
+  function updateDetectionSettings(entityStates) {
+    const newDetectionRange = entityStates.find((e) => e.entity_id.endsWith('max_distance'))?.state ?? 600;
+    detectionRange = newDetectionRange * 10; // cm -> mm
+    const newInstallationAngle = Number(entityStates.find((e) => e.entity_id.endsWith('installation_angle'))?.state ?? 0);
+    if (installationAngle != newInstallationAngle) { installationAngle = newInstallationAngle; calculateOffsetY(); }
+  }
+
+  function handlePersistence() {
+    if (!isPersistenceEnabled) return;
+    targets.forEach((target) => {
+      if (target.active) {
+        const lastDot = persistentDots[persistentDots.length - 1];
+        if (!lastDot || lastDot.x !== target.x || lastDot.y !== target.y) {
+          persistentDots.push({ x: target.x, y: target.y });
+          if (persistentDots.length > 1000) persistentDots.shift();
+        }
+      }
+    });
+  }
+
+  const wsManager = createWSManager({
+    getSelectedEntities: () => selectedEntities.map(e => e.id),
+    onStatesUpdated: (arr) => processEntityStates(arr),
+    onStatusChange: (c, a) => updateConnectionUI(c, a),
+  });
 
   // ==========================
   // WebSocket Toggle Controls
@@ -529,7 +188,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const toggleRefreshButton = document.getElementById("toggleRefreshButton");
   const statusIndicator = document.getElementById("statusIndicator");
   let refreshInterval = 500;
-  let refreshIntervalId = null;
   let isFetchingData = false;
   let installationAngle = 0;
   let detectionRange = 6000;
@@ -543,7 +201,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let resizeCorner = null;
   const dragOffset = { x: 0, y: 0 };
 
-  // Scaling functions
+  // Scaling
   const scale = canvas.width / 12000; // 0.08 pixels/mm
 
   // Define unique colors for HA Zones
@@ -635,137 +293,11 @@ document.addEventListener("DOMContentLoaded", () => {
     requestAnimationFrame(animate);
   }
 
-  function getAnimationTransform(animationType, progress) {
-    if (animationType === 'appear') {
-      if (progress < 0.5) {
-        // First half: scale from 0 to 1.05
-        const t = progress * 2;
-        return {
-          scale: t * 1.05,
-          opacity: t * 0.8
-        };
-      } else {
-        // Second half: scale from 1.05 to 1
-        const t = (progress - 0.5) * 2;
-        return {
-          scale: 1.05 - (t * 0.05),
-          opacity: 0.8 + (t * 0.2)
-        };
-      }
-    } else if (animationType === 'disappear') {
-      if (progress < 0.5) {
-        // First half: scale from 1 to 1.05
-        const t = progress * 2;
-        return {
-          scale: 1 + (t * 0.05),
-          opacity: 1 - (t * 0.5)
-        };
-      } else {
-        // Second half: scale from 1.05 to 0
-        const t = (progress - 0.5) * 2;
-        return {
-          scale: 1.05 - (t * 1.05),
-          opacity: 0.5 - (t * 0.5)
-        };
-      }
-    }
-    return { scale: 1, opacity: 1 };
-  }
+  // getAnimationTransform moved into draw/zones.js
 
   // Ghost zone drawing function
   function drawGhostZone(zone, zoneType) {
-    if (!zone) return;
-    
-    const x = scaleX(Math.min(zone.beginX, zone.endX));
-    const y = scaleY(Math.min(zone.beginY, zone.endY));
-    const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
-    const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
-
-    // Save canvas state
-    ctx.save();
-    
-    // Ghost zone styling
-    const cornerRadius = 8;
-    const isDarkMode = document.body.classList.contains("dark-mode");
-    
-    let fillColor, strokeColor, glowColor;
-    
-    if (zoneType === "regular") {
-      fillColor = "#8b5cf620";
-      strokeColor = "#8b5cf6";
-      glowColor = "#8b5cf640";
-    } else if (zoneType === "exclusion") {
-      fillColor = "#f8717120";
-      strokeColor = "#f87171";
-      glowColor = "#f8717140";
-    }
-
-    // Draw glow effect
-    ctx.shadowColor = glowColor;
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    
-    // Draw semi-transparent fill
-    ctx.fillStyle = fillColor;
-    ctx.beginPath();
-    ctx.roundRect(x, y, width, height, cornerRadius);
-    ctx.fill();
-    
-    // Reset shadow for border
-    ctx.shadowColor = "transparent";
-    ctx.shadowBlur = 0;
-    
-    // Draw dashed border
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.setLineDash([12, 6]);
-    ctx.globalAlpha = 0.7;
-    
-    ctx.beginPath();
-    ctx.roundRect(x, y, width, height, cornerRadius);
-    ctx.stroke();
-    
-    ctx.strokeStyle = strokeColor + "60"; // 60% opacity
-    ctx.lineWidth = 1;
-    ctx.setLineDash([8, 4]); // Smaller inner dash
-    ctx.globalAlpha = 0.5;
-    
-    ctx.beginPath();
-    ctx.roundRect(x + 2, y + 2, width - 4, height - 4, cornerRadius - 1);
-    ctx.stroke();
-    
-    // Reset line dash and draw preview label
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 0.8;
-    
-    // Font for ghost label
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "left";
-    ctx.font = "500 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-    
-    const label = zoneType === "regular" ? "Zone Preview" : "Exclusion Preview";
-    
-    const textMetrics = ctx.measureText(label);
-    const textWidth = textMetrics.width;
-    const textHeight = 14;
-    const textPadding = 7;
-    const textX = x + 10;
-    const textY = y + textHeight / 2 + 6;
-    
-    // Draw semi-transparent text background
-    ctx.fillStyle = isDarkMode ? "rgba(0, 0, 0, 0.4)" : "rgba(255, 255, 255, 0.9)";
-    ctx.beginPath();
-    ctx.roundRect(textX - textPadding/2, textY - textHeight/2 + 1, textWidth + textPadding, textHeight - 2, 5);
-    ctx.fill();
-    
-    ctx.fillStyle = isDarkMode ? "#ffffff" : "#1a202c";
-    ctx.fillText(label, textX, textY);
-    
-    // Restore canvas state
-    ctx.restore();
+    renderGhostZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, zoneType, { isDarkMode: document.body.classList.contains('dark-mode') });
   }
 
   // Initialize zone tile selection
@@ -1185,24 +717,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // ==========================
-  //   === Scaling Functions ===
-  // ==========================
-  function scaleX(value) {
-    return (value + 6000) * scale;
-  }
-
-  function unscaleX(value) {
-    return value / scale - 6000;
-  }
-
-  function scaleY(value) {
-    return (value + offsetY) * scale;
-  }
-
-  function unscaleY(value) {
-    return value / scale - offsetY;
-  }
+  // Centralized scaling helpers
+  const scaler = createScaler(() => ({ scale, offsetY }));
+  function scaleX(value) { return scaler.scaleX(value); }
+  function unscaleX(value) { return scaler.unscaleX(value); }
+  function scaleY(value) { return scaler.scaleY(value); }
+  function unscaleY(value) { return scaler.unscaleY(value); }
 
   function calculateOffsetY() {
     let absAngle = Math.abs(installationAngle);
@@ -1257,17 +777,17 @@ document.addEventListener("DOMContentLoaded", () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Draw grid lines
-    drawGrid();
+    renderGrid(ctx, (v)=>scaleX(v), (v)=>scaleY(v));
 
     // Draw radar background
-    drawRadarBackground();
+    renderRadar(ctx, (v)=>scaleX(v), (v)=>scaleY(v), installationAngle, detectionRange);
 
     // Draw HA zones in view mode
     if (!isEditMode) {
       haZones.forEach((zone, index) => {
         // Only draw zones that have actual coordinates (not default 0,0,0,0)
         if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
-          drawZone(zone, index, "ha");
+          renderZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "ha", { animatedZones, hoveredZone });
         }
       });
     }
@@ -1277,7 +797,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (zone) { // Only draw non-null zones
         // Don't draw the zone being created, use Ghost zone
         if (!(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "regular")) {
-          drawZone(zone, index, "user");
+          renderZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "user", { animatedZones, hoveredZone });
         }
       }
     });
@@ -1287,7 +807,7 @@ document.addEventListener("DOMContentLoaded", () => {
       haExclusionZones.forEach((zone, index) => {
         // Only draw zones that have actual coordinates (not default 0,0,0,0)
         if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
-          drawZone(zone, index, "haExclusion");
+          renderZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "haExclusion", { animatedZones, hoveredZone });
         }
       });
     }
@@ -1297,7 +817,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (zone) { // Only draw non-null zones
         // Don't draw the exclusion zone being created, use Ghost Zone
         if (!(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "exclusion")) {
-          drawZone(zone, index, "exclusion");
+          renderZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "exclusion", { animatedZones, hoveredZone });
         }
       }
     });
@@ -1305,20 +825,20 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw corner handles for hovered zones
     userZones.forEach((zone, index) => {
       if (zone && !(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "regular")) {
-        drawCornerHandles(zone, index, "user");
+        renderHandles(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "user", hoveredZone, hoveredCorner);
       }
     });
     
     exclusionZones.forEach((zone, index) => {
       if (zone && !(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "exclusion")) {
-        drawCornerHandles(zone, index, "exclusion");
+        renderHandles(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "exclusion", hoveredZone, hoveredCorner);
       }
     });
 
     // Draw animated zones that are being deleted
     animatedZones.forEach((animation, key) => {
       if (animation.type === 'disappear' && animation.zone) {
-        drawZone(animation.zone, animation.index, animation.zoneType);
+        renderZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), animation.zone, animation.index, animation.zoneType, { animatedZones, hoveredZone });
       }
     });
 
@@ -1330,7 +850,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Draw targets
     targets.forEach((target) => {
       if (target.active) {
-        drawTarget(target);
+        renderTarget(ctx, (v)=>scaleX(v), (v)=>scaleY(v), target);
       }
     });
 
@@ -1338,274 +858,26 @@ document.addEventListener("DOMContentLoaded", () => {
     // === Draw Persistent Dots ==
     // ==========================
     if (isPersistenceEnabled) {
-      drawPersistentDots();
+      renderDots(ctx, (v)=>scaleX(v), (v)=>scaleY(v), persistentDots);
     }
 
     // Update zone tile displays
     updateZoneTileDisplays();
   }
 
-  function drawRadarBackground() {
-    const centerX = scaleX(0);
-    const centerY = scaleY(0);
-    const halfDetectionAngle = 60;
-    const startAngleRadians =
-      ((-halfDetectionAngle - installationAngle) / 180) * Math.PI;
-    const endAngleRadians =
-      ((halfDetectionAngle - installationAngle) / 180) * Math.PI;
+  
 
-    const startAngle = Math.PI / 2 + startAngleRadians;
-    const endAngle = Math.PI / 2 + endAngleRadians;
-
-    const radius = scaleY(detectionRange) - scaleY(0);
-
-    ctx.beginPath();
-    ctx.moveTo(centerX, centerY);
-    ctx.arc(centerX, centerY, radius, startAngle, endAngle, false);
-    ctx.closePath();
-
-    ctx.fillStyle = "rgba(168, 216, 234, 0.15)";
-    ctx.fill();
-
-    ctx.strokeStyle = "rgba(168, 216, 234, 0.5)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-
-  function drawZone(zone, index, zoneType) {
-    const x = scaleX(Math.min(zone.beginX, zone.endX));
-    const y = scaleY(Math.min(zone.beginY, zone.endY));
-    const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
-    const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
-
-    // Check if this zone is being animated
-    const animationKey = `${zoneType}-${index}`;
-    const animation = animatedZones.get(animationKey);
-    let transform = { scale: 1, opacity: 1 };
-    
-    if (animation) {
-      const elapsed = Date.now() - animation.startTime;
-      const progress = Math.min(elapsed / animation.duration, 1);
-      transform = getAnimationTransform(animation.type, progress);
-    }
-
-    // Save canvas state for transform
-    ctx.save();
-    
-    // Apply animation transforms
-    if (transform.scale !== 1) {
-      const centerX = x + width / 2;
-      const centerY = y + height / 2;
-      ctx.translate(centerX, centerY);
-      ctx.scale(transform.scale, transform.scale);
-      ctx.translate(-centerX, -centerY);
-    }
-    
-    // Apply opacity
-    ctx.globalAlpha = transform.opacity;
-
-    // Zone styling
-    const cornerRadius = 8;
-    const isDarkMode = document.body.classList.contains("dark-mode");
-    
-    // Check if this zone is being hovered
-    const isHovered = hoveredZone && 
-                     hoveredZone.type === zoneType && 
-                     hoveredZone.index === index &&
-                     (zoneType === "user" || zoneType === "exclusion");
-    
-    // Define color schemes
-    let fillGradient, strokeColor, shadowColor, labelColor;
-    
-    if (zoneType === "ha") {
-      const colors = [
-        { fill: ["#3b82f6", "#1d4ed8"], stroke: "#1e40af", shadow: "#3b82f680" }, // Blue
-        { fill: ["#10b981", "#047857"], stroke: "#065f46", shadow: "#10b98180" }, // Green  
-        { fill: ["#f59e0b", "#d97706"], stroke: "#92400e", shadow: "#f59e0b80" }, // Amber
-        { fill: ["#ef4444", "#dc2626"], stroke: "#991b1b", shadow: "#ef444480" }, // Red
-      ];
-      const color = colors[index % colors.length];
-      fillGradient = color.fill;
-      strokeColor = color.stroke;
-      shadowColor = color.shadow;
-    } else if (zoneType === "user") {
-      fillGradient = ["#8b5cf6", "#7c3aed"]; // Purple gradient
-      strokeColor = "#6d28d9";
-      shadowColor = "#8b5cf680";
-    } else if (zoneType === "haExclusion") {
-      fillGradient = ["#f87171", "#ef4444"]; // red gradient
-      strokeColor = "#dc2626";
-      shadowColor = "#f8717180";
-    } else if (zoneType === "exclusion") {
-      fillGradient = ["#f87171", "#ef4444"]; // red gradient
-      strokeColor = "#dc2626";
-      shadowColor = "#f8717180";
-    }
-
-    // Create gradient fill with hover
-    const gradient = ctx.createLinearGradient(x, y, x, y + height);
-    const topOpacity = isHovered ? "30" : "20";
-    const bottomOpacity = isHovered ? "40" : "30";
-    gradient.addColorStop(0, fillGradient[0] + topOpacity); // Enhanced opacity when hovered
-    gradient.addColorStop(1, fillGradient[1] + bottomOpacity); // Enhanced opacity when hovered
-    
-    // Draw shadow effect with hover
-    ctx.shadowColor = shadowColor;
-    ctx.shadowBlur = isHovered ? 12 : 6;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = isHovered ? 3 : 2;
-
-    // Draw rounded rectangle with gradient fill
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.roundRect(x, y, width, height, cornerRadius);
-    ctx.fill();
-    
-    // Reset shadow for border
-    ctx.shadowColor = "transparent";
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
-    
-    // Draw border with hover
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = isHovered ? 3 : 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.roundRect(x, y, width, height, cornerRadius);
-    ctx.stroke();
-
-    // Add inner highlight
-    ctx.strokeStyle = fillGradient[0] + "40"; // 40% opacity highlight
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(x + 1, y + 1, width - 2, height - 2, cornerRadius - 1);
-    ctx.stroke();
-
-    // Font for labels
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "left";
-    
-    // Use system fonts for better cross-platform
-    ctx.font = "500 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-    
-    let zoneLabel;
-    if (zoneType === "ha") {
-      zoneLabel = `HA Zone ${index + 1}`;
-    } else if (zoneType === "user") {
-      zoneLabel = `Zone ${index + 1}`;
-    } else if (zoneType === "exclusion") {
-      zoneLabel = `Exclusion ${index + 1}`;
-    } else if (zoneType === "haExclusion") {
-      zoneLabel = `HA Exclusion ${index + 1}`;
-    }
-    
-    // Measure text for better positioning
-    const textMetrics = ctx.measureText(zoneLabel);
-    const textWidth = textMetrics.width;
-    const textHeight = 16;
-    const textPadding = 8;
-    const textX = x + 10;
-    const textY = y + textHeight / 2 + 6;
-    
-    // Draw text background
-    ctx.fillStyle = isDarkMode ? "rgba(0, 0, 0, 0.3)" : "rgba(255, 255, 255, 0.8)";
-    ctx.beginPath();
-    ctx.roundRect(textX - textPadding/2, textY - textHeight/2 + 1, textWidth + textPadding, textHeight - 2, 6);
-    ctx.fill();
-    
-    // Draw text
-    ctx.fillStyle = isDarkMode ? "#ffffff" : "#1a202c";
-    ctx.fillText(zoneLabel, textX, textY);
-    
-    // Restore canvas state
-    ctx.restore();
-  }
+  
 
   // Draw corner handles for hover
-  function drawCornerHandles(zone, index, zoneType) {
-    if (!hoveredZone || hoveredZone.type !== zoneType || hoveredZone.index !== index) return;
-    
-    const x = scaleX(Math.min(zone.beginX, zone.endX));
-    const y = scaleY(Math.min(zone.beginY, zone.endY));
-    const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
-    const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
-    
-    const baseHandleSize = 8;
-    const pulseEffect = 0.2 * Math.sin(Date.now() * 0.003);
-    const handleSize = baseHandleSize + pulseEffect;
-    const isDarkMode = document.body.classList.contains("dark-mode");
-    
-    // Define corner positions
-    const corners = [
-      { x: x, y: y, corner: "top-left" },
-      { x: x + width, y: y, corner: "top-right" },
-      { x: x, y: y + height, corner: "bottom-left" },
-      { x: x + width, y: y + height, corner: "bottom-right" }
-    ];
-    
-    ctx.save();
-    
-    corners.forEach(corner => {
-      const isHovered = hoveredCorner === corner.corner;
-      
-      // Draw glow effect for hovered corner
-      if (isHovered) {
-        ctx.shadowColor = isDarkMode ? "#ffffff60" : "#00000040";
-        ctx.shadowBlur = 8;
-      } else {
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
-      }
-      
-      // Draw corner handle
-      ctx.fillStyle = isHovered 
-        ? (isDarkMode ? "#ffffff" : "#1a202c")
-        : (isDarkMode ? "#ffffff80" : "#1a202c80");
-      
-      ctx.beginPath();
-      ctx.arc(corner.x, corner.y, handleSize / 2, 0, 2 * Math.PI);
-      ctx.fill();
-      
-      // Draw inner dot
-      ctx.shadowColor = "transparent";
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = isHovered
-        ? (isDarkMode ? "#1a202c" : "#ffffff")
-        : (isDarkMode ? "#1a202c60" : "#ffffff60");
-      
-      ctx.beginPath();
-      ctx.arc(corner.x, corner.y, 2, 0, 2 * Math.PI);
-      ctx.fill();
-    });
-    
-    ctx.restore();
-  }
+  
 
-  function drawTarget(target) {
-    const x = scaleX(target.x);
-    const y = scaleY(target.y);
-
-    ctx.beginPath();
-    ctx.arc(x, y, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = "red";
-    ctx.fill();
-    ctx.closePath();
-  }
+  
 
   // ==========================
   //   === Persistent Dots ===
   // ==========================
-  function drawPersistentDots() {
-    ctx.fillStyle = "black"; // Choose desired color for persistent dots
-    persistentDots.forEach((dot) => {
-      ctx.beginPath();
-      ctx.arc(scaleX(dot.x), scaleY(dot.y), 3, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.closePath();
-    });
-  }
+  
 
   // ==========================
   //    === Event Listeners ===
@@ -1662,6 +934,8 @@ document.addEventListener("DOMContentLoaded", () => {
   
   // Start the hover animation loop
   animateHoverEffects();
+
+  // Debug tests button removed
 
   function onMouseDown(e) {
     // Block zone editing if not in edit mode
@@ -1884,27 +1158,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateCoordinatesOutput();
   }
 
-  function drawGrid() {
-    const gridSize = 1000; // Grid every 1000 mm
-    ctx.strokeStyle = "#e0e0e0";
-    ctx.lineWidth = 1;
-
-    // Vertical grid lines
-    for (let x = -6000; x <= 6000; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(scaleX(x), scaleY(-2000));
-      ctx.lineTo(scaleX(x), scaleY(7500));
-      ctx.stroke();
-    }
-
-    // Horizontal grid lines
-    for (let y = -2000; y <= 7500; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(scaleX(-6000), scaleY(y));
-      ctx.lineTo(scaleX(6000), scaleY(y));
-      ctx.stroke();
-    }
-  }
+  
 
   function onMouseUp(e) {
     // Check finished creating a zone
@@ -2181,63 +1435,32 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getZoneAtPosition(pos) {
+    const mmToPx = { x: (mm) => scaleX(mm), y: (mm) => scaleY(mm) };
+    const cornerRadiusPx = 4; // matches previous handle half-size
+
     // Check exclusion zones first (higher priority)
     for (let i = exclusionZones.length - 1; i >= 0; i--) {
       const zone = exclusionZones[i];
       if (!zone) continue; // Skip null zones
-      
-      const x = scaleX(Math.min(zone.beginX, zone.endX));
-      const y = scaleY(Math.min(zone.beginY, zone.endY));
-      const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
-      const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
+      const rect = { x1: zone.beginX, y1: zone.beginY, x2: zone.endX, y2: zone.endY };
 
-      const handleSize = 8;
-      const corners = [
-        { x: x, y: y, corner: "top-left", type: "exclusion", index: i },
-        {
-          x: x + width,
-          y: y,
-          corner: "top-right",
-          type: "exclusion",
-          index: i,
-        },
-        {
-          x: x,
-          y: y + height,
-          corner: "bottom-left",
-          type: "exclusion",
-          index: i,
-        },
-        {
-          x: x + width,
-          y: y + height,
-          corner: "bottom-right",
-          type: "exclusion",
-          index: i,
-        },
-      ];
-      for (const corner of corners) {
-        if (
-          pos.x >= corner.x - handleSize / 2 &&
-          pos.x <= corner.x + handleSize / 2 &&
-          pos.y >= corner.y - handleSize / 2 &&
-          pos.y <= corner.y + handleSize / 2
-        ) {
-          return {
-            index: corner.index,
-            corner: corner.corner,
-            zoneType: corner.type,
-          };
-        }
+      // Corner hit-tests
+      if (hitTestCorner(rect, 'topLeft', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'top-left', zoneType: 'exclusion' };
+      }
+      if (hitTestCorner(rect, 'topRight', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'top-right', zoneType: 'exclusion' };
+      }
+      if (hitTestCorner(rect, 'bottomLeft', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'bottom-left', zoneType: 'exclusion' };
+      }
+      if (hitTestCorner(rect, 'bottomRight', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'bottom-right', zoneType: 'exclusion' };
       }
 
-      if (
-        pos.x >= x &&
-        pos.x <= x + width &&
-        pos.y >= y &&
-        pos.y <= y + height
-      ) {
-        return { index: i, corner: null, zoneType: "exclusion" };
+      // Body hit-test
+      if (hitTestRect(rect, pos.x, pos.y, mmToPx, 0)) {
+        return { index: i, corner: null, zoneType: 'exclusion' };
       }
     }
 
@@ -2245,43 +1468,23 @@ document.addEventListener("DOMContentLoaded", () => {
     for (let i = userZones.length - 1; i >= 0; i--) {
       const zone = userZones[i];
       if (!zone) continue; // Skip null zones
-      
-      const x = scaleX(Math.min(zone.beginX, zone.endX));
-      const y = scaleY(Math.min(zone.beginY, zone.endY));
-      const width = Math.abs(scaleX(zone.endX) - scaleX(zone.beginX));
-      const height = Math.abs(scaleY(zone.endY) - scaleY(zone.beginY));
+      const rect = { x1: zone.beginX, y1: zone.beginY, x2: zone.endX, y2: zone.endY };
 
-      const handleSize = 8;
-      const corners = [
-        { x: x, y: y, corner: "top-left", type: "user", index: i },
-        { x: x + width, y: y, corner: "top-right", type: "user", index: i },
-        { x: x, y: y + height, corner: "bottom-left", type: "user", index: i },
-        {
-          x: x + width,
-          y: y + height,
-          corner: "bottom-right",
-          type: "user",
-          index: i,
-        },
-      ];
-      for (const corner of corners) {
-        if (
-          pos.x >= corner.x - handleSize / 2 &&
-          pos.x <= corner.x + handleSize / 2 &&
-          pos.y >= corner.y - handleSize / 2 &&
-          pos.y <= corner.y + handleSize / 2
-        ) {
-          return { index: corner.index, corner: corner.corner, zoneType: corner.type };
-        }
+      if (hitTestCorner(rect, 'topLeft', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'top-left', zoneType: 'user' };
+      }
+      if (hitTestCorner(rect, 'topRight', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'top-right', zoneType: 'user' };
+      }
+      if (hitTestCorner(rect, 'bottomLeft', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'bottom-left', zoneType: 'user' };
+      }
+      if (hitTestCorner(rect, 'bottomRight', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'bottom-right', zoneType: 'user' };
       }
 
-      if (
-        pos.x >= x &&
-        pos.x <= x + width &&
-        pos.y >= y &&
-        pos.y <= y + height
-      ) {
-        return { index: i, corner: null, zoneType: "user" };
+      if (hitTestRect(rect, pos.x, pos.y, mmToPx, 0)) {
+        return { index: i, corner: null, zoneType: 'user' };
       }
     }
     return null;
@@ -2315,28 +1518,7 @@ document.addEventListener("DOMContentLoaded", () => {
     coordinatesOutput.textContent = output;
   }
 
-  // ==========================
-  //   === Fetch Entity State ===
-  // ==========================
-  async function fetchEntityState(entityId) {
-    if (!entityId) {
-      console.error("Attempted to fetch entity with undefined ID.");
-      return null;
-    }
-
-    try {
-      const response = await fetch(`api/entities/${entityId}`);
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch entity ${entityId}: ${response.statusText}`
-        );
-      }
-      return await response.json();
-    } catch (error) {
-      console.error(`Error fetching entity ${entityId}:`, error);
-      return null;
-    }
-  }
+  // Fetch Entity State moved to src/io/rest.js
 
   // ==========================
   //   === Dark Mode Toggle ===
@@ -2551,31 +1733,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Function to notify backend about selected entities for WebSocket
   async function notifyBackendOfSelectedEntities() {
-    try {
-      const zoneEntityIds = selectedEntities.map(e => e.id);
-      const settingsEntityIds = settingsEntities.map(e => e.id);
-      const allEntityIds = [...zoneEntityIds, ...settingsEntityIds];
-      
-      const response = await fetch('api/selected-entities', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          entity_ids: allEntityIds
-        })
-      });
-      
-      if (response.ok) {
-        return true;
-      } else {
-        console.warn('Failed to notify backend of selected entities:', response.status);
-        return false;
-      }
-    } catch (error) {
-      console.warn('Error notifying backend of selected entities:', error);
-      return false;
-    }
+    const zoneEntityIds = selectedEntities.map(e => e.id);
+    const settingsEntityIds = settingsEntities.map(e => e.id);
+    const allEntityIds = [...zoneEntityIds, ...settingsEntityIds];
+    const ok = await notifySelectedEntities(allEntityIds);
+    if (!ok) console.warn('Failed to notify backend of selected entities');
+    return ok;
   }
 
   // Function to filter required entities based on naming conventions
@@ -3321,26 +2484,18 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshInterval = rate;
     refreshRateInput.value = rate;
 
-    if (refreshIntervalId !== null) {
-      clearInterval(refreshIntervalId);
-    }
-
-    if (selectedEntities.length === 0) {
-      alert("No entities selected for live updating.");
-      return;
-    }
-
-    fetchLiveData();
-
-    refreshIntervalId = setInterval(fetchLiveData, refreshInterval);
-
-    statusIndicator.textContent = `Status: Refreshing every ${refreshInterval} ms`;
-
-    // Update toggleRefreshButton text based on whether it's starting or stopping
-    // If it's programmatic, keep the current state
-    if (!isProgrammatic) {
-      isRefreshing = true;
-      toggleRefreshButton.textContent = "Stop Refresh";
+    // If currently using REST polling, restart ticker
+    if (!wsManager.useWebSocket || !wsManager.isConnected()) {
+      if (selectedEntities.length === 0) {
+        alert("No entities selected for live updating.");
+        return;
+      }
+      pollTicker.start();
+      statusIndicator.textContent = `Status: Refreshing every ${refreshInterval} ms (REST API)`;
+      if (!isProgrammatic) {
+        isRefreshing = true;
+        toggleRefreshButton.textContent = "Stop Refresh";
+      }
     }
   }
 
@@ -3348,6 +2503,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // === Live Refresh ===
   // ==========================
   let isRefreshing = false; // To track refresh state
+
+  const pollTicker = createTicker({ onTick: () => fetchLiveData(), getIntervalMs: () => refreshInterval });
 
   function startLiveRefresh() {
     // If WebSocket is available and connected, use it instead
@@ -3360,19 +2517,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Fallback to REST API polling
-    if (refreshIntervalId !== null) {
-      clearInterval(refreshIntervalId);
-    }
-
     if (selectedEntities.length === 0) {
       alert("No entities selected for live updating.");
       return;
     }
 
-    fetchLiveData();
-
-    refreshIntervalId = setInterval(fetchLiveData, refreshInterval);
-
+    pollTicker.start();
     statusIndicator.textContent = `Status: Refreshing every ${refreshInterval} ms (REST API)`;
     isRefreshing = true;
     toggleRefreshButton.textContent = "Stop Refresh";
@@ -3388,13 +2538,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Stop REST API polling
-    if (refreshIntervalId !== null) {
-      clearInterval(refreshIntervalId);
-      refreshIntervalId = null;
-      statusIndicator.textContent = "Status: Not Refreshing";
-      isRefreshing = false;
-      toggleRefreshButton.textContent = "Start Refresh";
-    }
+    pollTicker.stop();
+    statusIndicator.textContent = "Status: Not Refreshing";
+    isRefreshing = false;
+    toggleRefreshButton.textContent = "Start Refresh";
   }
 
   function toggleRefresh() {
