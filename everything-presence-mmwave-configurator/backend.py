@@ -2,11 +2,14 @@
 
 from flask import Flask, jsonify, request, Response
 from flask_sock import Sock
+from urllib.parse import urlparse
 import requests
 import os
 import logging
 import threading
+import ssl
 import sys
+import urllib3
 import time
 import json
 
@@ -22,6 +25,10 @@ sock = Sock(app)
 SUPERVISOR_TOKEN = os.getenv('SUPERVISOR_TOKEN')
 HA_URL = os.getenv('HA_URL')
 HA_TOKEN = os.getenv('HA_TOKEN')
+VERIFY_SSL = os.getenv('VERIFY_SSL', 'true').lower() == 'true'
+
+if not VERIFY_SSL:
+    urllib3.disable_warnings()
 
 if SUPERVISOR_TOKEN:
     HOME_ASSISTANT_API = 'http://supervisor/core/api'
@@ -42,7 +49,7 @@ else:
 def check_connectivity():
     """Function to check connectivity with Home Assistant API."""
     try:
-        response = requests.get(f'{HOME_ASSISTANT_API}/', headers=headers, timeout=10)
+        response = requests.get(f'{HOME_ASSISTANT_API}/', headers=headers, timeout=10, verify=VERIFY_SSL)
         
         if response.status_code != 200:
             logging.error(f"Failed to connect to Home Assistant API. Status Code: {response.status_code}")
@@ -55,7 +62,7 @@ def health_check():
     """Health check endpoint to test HA connectivity"""
     try:
         logging.error("🩺 Health check requested")
-        response = requests.get(f'{HOME_ASSISTANT_API}/', headers=headers, timeout=5)
+        response = requests.get(f'{HOME_ASSISTANT_API}/', headers=headers, timeout=5, verify=VERIFY_SSL)
         
         return jsonify({
             "backend_status": "running",
@@ -92,7 +99,8 @@ def execute_template():
             f'{HOME_ASSISTANT_API}/template',
             headers=headers,
             json={"template": template},
-            timeout=10
+            timeout=10,
+            verify=VERIFY_SSL
         )
         
         if response.status_code == 200:
@@ -119,7 +127,7 @@ def get_entity_state(entity_id):
     """
     Endpoint to get the state of a specific entity.
     """
-    response = requests.get(f'{HOME_ASSISTANT_API}/states/{entity_id}', headers=headers)
+    response = requests.get(f'{HOME_ASSISTANT_API}/states/{entity_id}', headers=headers, verify=VERIFY_SSL)
     if response.status_code == 200:
         return jsonify(response.json())
     else:
@@ -141,7 +149,7 @@ def set_value():
         }
         
         # Make the POST request to Home Assistant API
-        response = requests.post(f'{HOME_ASSISTANT_API}/services/number/set_value', headers=headers, json=payload)
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/number/set_value', headers=headers, json=payload, verify=VERIFY_SSL)
 
         if response.status_code == 200:
             return jsonify({"message": f"Entity {entity_id} updated successfully."}), 200
@@ -165,7 +173,7 @@ def switch_turn_on():
         }
         
         # Make the POST request to Home Assistant API
-        response = requests.post(f'{HOME_ASSISTANT_API}/services/switch/turn_on', headers=headers, json=payload)
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/switch/turn_on', headers=headers, json=payload, verify=VERIFY_SSL)
 
         if response.status_code == 200:
             return jsonify({"message": f"Switch {entity_id} turned on successfully."}), 200
@@ -189,7 +197,7 @@ def switch_turn_off():
         }
         
         # Make the POST request to Home Assistant API
-        response = requests.post(f'{HOME_ASSISTANT_API}/services/switch/turn_off', headers=headers, json=payload)
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/switch/turn_off', headers=headers, json=payload, verify=VERIFY_SSL)
 
         if response.status_code == 200:
             return jsonify({"message": f"Switch {entity_id} turned off successfully."}), 200
@@ -215,7 +223,7 @@ def select_option():
         }
         
         # Make the POST request to Home Assistant API
-        response = requests.post(f'{HOME_ASSISTANT_API}/services/select/select_option', headers=headers, json=payload)
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/select/select_option', headers=headers, json=payload, verify=VERIFY_SSL)
 
         if response.status_code == 200:
             return jsonify({"message": f"Select entity {entity_id} updated successfully."}), 200
@@ -239,7 +247,7 @@ def light_turn_on():
         }
         
         # Make the POST request to Home Assistant API
-        response = requests.post(f'{HOME_ASSISTANT_API}/services/light/turn_on', headers=headers, json=payload)
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/light/turn_on', headers=headers, json=payload, verify=VERIFY_SSL)
 
         if response.status_code == 200:
             return jsonify({"message": f"Light {entity_id} turned on successfully."}), 200
@@ -263,7 +271,7 @@ def light_turn_off():
         }
         
         # Make the POST request to Home Assistant API
-        response = requests.post(f'{HOME_ASSISTANT_API}/services/light/turn_off', headers=headers, json=payload)
+        response = requests.post(f'{HOME_ASSISTANT_API}/services/light/turn_off', headers=headers, json=payload, verify=VERIFY_SSL)
 
         if response.status_code == 200:
             return jsonify({"message": f"Light {entity_id} turned off successfully."}), 200
@@ -448,12 +456,9 @@ def websocket_proxy(ws):
     if supervisor_token:
         websocket_url = 'ws://supervisor/core/websocket'
     elif ha_url and ha_token:
-        # This slightly odd replace statement allows us to transform
-        # http://hostname to ws://hostname
-        # https://hostname to wss://hostname
-        # It's a bit inflexible because it hard requires the http(s),
-        # but that's how the example is written either way
-        websocket_url = ha_url.replace("http", "ws", 1) + '/api/websocket'
+        parsed_url = urlparse(ha_url)
+        scheme = 'wss' if parsed_url.scheme == 'https' else 'ws'
+        websocket_url = f"{scheme}://{parsed_url.netloc}/api/websocket"
     else:
         logging.error("No supervisor token or HA_URL available for websocket proxy")
     
@@ -466,7 +471,8 @@ def websocket_proxy(ws):
                                    on_close=ha_on_close)
     
     # Start HA WebSocket in background thread
-    ha_thread = threading.Thread(target=ha_ws.run_forever)
+    args = {"sslopt": {"cert_reqs": ssl.CERT_NONE}} if not VERIFY_SSL else {}
+    ha_thread = threading.Thread(target=ha_ws.run_forever, kwargs=args)
     ha_thread.daemon = True
     ha_thread.start()
     
