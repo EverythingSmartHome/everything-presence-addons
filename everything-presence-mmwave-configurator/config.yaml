@@ -11,6 +11,7 @@ arch:
   - i386
 startup: services
 boot: auto
+panel_title: EP Zones
 ingress: true
 ingress_port: 8099
 ingress_entry: index.html
