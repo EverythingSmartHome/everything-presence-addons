@@ -1,0 +1,20 @@
+target-version = "py312"
+
+lint.select = ["ALL"]
+
+lint.ignore = [
+    "COM812",   # Trailing comma missing (conflicts with formatter)
+    "D203",     # 1 blank line required before class docstring (conflicts with `no-blank-line-before-class` (D211))
+    "D213",     # Multi-line docstring summary should start at the second line (conflicts with multi-line-summary-first-line` (D212))
+    "EM101",    # Exception must not use a string literal, assign to variable first
+    "EM102",    # Exception must not use an f-string literal, assign to variable first
+    "FBT001",   # Boolean-typed positional argument in function definition
+    "FBT002",   # Boolean default positional argument in function definition
+    "FBT003",   # Boolean positional value in function call
+    "N818",     # Exception name should be named with an Error suffix
+    "PLR0912",  # Too many branches
+    "TRY003",   # Avoid specifying long messages outside the exception class
+]
+
+[lint.mccabe]
+max-complexity = 18
