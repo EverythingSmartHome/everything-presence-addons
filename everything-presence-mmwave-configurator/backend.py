@@ -312,6 +312,10 @@ def is_mmwave_entity(entity_id):
         "zone_2_begin_x", "zone_2_begin_y", "zone_2_end_x", "zone_2_end_y", 
         "zone_3_begin_x", "zone_3_begin_y", "zone_3_end_x", "zone_3_end_y",
         "zone_4_begin_x", "zone_4_begin_y", "zone_4_end_x", "zone_4_end_y",
+
+        # Entry Zone Coordinates (PR2)
+        "entry_zone_1_begin_x", "entry_zone_1_begin_y", "entry_zone_1_end_x", "entry_zone_1_end_y",
+        "entry_zone_2_begin_x", "entry_zone_2_begin_y", "entry_zone_2_end_x", "entry_zone_2_end_y",
         
         # Target Tracking
         "target_1_active", "target_2_active", "target_3_active",
@@ -332,6 +336,8 @@ def is_mmwave_entity(entity_id):
         # Configured Values
         "max_distance", "installation_angle",
         
+        # Entry/Exit diagnostics
+        "assumed_present", "assumed_present_remaining_s",
         # Occupancy Masks (Exclusion Zones)
         "occupancy_mask_1_begin_x", "occupancy_mask_1_begin_y", 
         "occupancy_mask_1_end_x", "occupancy_mask_1_end_y",
@@ -343,6 +349,9 @@ def is_mmwave_entity(entity_id):
         "off_delay", "zone_1_off_delay", "zone_2_off_delay", "zone_3_off_delay", "zone_4_off_delay",
         "aggressive_timeout", "illuminance_offset_ui", "illuminance_offset",
         "esp32_led", "status_led",
+
+        # Entry/Exit (PR2) settings
+        "entry_exit_enabled", "assume_present_timeout_s", "exit_threshold_pct",
     ]
     
     return any(entity_id.endswith(suffix) for suffix in required_suffixes)

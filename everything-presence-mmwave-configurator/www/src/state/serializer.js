@@ -1,6 +1,6 @@
 // Simple zones serializer to match current export/import format
 
-export function serializeZones(userZones, exclusionZones) {
+export function serializeZones(userZones, exclusionZones, entryZones) {
   const sanitize = (z) => {
     const src = z || {};
     return {
@@ -13,6 +13,7 @@ export function serializeZones(userZones, exclusionZones) {
   return {
     userZones: (userZones || []).map(sanitize),
     exclusionZones: (exclusionZones || []).map(sanitize),
+    entryZones: (entryZones || []).map(sanitize),
   };
 }
 
@@ -29,5 +30,6 @@ export function deserializeZones(obj) {
   return {
     userZones: (obj.userZones || []).map(toZone),
     exclusionZones: (obj.exclusionZones || []).map(toZone),
+    entryZones: (obj.entryZones || []).map(toZone),
   };
 }

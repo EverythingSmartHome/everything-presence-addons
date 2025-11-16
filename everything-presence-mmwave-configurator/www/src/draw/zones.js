@@ -30,7 +30,7 @@ export function drawZone(ctx, scaleX, scaleY, zone, index, zoneType, { animatedZ
   ctx.globalAlpha = transform.opacity;
 
   const cornerRadius = 8;
-  const isHovered = hoveredZone && hoveredZone.type === zoneType && hoveredZone.index === index && (zoneType === 'user' || zoneType === 'exclusion');
+  const isHovered = hoveredZone && hoveredZone.type === zoneType && hoveredZone.index === index && (zoneType === 'user' || zoneType === 'exclusion' || zoneType === 'entry');
 
   let fillGradient, strokeColor, shadowColor;
   if (zoneType === 'ha') {
@@ -52,6 +52,10 @@ export function drawZone(ctx, scaleX, scaleY, zone, index, zoneType, { animatedZ
     fillGradient = ['#f87171', '#ef4444'];
     strokeColor = '#dc2626';
     shadowColor = '#f8717180';
+  } else if (zoneType === 'haEntry' || zoneType === 'entry') {
+    fillGradient = ['#14b8a6', '#0d9488']; // teal gradient
+    strokeColor = '#0f766e';
+    shadowColor = '#14b8a680';
   } else {
     fillGradient = ['#999999', '#777777'];
     strokeColor = '#555555';
@@ -101,7 +105,9 @@ export function drawZone(ctx, scaleX, scaleY, zone, index, zoneType, { animatedZ
   if (zoneType === 'ha') zoneLabel = `HA Zone ${index + 1}`;
   else if (zoneType === 'user') zoneLabel = `Zone ${index + 1}`;
   else if (zoneType === 'exclusion') zoneLabel = `Exclusion ${index + 1}`;
+  else if (zoneType === 'entry') zoneLabel = `Entry ${index + 1}`;
   else if (zoneType === 'haExclusion') zoneLabel = `HA Exclusion ${index + 1}`;
+  else if (zoneType === 'haEntry') zoneLabel = `HA Entry ${index + 1}`;
 
   const textMetrics = ctx.measureText(zoneLabel);
   const textWidth = textMetrics.width;
@@ -142,4 +148,3 @@ function getAnimationTransform(animationType, progress) {
   }
   return { scale: 1, opacity: 1 };
 }
-

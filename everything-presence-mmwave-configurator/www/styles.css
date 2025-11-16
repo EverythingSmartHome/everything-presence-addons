@@ -680,6 +680,10 @@ body.is-edit-mode .zone-delete-btn {
   background: linear-gradient(to bottom, #f87171, #ef4444); 
   opacity: 1; /* Show when colored */
 }
+.zone-color-indicator.entry-zone {
+  background: linear-gradient(to bottom, #14b8a6, #0d9488);
+  opacity: 1;
+}
 
 /* Editing Status Indicator */
 #editing-status {
@@ -2094,4 +2098,16 @@ body.dark-mode .settings-number-input.invalid:focus {
 }
 
 
+
+
+/* Assumed Presence Banner */
+#assumedPresenceBanner.info-banner {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--warning-bg, rgba(250, 204, 21, 0.15));
+  color: var(--warning-fg, #92400e);
+  border: 1px solid var(--warning-border, rgba(250, 204, 21, 0.4));
+  font-size: 0.95rem;
+}
 

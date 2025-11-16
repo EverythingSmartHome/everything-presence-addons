@@ -63,6 +63,11 @@
 
         <!-- Status Indicator -->
         <div id="statusIndicator">Status: Refreshing every 500 ms</div>
+
+        <!-- Assumed Presence Banner -->
+        <div id="assumedPresenceBanner" style="display:none;" class="info-banner">
+          <span id="assumedPresenceText">Likely present</span>
+        </div>
       </div>
 
       <!-- Display Target Tracking Information and Occupancy State -->
@@ -121,6 +126,15 @@
                   </tr>
               </tbody>
           </table>
+          <div id="assumed-presence-info" style="margin-top: 15px; padding: 10px; border-top: 1px solid var(--border-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong>Assumed Presence:</strong>
+              <span id="assumed-presence-status" style="padding: 4px 12px; border-radius: 4px; font-weight: 500;">N/A</span>
+            </div>
+            <div id="assumed-presence-remaining" style="margin-top: 5px; font-size: 0.9em; color: var(--text-secondary); display: none;">
+              Remaining: <span id="assumed-presence-time">0</span>s
+            </div>
+          </div>
           </div>
         </div>
 
@@ -236,6 +250,35 @@
                 <span class="coord-label">Y:</span> <span class="coord-value" id="exclusion-2-y-display">—</span>
               </div>
               <div class="zone-status-text" id="exclusion-2-status">Disabled</div>
+            </div>
+
+            <!-- Entry Zones -->
+            <div class="zone-tile" data-zone-type="entry" data-zone-number="1">
+              <div class="zone-color-indicator"></div>
+              <div class="zone-tile-header">
+                <span class="zone-title">Entry 1</span>
+                <button class="zone-delete-btn" title="Delete Entry 1" aria-label="Delete Entry 1">✖</button>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="entry-1-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="entry-1-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="entry-1-status">Disabled</div>
+            </div>
+
+            <div class="zone-tile" data-zone-type="entry" data-zone-number="2">
+              <div class="zone-color-indicator"></div>
+              <div class="zone-tile-header">
+                <span class="zone-title">Entry 2</span>
+                <button class="zone-delete-btn" title="Delete Entry 2" aria-label="Delete Entry 2">✖</button>
+                <div class="zone-status-indicator"></div>
+              </div>
+              <div class="zone-coordinates">
+                <span class="coord-label">X:</span> <span class="coord-value" id="entry-2-x-display">—</span>
+                <span class="coord-label">Y:</span> <span class="coord-value" id="entry-2-y-display">—</span>
+              </div>
+              <div class="zone-status-text" id="entry-2-status">Disabled</div>
             </div>
           </div>
         </div>

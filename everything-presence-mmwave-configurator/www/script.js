@@ -22,8 +22,10 @@ document.addEventListener("DOMContentLoaded", () => {
   let targets = [];
   let haZones = [];
   let haExclusionZones = [];
+  let haEntryZones = [];
   let userZones = [];
   let exclusionZones = [];
+  let entryZones = [];
 
   // Helpers to detect default/disabled coordinates
   function isZeroCoords(z) {
@@ -72,14 +74,24 @@ document.addEventListener("DOMContentLoaded", () => {
       const reconstructed = reconstructZones(entityStates);
       haZones = reconstructed.regularZones;
       haExclusionZones = reconstructed.exclusionZones;
+      haEntryZones = reconstructed.entryZones;
       processTargets(entityStates);
       updateDetectionSettings(entityStates);
+      processAssumedPresence(entityStates);
       handlePersistence();
       drawVisualization();
       updateCoordinatesOutput();
       updateZoneTileDisplays();
       updateTargetTrackingInfo();
     } catch (error) { console.error('Error processing entity data:', error); }
+  }
+
+  function processAssumedPresence(entityStates) {
+    const apEntity = entityStates.find(e => e.entity_id && e.entity_id.includes('_assumed_present') && !e.entity_id.includes('_remaining'));
+    const remEntity = entityStates.find(e => e.entity_id && e.entity_id.includes('_assumed_present_remaining'));
+    const apState = apEntity ? apEntity.state : false;
+    const remState = remEntity ? remEntity.state : null;
+    updateAssumedPresenceBannerFromStates(apState, remState);
   }
 
   function processTargets(entityStates) {
@@ -136,7 +148,25 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const wsManager = createWSManager({
-    getSelectedEntities: () => selectedEntities.map(e => e.id),
+    getSelectedEntities: () => {
+      const entityIds = selectedEntities.map(e => e.id);
+
+      // Add assumed presence entities
+      const zoneId = entityIds.find(id => /_(entry_zone|zone|occupancy_mask)_\d+_(begin|end)_(x|y)$/.test(id));
+      if (zoneId) {
+        const slugAndRest = (zoneId.split('.')[1] || '');
+        let cut = Infinity;
+        ['_entry_zone_','_occupancy_mask_','_zone_'].forEach(p => {
+          const k = slugAndRest.indexOf(p);
+          if(k !== -1 && k < cut) cut = k;
+        });
+        const deviceSlug = cut !== Infinity ? slugAndRest.substring(0, cut) : slugAndRest;
+        entityIds.push(`binary_sensor.${deviceSlug}_assumed_present`);
+        entityIds.push(`sensor.${deviceSlug}_assumed_present_remaining`);
+      }
+
+      return entityIds;
+    },
     onStatesUpdated: (arr) => processEntityStates(arr),
     onStatusChange: (c, a) => updateConnectionUI(c, a),
   });
@@ -357,6 +387,17 @@ document.addEventListener("DOMContentLoaded", () => {
               updateEditingStatus();
             });
           }
+        } else if (zoneType === 'entry') {
+          const zone = entryZones[index];
+          if (!zone) return;
+          if (confirm(`Delete Entry ${zoneNumber}?`)) {
+            animateZoneDeletion('entry', index, zone, () => {
+              entryZones[index] = null;
+              updateCoordinatesOutput();
+              updateZoneTileDisplays();
+              updateEditingStatus();
+            });
+          }
         }
       });
     });
@@ -366,20 +407,22 @@ document.addEventListener("DOMContentLoaded", () => {
   function updateEditingStatus() {
     const statusDiv = document.getElementById('editing-status');
     const statusText = document.getElementById('editing-status-text');
-    
+
     const hasUserZones = userZones.some(zone => zone !== null && zone !== undefined);
     const hasUserExclusionZones = exclusionZones.some(zone => zone !== null && zone !== undefined);
-    const hasChanges = hasUserZones || hasUserExclusionZones;
-    
+    const hasUserEntryZones = entryZones.some(zone => zone !== null && zone !== undefined);
+    const hasChanges = hasUserZones || hasUserExclusionZones || hasUserEntryZones;
+
     if (isEditMode) {
       statusDiv.style.display = 'block';
       statusDiv.offsetHeight;
       statusDiv.classList.add('show');
-      
+
       if (hasChanges) {
         const zoneCount = userZones.filter(zone => zone !== null && zone !== undefined).length;
         const exclusionCount = exclusionZones.filter(zone => zone !== null && zone !== undefined).length;
-        const totalCount = zoneCount + exclusionCount;
+        const entryCount = entryZones.filter(zone => zone !== null && zone !== undefined).length;
+        const totalCount = zoneCount + exclusionCount + entryCount;
         
         statusDiv.classList.add('has-changes');
         statusText.textContent = `${totalCount} unsaved zone${totalCount !== 1 ? 's' : ''} • Click "Save Zones" to apply`;
@@ -455,12 +498,17 @@ document.addEventListener("DOMContentLoaded", () => {
     for (let i = 1; i <= 4; i++) {
       updateZoneTileDisplay('regular', i);
     }
-    
+
     // Update exclusion zones
     for (let i = 1; i <= 2; i++) {
       updateZoneTileDisplay('exclusion', i);
     }
-    
+
+    // Update entry zones
+    for (let i = 1; i <= 2; i++) {
+      updateZoneTileDisplay('entry', i);
+    }
+
     // Update edit mode visual states
     updateZoneTileEditModeStates();
   }
@@ -503,24 +551,37 @@ document.addEventListener("DOMContentLoaded", () => {
     const colorIndicator = tile.querySelector('.zone-color-indicator');
     const statusIndicator = tile.querySelector('.zone-status-indicator');
     const statusText = tile.querySelector('.zone-status-text');
-    const xDisplay = tile.querySelector(`#${zoneType === 'regular' ? 'zone' : 'exclusion'}-${zoneNumber}-x-display`);
-    const yDisplay = tile.querySelector(`#${zoneType === 'regular' ? 'zone' : 'exclusion'}-${zoneNumber}-y-display`);
+
+    // Get the correct display element IDs based on zone type
+    let displayPrefix = 'zone';
+    if (zoneType === 'exclusion') displayPrefix = 'exclusion';
+    else if (zoneType === 'entry') displayPrefix = 'entry';
+
+    const xDisplay = tile.querySelector(`#${displayPrefix}-${zoneNumber}-x-display`);
+    const yDisplay = tile.querySelector(`#${displayPrefix}-${zoneNumber}-y-display`);
 
     let zone = null;
     let haZone = null;
-    
+
     // Get zone data
     if (zoneType === 'regular') {
       zone = userZones[zoneNumber - 1];
       haZone = haZones[zoneNumber - 1];
-    } else {
+    } else if (zoneType === 'exclusion') {
       zone = exclusionZones[zoneNumber - 1];
       haZone = haExclusionZones[zoneNumber - 1];
+    } else if (zoneType === 'entry') {
+      zone = entryZones[zoneNumber - 1];
+      haZone = haEntryZones[zoneNumber - 1];
     }
 
     // Check if entities exist and are enabled in Home Assistant
-    const entityPrefix = zoneType === 'regular' ? `zone_${zoneNumber}` : `occupancy_mask_${zoneNumber}`;
-    const hasEnabledEntities = selectedEntities && selectedEntities.some(entity => 
+    let entityPrefix;
+    if (zoneType === 'regular') entityPrefix = `zone_${zoneNumber}`;
+    else if (zoneType === 'exclusion') entityPrefix = `occupancy_mask_${zoneNumber}`;
+    else if (zoneType === 'entry') entityPrefix = `entry_zone_${zoneNumber}`;
+
+    const hasEnabledEntities = selectedEntities && selectedEntities.some(entity =>
       entity.id.includes(entityPrefix) && entity.state !== 'unavailable' && entity.state !== 'unknown'
     );
 
@@ -822,16 +883,42 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
+    // Draw HA Entry zones in view mode
+    if (!isEditMode) {
+      haEntryZones.forEach((zone, index) => {
+        // Only draw zones that have actual coordinates (not default 0,0,0,0)
+        if (zone && !(zone.beginX === 0 && zone.endX === 0 && zone.beginY === 0 && zone.endY === 0)) {
+          renderZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "haEntry", { animatedZones, hoveredZone });
+        }
+      });
+    }
+
+    // Draw entry zones (interactive)
+    entryZones.forEach((zone, index) => {
+      if (zone) { // Only draw non-null zones
+        // Don't draw the entry zone being created, use Ghost Zone
+        if (!(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "entry")) {
+          renderZone(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "entry", { animatedZones, hoveredZone });
+        }
+      }
+    });
+
     // Draw corner handles for hovered zones
     userZones.forEach((zone, index) => {
       if (zone && !(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "regular")) {
         renderHandles(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "user", hoveredZone, hoveredCorner);
       }
     });
-    
+
     exclusionZones.forEach((zone, index) => {
       if (zone && !(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "exclusion")) {
         renderHandles(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "exclusion", hoveredZone, hoveredCorner);
+      }
+    });
+
+    entryZones.forEach((zone, index) => {
+      if (zone && !(isCreatingZone && dragType === "create" && draggingZone === index && currentZoneType === "entry")) {
+        renderHandles(ctx, (v)=>scaleX(v), (v)=>scaleY(v), zone, index, "entry", hoveredZone, hoveredCorner);
       }
     });
 
@@ -910,15 +997,17 @@ document.addEventListener("DOMContentLoaded", () => {
         userZones[draggingZone] = null;
       } else if (currentZoneType === "exclusion" && draggingZone !== null) {
         exclusionZones[draggingZone] = null;
+      } else if (currentZoneType === "entry" && draggingZone !== null) {
+        entryZones[draggingZone] = null;
       }
-      
+
       // Clear creation state
       ghostZone = null;
       isCreatingZone = false;
       isDragging = false;
       draggingZone = null;
       dragType = null;
-      
+
       drawVisualization();
     }
   });
@@ -999,24 +1088,24 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (currentZoneType === "exclusion") {
         // Create exclusion zone only for the selected zone number
         const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
-        
+
         // Check if exclusion zone already exists at this index
         if (exclusionZones[targetIndex]) {
           alert(`Exclusion Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
           return;
         }
-        
+
         // Ensure exclusionZones array has enough slots
         while (exclusionZones.length <= targetIndex) {
           exclusionZones.push(null);
         }
-        
+
         dragType = "create";
         draggingZone = targetIndex;
         isCreatingZone = true;
         const startX = unscaleX(mousePos.x);
         const startY = unscaleY(mousePos.y);
-        
+
         // Create ghost zone for preview
         ghostZone = {
           beginX: startX,
@@ -1024,9 +1113,41 @@ document.addEventListener("DOMContentLoaded", () => {
           endX: startX,
           endY: startY,
         };
-        
+
         // Reserve the slot but don't create the actual zone yet
         exclusionZones[targetIndex] = null;
+        isDragging = true;
+      } else if (currentZoneType === "entry") {
+        // Create entry zone only for the selected zone number
+        const targetIndex = currentZoneNumber - 1; // Convert to 0-based index
+
+        // Check if entry zone already exists at this index
+        if (entryZones[targetIndex]) {
+          alert(`Entry Zone ${currentZoneNumber} already exists. Select an empty zone to create a new one.`);
+          return;
+        }
+
+        // Ensure entryZones array has enough slots
+        while (entryZones.length <= targetIndex) {
+          entryZones.push(null);
+        }
+
+        dragType = "create";
+        draggingZone = targetIndex;
+        isCreatingZone = true;
+        const startX = unscaleX(mousePos.x);
+        const startY = unscaleY(mousePos.y);
+
+        // Create ghost zone for preview
+        ghostZone = {
+          beginX: startX,
+          beginY: startY,
+          endX: startX,
+          endY: startY,
+        };
+
+        // Reserve the slot but don't create the actual zone yet
+        entryZones[targetIndex] = null;
         isDragging = true;
       }
     }
@@ -1043,7 +1164,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const prevHoveredZone = hoveredZone;
       const prevHoveredCorner = hoveredCorner;
       
-      if (isEditMode && zoneInfo !== null && (zoneInfo.zoneType === "user" || zoneInfo.zoneType === "exclusion")) {
+      if (isEditMode && zoneInfo !== null && (zoneInfo.zoneType === "user" || zoneInfo.zoneType === "exclusion" || zoneInfo.zoneType === "entry")) {
         hoveredZone = { type: zoneInfo.zoneType, index: zoneInfo.index };
         hoveredCorner = zoneInfo.corner;
         canvas.style.cursor = zoneInfo.corner ? "nwse-resize" : "move";
@@ -1130,6 +1251,36 @@ document.addEventListener("DOMContentLoaded", () => {
         zone.endX = Math.round(zone.endX);
         zone.beginY = Math.round(zone.beginY);
         zone.endY = Math.round(zone.endY);
+      } else if (draggingZoneType === "entry") {
+        let zone = entryZones[draggingZone];
+        let newBeginX = zone.beginX + dx;
+        let newEndX = zone.endX + dx;
+        let newBeginY = zone.beginY + dy;
+        let newEndY = zone.endY + dy;
+
+        // Adjust dx and dy to prevent moving beyond boundaries
+        if (newBeginX < -6000) {
+          dx += -6000 - newBeginX;
+        }
+        if (newEndX > 6000) {
+          dx += 6000 - newEndX;
+        }
+        if (newBeginY < -offsetY) {
+          dy += -offsetY - newBeginY;
+        }
+        if (newEndY > 6000) {
+          dy += 6000 - newEndY;
+        }
+
+        zone.beginX += dx;
+        zone.endX += dx;
+        zone.beginY += dy;
+        zone.endY += dy;
+
+        zone.beginX = Math.round(zone.beginX);
+        zone.endX = Math.round(zone.endX);
+        zone.beginY = Math.round(zone.beginY);
+        zone.endY = Math.round(zone.endY);
       }
     } else if (dragType === "resize") {
       if (draggingZoneType === "user") {
@@ -1138,6 +1289,9 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (draggingZoneType === "exclusion") {
         const zone = exclusionZones[draggingZone];
         adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy, "exclusion");
+      } else if (draggingZoneType === "entry") {
+        const zone = entryZones[draggingZone];
+        adjustZoneCornerWithConstraints(zone, resizeCorner, dx, dy, "entry");
       }
     } else if (dragType === "create") {
       const newEndX = Math.max(-6000, Math.min(6000, unscaleX(mousePos.x)));
@@ -1178,9 +1332,16 @@ document.addEventListener("DOMContentLoaded", () => {
           endX: ghostZone.endX,
           endY: ghostZone.endY,
         };
+      } else if (currentZoneType === "entry") {
+        entryZones[draggingZone] = {
+          beginX: ghostZone.beginX,
+          beginY: ghostZone.beginY,
+          endX: ghostZone.endX,
+          endY: ghostZone.endY,
+        };
       }
-      
-      const zoneType = currentZoneType === "regular" ? "user" : "exclusion";
+
+      const zoneType = currentZoneType === "regular" ? "user" : (currentZoneType === "exclusion" ? "exclusion" : "entry");
       animateZoneCreation(zoneType, draggingZone);
       updateEditingStatus();
     }
@@ -1214,15 +1375,17 @@ document.addEventListener("DOMContentLoaded", () => {
         userZones[draggingZone] = null;
       } else if (currentZoneType === "exclusion" && draggingZone !== null) {
         exclusionZones[draggingZone] = null;
+      } else if (currentZoneType === "entry" && draggingZone !== null) {
+        entryZones[draggingZone] = null;
       }
-      
+
       // Clear creation state
       ghostZone = null;
       isCreatingZone = false;
       isDragging = false;
       draggingZone = null;
       dragType = null;
-      
+
       drawVisualization();
       return;
     }
@@ -1246,6 +1409,16 @@ document.addEventListener("DOMContentLoaded", () => {
           const zone = exclusionZones[index];
           animateZoneDeletion("exclusion", index, zone, () => {
             exclusionZones[index] = null; // Set to null instead of removing
+            updateCoordinatesOutput();
+            updateZoneTileDisplays();
+            updateEditingStatus();
+          });
+        }
+      } else if (zoneType === "entry") {
+        if (confirm(`Delete Entry Zone ${index + 1}?`)) {
+          const zone = entryZones[index];
+          animateZoneDeletion("entry", index, zone, () => {
+            entryZones[index] = null; // Set to null instead of removing
             updateCoordinatesOutput();
             updateZoneTileDisplays();
             updateEditingStatus();
@@ -1461,6 +1634,32 @@ document.addEventListener("DOMContentLoaded", () => {
       // Body hit-test
       if (hitTestRect(rect, pos.x, pos.y, mmToPx, 0)) {
         return { index: i, corner: null, zoneType: 'exclusion' };
+      }
+    }
+
+    // Check entry zones next
+    for (let i = entryZones.length - 1; i >= 0; i--) {
+      const zone = entryZones[i];
+      if (!zone) continue; // Skip null zones
+      const rect = { x1: zone.beginX, y1: zone.beginY, x2: zone.endX, y2: zone.endY };
+
+      // Corner hit-tests
+      if (hitTestCorner(rect, 'topLeft', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'top-left', zoneType: 'entry' };
+      }
+      if (hitTestCorner(rect, 'topRight', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'top-right', zoneType: 'entry' };
+      }
+      if (hitTestCorner(rect, 'bottomLeft', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'bottom-left', zoneType: 'entry' };
+      }
+      if (hitTestCorner(rect, 'bottomRight', pos.x, pos.y, mmToPx, cornerRadiusPx)) {
+        return { index: i, corner: 'bottom-right', zoneType: 'entry' };
+      }
+
+      // Body hit-test
+      if (hitTestRect(rect, pos.x, pos.y, mmToPx, 0)) {
+        return { index: i, corner: null, zoneType: 'entry' };
       }
     }
 
@@ -1735,7 +1934,23 @@ document.addEventListener("DOMContentLoaded", () => {
   async function notifyBackendOfSelectedEntities() {
     const zoneEntityIds = selectedEntities.map(e => e.id);
     const settingsEntityIds = settingsEntities.map(e => e.id);
-    const allEntityIds = [...zoneEntityIds, ...settingsEntityIds];
+
+    // Add assumed presence entities for WebSocket updates
+    const assumedPresenceIds = [];
+    const zoneId = zoneEntityIds.find(id => /_(entry_zone|zone|occupancy_mask)_\d+_(begin|end)_(x|y)$/.test(id));
+    if (zoneId) {
+      const slugAndRest = (zoneId.split('.')[1] || '');
+      let cut = Infinity;
+      ['_entry_zone_','_occupancy_mask_','_zone_'].forEach(p => {
+        const k = slugAndRest.indexOf(p);
+        if(k !== -1 && k < cut) cut = k;
+      });
+      const deviceSlug = cut !== Infinity ? slugAndRest.substring(0, cut) : slugAndRest;
+      assumedPresenceIds.push(`binary_sensor.${deviceSlug}_assumed_present`);
+      assumedPresenceIds.push(`sensor.${deviceSlug}_assumed_present_remaining`);
+    }
+
+    const allEntityIds = [...zoneEntityIds, ...settingsEntityIds, ...assumedPresenceIds];
     const ok = await notifySelectedEntities(allEntityIds);
     if (!ok) console.warn('Failed to notify backend of selected entities');
     return ok;
@@ -2570,13 +2785,20 @@ document.addEventListener("DOMContentLoaded", () => {
     entities.forEach((entity) => {
       const entityId = entity.entity_id;
       const match =
+        entityId.match(/entry_zone_(\d+)_(begin|end)_(x|y)$/) ||
         entityId.match(/zone_(\d+)_(begin|end)_(x|y)$/) ||
         entityId.match(/occupancy_mask_(\d+)_(begin|end)_(x|y)$/);
 
       if (match) {
-        const zoneType = entityId.includes("occupancy_mask")
-          ? "occupancy_mask"
-          : "zone";
+        let zoneType;
+        if (entityId.includes("entry_zone")) {
+          zoneType = "entry_zone";
+        } else if (entityId.includes("occupancy_mask")) {
+          zoneType = "occupancy_mask";
+        } else {
+          zoneType = "zone";
+        }
+
         const zoneNumber = match[1]; // e.g., '1' for zone_1
         const position = match[2]; // 'begin' or 'end'
         const axis = match[3]; // 'x' or 'y'
@@ -2607,19 +2829,36 @@ document.addEventListener("DOMContentLoaded", () => {
     // Convert zones object to arrays
     const reconstructedRegularZones = [];
     const reconstructedExclusionZones = [];
+    const reconstructedEntryZones = [];
 
     Object.keys(zones).forEach((key) => {
       const zone = zones[key];
-      if (key.startsWith("occupancy_mask")) {
+      if (key.startsWith("entry_zone")) {
+        // Extract zone number
+        const zoneNumber = parseInt(key.match(/entry_zone_(\d+)/)[1]);
+        const zoneIndex = zoneNumber - 1; // Convert to 0-based index
+
+        // Ensure array has enough slots
+        while (reconstructedEntryZones.length <= zoneIndex) {
+          reconstructedEntryZones.push(null);
+        }
+
+        reconstructedEntryZones[zoneIndex] = {
+          beginX: zone.beginX || 0,
+          beginY: zone.beginY || 0,
+          endX: zone.endX || 0,
+          endY: zone.endY || 0,
+        };
+      } else if (key.startsWith("occupancy_mask")) {
         // Extract zone number
         const zoneNumber = parseInt(key.match(/occupancy_mask_(\d+)/)[1]);
         const zoneIndex = zoneNumber - 1; // Convert to 0-based index
-        
+
         // Ensure array has enough slots
         while (reconstructedExclusionZones.length <= zoneIndex) {
           reconstructedExclusionZones.push(null);
         }
-        
+
         reconstructedExclusionZones[zoneIndex] = {
           beginX: zone.beginX || 0,
           beginY: zone.beginY || 0,
@@ -2630,12 +2869,12 @@ document.addEventListener("DOMContentLoaded", () => {
         // Extract zone number
         const zoneNumber = parseInt(key.match(/zone_(\d+)/)[1]);
         const zoneIndex = zoneNumber - 1; // Convert to 0-based index
-        
+
         // Ensure array has enough slots
         while (reconstructedRegularZones.length <= zoneIndex) {
           reconstructedRegularZones.push(null);
         }
-        
+
         reconstructedRegularZones[zoneIndex] = {
           beginX: zone.beginX || 0,
           beginY: zone.beginY || 0,
@@ -2648,6 +2887,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return {
       regularZones: reconstructedRegularZones,
       exclusionZones: reconstructedExclusionZones,
+      entryZones: reconstructedEntryZones,
     };
   }
 
@@ -2731,7 +2971,32 @@ document.addEventListener("DOMContentLoaded", () => {
       const dataPromises = selectedEntities.map((entity) =>
         fetchEntityState(entity.id),
       );
-      const entityStates = await Promise.all(dataPromises);
+      let entityStates = await Promise.all(dataPromises);
+
+      // Fetch assumed presence entities separately
+      const zoneId = selectedEntities.map(e => e.id).find(id => /_(entry_zone|zone|occupancy_mask)_\d+_(begin|end)_(x|y)$/.test(id));
+      if (zoneId) {
+        const slugAndRest = (zoneId.split('.')[1] || '');
+        let cut = Infinity;
+        ['_entry_zone_','_occupancy_mask_','_zone_'].forEach(p => {
+          const k = slugAndRest.indexOf(p);
+          if(k !== -1 && k < cut) cut = k;
+        });
+        const deviceSlug = cut !== Infinity ? slugAndRest.substring(0, cut) : slugAndRest;
+        const apId = `binary_sensor.${deviceSlug}_assumed_present`;
+        const remId = `sensor.${deviceSlug}_assumed_present_remaining`;
+
+        try {
+          const [apState, remState] = await Promise.all([
+            fetchEntityState(apId),
+            fetchEntityState(remId)
+          ]);
+          if (apState) entityStates.push(apState);
+          if (remState) entityStates.push(remState);
+        } catch (e) {
+          console.warn('Failed to fetch assumed presence entities:', e);
+        }
+      }
 
       const reconstructed = reconstructZones(entityStates);
       haZones = reconstructed.regularZones;
@@ -2833,6 +3098,9 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         });
       }
+
+      // Process assumed presence
+      processAssumedPresence(entityStates);
 
       // Draw the visualization
       drawVisualization();
@@ -3171,6 +3439,26 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    // Prepare entry zones (up to 2)
+    const entryZonesToSave = [];
+    for (let i = 0; i < 2; i++) {
+      if (entryZones[i]) {
+        entryZonesToSave.push({
+          beginX: entryZones[i].beginX || 0,
+          endX: entryZones[i].endX || 0,
+          beginY: entryZones[i].beginY || 0,
+          endY: entryZones[i].endY || 0,
+        });
+      } else {
+        entryZonesToSave.push({
+          beginX: 0,
+          endX: 0,
+          beginY: 0,
+          endY: 0,
+        });
+      }
+    }
+
     // Send the regular zones
     try {
       for (let i = 0; i < regularZonesToSave.length; i++) {
@@ -3195,14 +3483,14 @@ document.addEventListener("DOMContentLoaded", () => {
       for (let i = 0; i < exclusionZonesToSave.length; i++) {
         const zone = exclusionZonesToSave[i];
         const zoneNumber = i + 1;
-        
+
         // Check if entities exist for this exclusion zone before trying to save
         const zonePrefix = `occupancy_mask_${zoneNumber}`;
-        const hasEntities = zoneEntities[`${zonePrefix}_begin_x`] && 
-                           zoneEntities[`${zonePrefix}_begin_y`] && 
-                           zoneEntities[`${zonePrefix}_end_x`] && 
+        const hasEntities = zoneEntities[`${zonePrefix}_begin_x`] &&
+                           zoneEntities[`${zonePrefix}_begin_y`] &&
+                           zoneEntities[`${zonePrefix}_end_x`] &&
                            zoneEntities[`${zonePrefix}_end_y`];
-        
+
         if (hasEntities) {
           await saveExclusionZoneToHA(zoneNumber, zone, zoneEntities);
         } else {
@@ -3210,9 +3498,29 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
+      // Send the entry zones
+      for (let i = 0; i < entryZonesToSave.length; i++) {
+        const zone = entryZonesToSave[i];
+        const zoneNumber = i + 1;
+
+        // Check if entities exist for this entry zone before trying to save
+        const zonePrefix = `entry_zone_${zoneNumber}`;
+        const hasEntities = zoneEntities[`${zonePrefix}_begin_x`] &&
+                           zoneEntities[`${zonePrefix}_begin_y`] &&
+                           zoneEntities[`${zonePrefix}_end_x`] &&
+                           zoneEntities[`${zonePrefix}_end_y`];
+
+        if (hasEntities) {
+          await saveEntryZoneToHA(zoneNumber, zone, zoneEntities);
+        } else {
+          console.log(`Skipping entry zone ${zoneNumber} - entities not available (likely disabled in HA)`);
+        }
+      }
+
       alert("Zones saved successfully!");
       userZones = [];
       exclusionZones = [];
+      entryZones = [];
       persistentDots = []; // Optionally clear persistent dots after saving
       
       // Exit edit mode
@@ -3238,13 +3546,24 @@ document.addEventListener("DOMContentLoaded", () => {
   function extractZoneEntities(entities) {
     const zoneEntities = {};
 
+    const entryZoneRegex = /entry_zone_(\d+)_(begin|end)_(x|y)$/;
     const regularZoneRegex = /zone_(\d+)_(begin|end)_(x|y)$/;
     const exclusionZoneRegex = /occupancy_mask_(\d+)_(begin|end)_(x|y)$/;
 
     entities.forEach((entity) => {
       const entityId = entity.id;
+
+      // Check for Entry Zones FIRST (to avoid collision with regular zone regex)
+      let match = entityId.match(entryZoneRegex);
+      if (match) {
+        const [_, zoneNumber, position, axis] = match;
+        const key = `entry_zone_${zoneNumber}_${position}_${axis}`;
+        zoneEntities[key] = entityId;
+        return;
+      }
+
       // Check for Regular Zones
-      let match = entityId.match(regularZoneRegex);
+      match = entityId.match(regularZoneRegex);
       if (match) {
         const [_, zoneNumber, position, axis] = match;
         const key = `zone_${zoneNumber}_${position}_${axis}`;
@@ -3486,8 +3805,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (isEditMode) {
       const hasUserZones = userZones.some(zone => zone !== null && zone !== undefined);
       const hasUserExclusionZones = exclusionZones.some(zone => zone !== null && zone !== undefined);
-      
-      if (hasUserZones || hasUserExclusionZones) {
+      const hasUserEntryZones = entryZones.some(zone => zone !== null && zone !== undefined);
+
+      if (hasUserZones || hasUserExclusionZones || hasUserEntryZones) {
         const confirmExit = confirm(
           "You have unsaved changes that will be lost.\n\n" +
           "Do you want to exit Edit Mode and discard your changes?"
@@ -3502,6 +3822,7 @@ document.addEventListener("DOMContentLoaded", () => {
       document.body.classList.remove('is-edit-mode');
       userZones = [];
       exclusionZones = [];
+      entryZones = [];
       drawVisualization();
       updateCoordinatesOutput();
       updateZoneTileDisplays();
@@ -3513,8 +3834,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Check if there are existing user zones that would be overwritten
     const hasUserZones = userZones.some(zone => zone !== null && zone !== undefined);
     const hasUserExclusionZones = exclusionZones.some(zone => zone !== null && zone !== undefined);
-    
-    if (hasUserZones || hasUserExclusionZones) {
+    const hasUserEntryZones = entryZones.some(zone => zone !== null && zone !== undefined);
+
+    if (hasUserZones || hasUserExclusionZones || hasUserEntryZones) {
       const confirmOverwrite = confirm(
         "You have unsaved changes that will be lost.\n\n" +
         "Do you want to discard your current changes and load the zones from Home Assistant for editing?"
@@ -3530,7 +3852,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Clear existing user zones
     userZones = [];
     exclusionZones = [];
-    
+    entryZones = [];
+
     // Helper to detect zones that are effectively "default/disabled"
     const isZeroCoords = (z) => z && z.beginX === 0 && z.endX === 0 && z.beginY === 0 && z.endY === 0;
     const isDefaultDisabledCoords = (z) => z && z.beginX === -6000 && z.endX === -6000 && z.beginY === -1560 && z.endY === -1560;
@@ -3554,7 +3877,7 @@ document.addEventListener("DOMContentLoaded", () => {
         loadedCount++;
       }
     }
-    
+
     // Load HA exclusion zones into editable exclusion zones
     for (let i = 0; i < haExclusionZones.length; i++) {
       const zone = haExclusionZones[i];
@@ -3565,6 +3888,25 @@ document.addEventListener("DOMContentLoaded", () => {
           exclusionZones.push(null);
         }
         exclusionZones[i] = {
+          beginX: zone.beginX,
+          beginY: zone.beginY,
+          endX: zone.endX,
+          endY: zone.endY,
+        };
+        loadedCount++;
+      }
+    }
+
+    // Load HA entry zones into editable entry zones
+    for (let i = 0; i < haEntryZones.length; i++) {
+      const zone = haEntryZones[i];
+      // Only load zones that have valid coordinates (not disabled/empty zones)
+      if (zone && !isZeroCoords(zone) && !isDefaultDisabledCoords(zone)) {
+        // Ensure entryZones array has enough slots
+        while (entryZones.length <= i) {
+          entryZones.push(null);
+        }
+        entryZones[i] = {
           beginX: zone.beginX,
           beginY: zone.beginY,
           endX: zone.endX,
@@ -3646,6 +3988,61 @@ document.addEventListener("DOMContentLoaded", () => {
     await Promise.all(requests);
   }
 
+  async function saveEntryZoneToHA(zoneNumber, zone, zoneEntities) {
+    const baseUrl = "api/services/number/set_value";
+
+    const zonePrefix = `entry_zone_${zoneNumber}`;
+
+    const roundToNearestTen = (num) => {
+      return (Math.round(num / 10) * 10).toFixed(1);
+    };
+
+    const keys = [
+      `${zonePrefix}_begin_x`,
+      `${zonePrefix}_end_x`,
+      `${zonePrefix}_begin_y`,
+      `${zonePrefix}_end_y`,
+    ];
+
+    const requests = keys.map((key) => {
+      const entityId = zoneEntities[key];
+      if (!entityId) {
+        console.warn(`Entity ID for ${key} not found. Skipping this field.`);
+        return Promise.resolve();
+      }
+
+      let value;
+      switch (key) {
+        case `${zonePrefix}_begin_x`:
+          value = roundToNearestTen(zone.beginX);
+          break;
+        case `${zonePrefix}_end_x`:
+          value = roundToNearestTen(zone.endX);
+          break;
+        case `${zonePrefix}_begin_y`:
+          value = roundToNearestTen(zone.beginY);
+          break;
+        case `${zonePrefix}_end_y`:
+          value = roundToNearestTen(zone.endY);
+          break;
+        default:
+          value = 0;
+      }
+
+      return fetch(`${baseUrl}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: entityId,
+          value: value,
+        }),
+      });
+    });
+
+    // Execute all fetch requests
+    await Promise.all(requests);
+  }
+
   // ==========================
   // === Extract and Process Persistence ===
   // ==========================
@@ -3668,4 +4065,75 @@ document.addEventListener("DOMContentLoaded", () => {
       updateTargetTrackingInfo(); // Update target display format on resize
     }, 150);
   });
+
+  // Assumed Presence banner (non-intrusive poll)
+  function updateAssumedPresenceBannerFromStates(apState, remState) {
+    const banner = document.getElementById('assumedPresenceBanner');
+    const textEl = document.getElementById('assumedPresenceText');
+    if (!banner || !textEl) return;
+    const on = apState === 'on' || apState === true || apState === 'true';
+    if (on) {
+      const secs = remState != null && remState !== '' ? Math.max(0, Math.round(parseFloat(remState) || 0)) : null;
+      textEl.textContent = secs != null ? `Likely present (${secs}s)` : 'Likely present';
+      banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+    }
+
+    // Update tracking info display
+    updateAssumedPresenceTrackingInfo(on, remState);
+  }
+
+  function updateAssumedPresenceTrackingInfo(isActive, remainingTime) {
+    const statusEl = document.getElementById('assumed-presence-status');
+    const remainingEl = document.getElementById('assumed-presence-remaining');
+    const timeEl = document.getElementById('assumed-presence-time');
+
+    if (!statusEl) return;
+
+    if (isActive) {
+      statusEl.textContent = 'Active';
+      statusEl.style.backgroundColor = '#fbbf24'; // amber
+      statusEl.style.color = '#78350f'; // dark amber text
+
+      if (remainingTime != null && remainingTime !== '') {
+        const secs = Math.max(0, Math.round(parseFloat(remainingTime) || 0));
+        timeEl.textContent = secs;
+        remainingEl.style.display = 'block';
+      } else {
+        remainingEl.style.display = 'none';
+      }
+    } else {
+      statusEl.textContent = 'Inactive';
+      statusEl.style.backgroundColor = '#e5e7eb'; // gray
+      statusEl.style.color = '#374151'; // dark gray text
+      remainingEl.style.display = 'none';
+    }
+  }
+  async function pollAssumedPresence() {
+    // Only poll via REST when not using WebSocket mode
+    if (wsManager && wsManager.useWebSocket) {
+      return;
+    }
+
+    try {
+      // Derive device slug from any zone entity id
+      const zoneId = (selectedEntities || []).map(e=>e.id).find(id => /_(entry_zone|zone|occupancy_mask)_\d+_(begin|end)_(x|y)$/.test(id));
+      if (!zoneId) { updateAssumedPresenceBannerFromStates(false, null); return; }
+      const slugAndRest = (zoneId.split('.')[1] || ''); let cut = Infinity; ['_entry_zone_','_occupancy_mask_','_zone_'].forEach(p=>{ const k = slugAndRest.indexOf(p); if(k!==-1 && k < cut) cut = k; }); const deviceSlug = cut !== Infinity ? slugAndRest.substring(0, cut) : slugAndRest;
+      const apId = `binary_sensor.${deviceSlug}_assumed_present`;
+      const remId = `sensor.${deviceSlug}_assumed_present_remaining`;
+      const [ap, rem] = await Promise.all([
+        fetchEntityState(apId).catch(()=>null),
+        fetchEntityState(remId).catch(()=>null)
+      ]);
+      updateAssumedPresenceBannerFromStates(ap ? ap.state : false, rem ? rem.state : null);
+    } catch (e) {
+      // hide on error
+      updateAssumedPresenceBannerFromStates(false, null);
+    }
+  }
+
+  // Start lightweight poll (only runs in REST mode)
+  setInterval(pollAssumedPresence, 1000);
 });
