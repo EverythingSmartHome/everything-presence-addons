@@ -1,0 +1,52 @@
+{
+  "id": "everything_presence_one",
+  "label": "Everything Presence One",
+  "model": "Everything Presence One",
+  "manufacturer": "EverythingSmartTechnology",
+  "iconUrl": "./icons/devices/everything_presence_one.png",
+  "capabilities": {
+    "tracking": false,
+    "zones": false,
+    "exclusionZones": false,
+    "entryZones": false,
+    "distanceOnlyTracking": true,
+    "environmental": true,
+    "sensors": {
+      "mmwavePresence": true,
+      "pir": true,
+      "illuminance": true,
+      "temperature": true,
+      "humidity": true
+    }
+  },
+  "limits": {
+    "maxZones": 0,
+    "maxRangeMeters": 25,
+    "fieldOfViewDegrees": 120
+  },
+  "entityMap": {
+    "presenceEntity": "binary_sensor.${name}_occupancy",
+    "mmwaveEntity": "binary_sensor.${name}_mmwave",
+    "pirEntity": "binary_sensor.${name}_pir",
+    "temperatureEntity": "sensor.${name}_temperature",
+    "humidityEntity": "sensor.${name}_humidity",
+    "illuminanceEntity": "sensor.${name}_illuminance",
+    "distanceEntity": "sensor.${name}_mmwave_target_distance",
+    "speedEntity": "sensor.${name}_mmwave_target_speed",
+    "energyEntity": "sensor.${name}_mmwave_target_energy",
+    "targetCountEntity": "sensor.${name}_mmwave_target_count",
+    "modeEntity": "select.${name}_mmwave_mode",
+    "distanceMinEntity": "number.${name}_mmwave_distance_min",
+    "distanceMaxEntity": "number.${name}_mmwave_max_distance",
+    "triggerDistanceEntity": "number.${name}_mmwave_trigger_distance",
+    "sensitivityEntity": "number.${name}_mmwave_sustain_sensitivity",
+    "triggerSensitivityEntity": "number.${name}_mmwave_trigger_sensitivity",
+    "offLatencyEntity": "number.${name}_mmwave_off_latency",
+    "onLatencyEntity": "number.${name}_mmwave_on_latency",
+    "thresholdFactorEntity": "number.${name}_mmwave_threshold_factor",
+    "microMotionEntity": "switch.${name}_micro_motion_detection",
+    "updateRateEntity": "select.${name}_distance_speed_update_rate",
+    "co2Entity": "sensor.${name}_co2",
+    "zoneConfigEntities": null
+  }
+}

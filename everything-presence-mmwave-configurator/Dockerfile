@@ -1,39 +1,40 @@
-ARG BUILD_FROM=ghcr.io/hassio-addons/base:17.2.5
-FROM $BUILD_FROM
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.22
 
-ENV LANG C.UTF-8
-ENV PIP_ROOT_USER_ACTION=ignore
+FROM node:20-alpine AS build
+WORKDIR /app
+ENV NODE_ENV=development
 
-RUN apk add --no-cache ca-certificates && \
-    update-ca-certificates
+# Install dependencies for workspace build
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+RUN npm ci --include=dev
 
-RUN apk update && \
-    apk add --no-cache nginx python3 py3-pip
-    
-RUN apk add py3-requests py3-flask
+# Copy sources and build
+COPY backend backend
+COPY frontend frontend
+RUN npm run build --workspaces
+RUN npm prune --omit=dev --workspaces
 
-# Install Python packages 
-RUN apk add --no-cache \
-    py3-setuptools \
-    py3-wheel \
-    py3-websocket-client
+FROM ${BUILD_FROM}
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ENV NODE_ENV=production \
+    PORT=3000 \
+    FRONTEND_DIST=/app/frontend/dist
+WORKDIR /app
 
-# Install Flask-Sock for WebSocket support
-RUN pip3 install --no-cache-dir --break-system-packages flask-sock
+RUN apk add --no-cache nodejs npm
 
-# Copy nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/backend/package.json ./backend/package.json
+COPY --from=build /app/backend/node_modules ./backend/node_modules
+COPY --from=build /app/backend/dist ./backend/dist
+COPY --from=build /app/frontend/dist ./frontend/dist
+COPY config ./config
+COPY rootfs/ /
 
-# Copy your application files
-COPY www /usr/share/nginx/html
+RUN rm -rf /etc/services.d/zone-configurator && \
+    chmod +x /etc/s6-overlay/s6-rc.d/zone-configurator/run
 
-# Copy backend script
-COPY backend.py /app/backend.py
-
-# Copy services
-COPY services/ /etc/services.d/
-RUN chmod +x /etc/services.d/backend/run
-RUN chmod +x /etc/services.d/nginx/run
-
-# Expose the ingress port
-EXPOSE 8099 
+EXPOSE 3000/tcp

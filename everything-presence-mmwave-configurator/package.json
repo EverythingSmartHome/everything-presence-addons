@@ -1,0 +1,17 @@
+{
+  "name": "zone-configurator",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --if-present --workspaces"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
