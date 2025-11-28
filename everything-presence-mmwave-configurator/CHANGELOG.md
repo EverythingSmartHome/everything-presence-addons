@@ -1,3 +1,30 @@
+## 2.0.0 - Complete Rewrite
+
+Version 2.0 is a complete rewrite of the Zone Configurator with a new modern UI and significantly expanded functionality by [@EverythingSmartHome](https://github.com/EverythingSmartHome).
+
+### Added
+- **New UI** - Completely redesigned interface built with React and Tailwind CSS by @EverythingSmartHome
+- **Polygon Zone Support** - Create custom-shaped zones beyond simple rectangles by @EverythingSmartHome
+- **Entry Zone Support** - Define entry/exit zones for directional presence detection by @EverythingSmartHome
+- **Assumed Presence Mode** - Configure assumed presence behavior for more reliable detection by @EverythingSmartHome
+- **Recording** - Record and playback target tracking data for analysis by @EverythingSmartHome
+- **Room Builder** - Design room layouts with walls, doors, and furniture for accurate zone placement by @EverythingSmartHome
+- **Multi-device Support** - Manage multiple Everything Presence devices from a single interface by @EverythingSmartHome
+- **Real-time Tracking** - Live visualization of detected targets with coordinate trails by @EverythingSmartHome
+- **Heatmap Analytics** - Visualize presence patterns over time by @EverythingSmartHome
+- **Environmental Monitoring** - View temperature, humidity, CO2, and illuminance data by @EverythingSmartHome
+- **Dark Mode** - Full dark mode support with system auto-detection by @EverythingSmartHome
+- **Import/Export** - Save and restore room configurations by @EverythingSmartHome
+
+### Changed
+- Backend rewritten in Node.js/TypeScript (previously Python/Flask) by @EverythingSmartHome
+- Frontend rewritten in React/TypeScript (previously vanilla JavaScript) by @EverythingSmartHome
+- Data storage location changed to `/config/everything-presence-zone-configurator/`
+
+---
+
+## Previous Releases (V1)
+
 ### 1.2.2
 - Fix: Allow drawing zones at default coordinates without being flagged as existing. @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/86
 - Feature: Add delete button to zone side tiles (shown in Edit Mode) to delete user/exclusion zones. @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/87

@@ -1,0 +1,426 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Dark mode (default) */
+:root,
+:root.dark {
+  color-scheme: dark;
+  font-family: 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border-color: #334155;
+  --accent-color: #34d399;
+  --accent-hover: #10b981;
+  background: radial-gradient(circle at 10% 20%, rgba(52, 211, 153, 0.08), transparent 25%),
+    radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.08), transparent 20%),
+    var(--bg-primary);
+}
+
+/* Light mode */
+:root.light {
+  color-scheme: light;
+  --bg-primary: #f8fafc;
+  --bg-secondary: #f1f5f9;
+  --bg-tertiary: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border-color: #cbd5e1;
+  --accent-color: #10b981;
+  --accent-hover: #059669;
+  background: radial-gradient(circle at 10% 20%, rgba(16, 185, 129, 0.05), transparent 25%),
+    radial-gradient(circle at 80% 0%, rgba(52, 211, 153, 0.05), transparent 20%),
+    var(--bg-primary);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Dark mode glass card */
+.dark .glass-card {
+  background-color: rgba(15, 23, 42, 0.6);
+  border: 1px solid #1e293b;
+  border-radius: 1rem;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+}
+
+/* Light mode glass card */
+.light .glass-card {
+  background-color: rgba(255, 255, 255, 0.8);
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 15px -3px rgba(148, 163, 184, 0.2), 0 4px 6px -4px rgba(148, 163, 184, 0.2);
+}
+
+/* Light mode overrides for common components */
+.light .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+.light .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+
+.light .bg-slate-900\/90 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.light .bg-slate-900\/95 {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+}
+
+.light .bg-slate-800 {
+  background-color: #f1f5f9 !important;
+}
+
+.light .bg-slate-800\/50 {
+  background-color: rgba(241, 245, 249, 0.5) !important;
+}
+
+.light .bg-slate-800\/70 {
+  background-color: rgba(241, 245, 249, 0.7) !important;
+}
+
+.light .border-slate-700 {
+  border-color: #cbd5e1 !important;
+}
+
+.light .border-slate-700\/50 {
+  border-color: rgba(203, 213, 225, 0.5) !important;
+}
+
+.light .border-slate-600 {
+  border-color: #94a3b8 !important;
+}
+
+.light .border-slate-800 {
+  border-color: #e2e8f0 !important;
+}
+
+.light .text-slate-100 {
+  color: #1e293b !important;
+}
+
+.light .text-slate-200 {
+  color: #334155 !important;
+}
+
+.light .text-slate-300 {
+  color: #475569 !important;
+}
+
+.light .text-slate-400 {
+  color: #64748b !important;
+}
+
+.light .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.light .text-white {
+  color: #0f172a !important;
+}
+
+/* Light mode for buttons and interactive elements */
+.light .hover\:bg-slate-800:hover {
+  background-color: #e2e8f0 !important;
+}
+
+.light .hover\:bg-slate-700:hover {
+  background-color: #cbd5e1 !important;
+}
+
+.light .hover\:border-slate-600:hover {
+  border-color: #94a3b8 !important;
+}
+
+.light .hover\:text-white:hover {
+  color: #0f172a !important;
+}
+
+/* Light mode for form inputs */
+.light input[type="checkbox"] {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light select {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+  color: #1e293b !important;
+}
+
+.light input[type="range"] {
+  background-color: #cbd5e1 !important;
+}
+
+/* Light mode shadows */
+.light .shadow-xl {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+}
+
+.light .shadow-lg {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* Keep accent colors consistent */
+.light .text-aqua-400,
+.light .text-aqua-100 {
+  color: #059669 !important;
+}
+
+.light .border-aqua-500 {
+  border-color: #10b981 !important;
+}
+
+.light .bg-aqua-500\/20 {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+}
+
+.light .bg-aqua-600\/10 {
+  background-color: rgba(5, 150, 105, 0.1) !important;
+}
+
+.light .bg-aqua-600\/20 {
+  background-color: rgba(5, 150, 105, 0.15) !important;
+}
+
+/* Light mode canvas/SVG backgrounds */
+.light .fill-slate-950 {
+  fill: #f8fafc !important;
+}
+
+.light .stroke-slate-700 {
+  stroke: #cbd5e1 !important;
+}
+
+/* Light mode for wizard and other pages with slate-950 backgrounds */
+.light .bg-slate-950\/70 {
+  background-color: rgba(248, 250, 252, 0.9) !important;
+}
+
+.light .bg-slate-900\/70 {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.light .bg-slate-900\/60 {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+}
+
+.light .bg-slate-900\/50 {
+  background-color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.light .bg-slate-900\/85 {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.light .bg-slate-900\/80 {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+}
+
+.light .bg-slate-900\/30 {
+  background-color: rgba(241, 245, 249, 0.5) !important;
+}
+
+.light .border-slate-800\/50 {
+  border-color: rgba(226, 232, 240, 0.5) !important;
+}
+
+.light .border-slate-800\/30 {
+  border-color: rgba(226, 232, 240, 0.3) !important;
+}
+
+/* Light mode gradient texts - keep visible */
+.light .from-aqua-400 {
+  --tw-gradient-from: #10b981 !important;
+}
+
+.light .to-cyan-300 {
+  --tw-gradient-to: #06b6d4 !important;
+}
+
+/* Light mode for selected/active states */
+.light .border-aqua-500\/50 {
+  border-color: rgba(16, 185, 129, 0.5) !important;
+}
+
+.light .hover\:border-aqua-500:hover {
+  border-color: #10b981 !important;
+}
+
+/* Light mode form controls */
+.light input[type="text"],
+.light input[type="number"] {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #1e293b !important;
+}
+
+.light input[type="text"]::placeholder,
+.light input[type="number"]::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Light mode scrollbar (webkit browsers) */
+.light ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Light mode gradient overrides */
+.light .from-slate-900\/90 {
+  --tw-gradient-from: rgba(255, 255, 255, 0.95) var(--tw-gradient-from-position) !important;
+}
+
+.light .from-slate-900\/70 {
+  --tw-gradient-from: rgba(255, 255, 255, 0.85) var(--tw-gradient-from-position) !important;
+}
+
+.light .from-slate-900\/60 {
+  --tw-gradient-from: rgba(255, 255, 255, 0.75) var(--tw-gradient-from-position) !important;
+}
+
+.light .from-slate-900\/50 {
+  --tw-gradient-from: rgba(255, 255, 255, 0.7) var(--tw-gradient-from-position) !important;
+}
+
+.light .to-slate-900\/90 {
+  --tw-gradient-to: rgba(248, 250, 252, 0.95) var(--tw-gradient-to-position) !important;
+}
+
+.light .to-slate-900\/70 {
+  --tw-gradient-to: rgba(248, 250, 252, 0.85) var(--tw-gradient-to-position) !important;
+}
+
+.light .to-slate-900\/60 {
+  --tw-gradient-to: rgba(248, 250, 252, 0.75) var(--tw-gradient-to-position) !important;
+}
+
+.light .to-slate-900\/50 {
+  --tw-gradient-to: rgba(248, 250, 252, 0.7) var(--tw-gradient-to-position) !important;
+}
+
+.light .from-slate-950 {
+  --tw-gradient-from: #f8fafc var(--tw-gradient-from-position) !important;
+}
+
+.light .to-slate-950 {
+  --tw-gradient-to: #f1f5f9 var(--tw-gradient-to-position) !important;
+}
+
+.light .from-slate-900 {
+  --tw-gradient-from: #ffffff var(--tw-gradient-from-position) !important;
+}
+
+.light .to-slate-900 {
+  --tw-gradient-to: #f8fafc var(--tw-gradient-to-position) !important;
+}
+
+.light .from-slate-800 {
+  --tw-gradient-from: #f1f5f9 var(--tw-gradient-from-position) !important;
+}
+
+.light .to-slate-800 {
+  --tw-gradient-to: #e2e8f0 var(--tw-gradient-to-position) !important;
+}
+
+/* Light mode for bg-slate-800/60 (used in input fields) */
+.light .bg-slate-800\/60 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Light mode for colored button text (room builder buttons) */
+.light .text-emerald-100 {
+  color: #047857 !important;
+}
+
+.light .text-amber-100 {
+  color: #b45309 !important;
+}
+
+.light .text-rose-100 {
+  color: #be123c !important;
+}
+
+.light .text-purple-100 {
+  color: #7c3aed !important;
+}
+
+/* Light mode for colored button backgrounds/borders */
+.light .bg-emerald-600\/10 {
+  background-color: rgba(5, 150, 105, 0.15) !important;
+}
+
+.light .bg-amber-600\/10 {
+  background-color: rgba(217, 119, 6, 0.15) !important;
+}
+
+.light .bg-rose-600\/10 {
+  background-color: rgba(225, 29, 72, 0.15) !important;
+}
+
+.light .bg-purple-600\/10 {
+  background-color: rgba(147, 51, 234, 0.1) !important;
+}
+
+.light .bg-purple-600\/20 {
+  background-color: rgba(147, 51, 234, 0.15) !important;
+}
+
+.light .border-emerald-600\/50 {
+  border-color: rgba(5, 150, 105, 0.5) !important;
+}
+
+.light .border-amber-600\/50 {
+  border-color: rgba(217, 119, 6, 0.5) !important;
+}
+
+.light .border-rose-600\/50 {
+  border-color: rgba(225, 29, 72, 0.5) !important;
+}
+
+.light .border-purple-600\/50 {
+  border-color: rgba(147, 51, 234, 0.5) !important;
+}
+
+/* Light mode hover states for colored buttons */
+.light .hover\:bg-emerald-600\/20:hover {
+  background-color: rgba(5, 150, 105, 0.25) !important;
+}
+
+.light .hover\:bg-amber-600\/20:hover {
+  background-color: rgba(217, 119, 6, 0.25) !important;
+}
+
+.light .hover\:bg-rose-600\/20:hover {
+  background-color: rgba(225, 29, 72, 0.25) !important;
+}
+
+.light .hover\:bg-purple-600\/30:hover {
+  background-color: rgba(147, 51, 234, 0.25) !important;
+}

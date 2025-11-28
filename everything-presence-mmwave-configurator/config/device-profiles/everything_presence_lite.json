@@ -1,0 +1,112 @@
+{
+  "id": "everything_presence_lite",
+  "label": "Everything Presence Lite",
+  "model": "Everything Presence Lite",
+  "manufacturer": "EverythingSmartTechnology",
+  "iconUrl": "./icons/devices/everything_presence_lite.png",
+  "capabilities": {
+    "tracking": true,
+    "zones": true,
+    "exclusionZones": true,
+    "entryZones": true,
+    "polygonZones": true,
+    "distanceOnlyTracking": false,
+    "sensors": {
+      "mmwavePresence": true,
+      "pir": true,
+      "light": true,
+      "temperature": true
+    }
+  },
+  "limits": {
+    "maxZones": 4,
+    "maxExclusionZones": 2,
+    "maxEntryZones": 2,
+    "maxRangeMeters": 6,
+    "fieldOfViewDegrees": 120
+  },
+  "entityMap": {
+    "trackingTargetsEntity": null,
+    "trackingTargetCountEntity": "sensor.${name}_zone_1_target_count",
+    "maxDistanceEntity": "number.${name}_max_distance",
+    "installationAngleEntity": "number.${name}_installation_angle",
+    "polygonZonesEnabledEntity": "switch.${name}_polygon_zones",
+    "polygonZoneEntities": {
+      "zone1": "text.${name}_polygon_zone_1",
+      "zone2": "text.${name}_polygon_zone_2",
+      "zone3": "text.${name}_polygon_zone_3",
+      "zone4": "text.${name}_polygon_zone_4"
+    },
+    "polygonExclusionEntities": {
+      "exclusion1": "text.${name}_polygon_exclusion_1",
+      "exclusion2": "text.${name}_polygon_exclusion_2"
+    },
+    "polygonEntryEntities": {
+      "entry1": "text.${name}_polygon_entry_1",
+      "entry2": "text.${name}_polygon_entry_2"
+    },
+    "zoneConfigEntities": {
+      "zone1": {
+        "beginX": "number.${name}_zone_1_begin_x",
+        "endX": "number.${name}_zone_1_end_x",
+        "beginY": "number.${name}_zone_1_begin_y",
+        "endY": "number.${name}_zone_1_end_y",
+        "offDelay": "number.${name}_zone_1_off_delay"
+      },
+      "zone2": {
+        "beginX": "number.${name}_zone_2_begin_x",
+        "endX": "number.${name}_zone_2_end_x",
+        "beginY": "number.${name}_zone_2_begin_y",
+        "endY": "number.${name}_zone_2_end_y",
+        "offDelay": "number.${name}_zone_2_off_delay"
+      },
+      "zone3": {
+        "beginX": "number.${name}_zone_3_begin_x",
+        "endX": "number.${name}_zone_3_end_x",
+        "beginY": "number.${name}_zone_3_begin_y",
+        "endY": "number.${name}_zone_3_end_y",
+        "offDelay": "number.${name}_zone_3_off_delay"
+      },
+      "zone4": {
+        "beginX": "number.${name}_zone_4_begin_x",
+        "endX": "number.${name}_zone_4_end_x",
+        "beginY": "number.${name}_zone_4_begin_y",
+        "endY": "number.${name}_zone_4_end_y",
+        "offDelay": "number.${name}_zone_4_off_delay"
+      }
+    },
+    "exclusionZoneConfigEntities": {
+      "exclusion1": {
+        "beginX": "number.${name}_occupancy_mask_1_begin_x",
+        "endX": "number.${name}_occupancy_mask_1_end_x",
+        "beginY": "number.${name}_occupancy_mask_1_begin_y",
+        "endY": "number.${name}_occupancy_mask_1_end_y"
+      },
+      "exclusion2": {
+        "beginX": "number.${name}_occupancy_mask_2_begin_x",
+        "endX": "number.${name}_occupancy_mask_2_end_x",
+        "beginY": "number.${name}_occupancy_mask_2_begin_y",
+        "endY": "number.${name}_occupancy_mask_2_end_y"
+      }
+    },
+    "entryZoneConfigEntities": {
+      "entry1": {
+        "beginX": "number.${name}_entry_zone_1_begin_x",
+        "endX": "number.${name}_entry_zone_1_end_x",
+        "beginY": "number.${name}_entry_zone_1_begin_y",
+        "endY": "number.${name}_entry_zone_1_end_y"
+      },
+      "entry2": {
+        "beginX": "number.${name}_entry_zone_2_begin_x",
+        "endX": "number.${name}_entry_zone_2_end_x",
+        "beginY": "number.${name}_entry_zone_2_begin_y",
+        "endY": "number.${name}_entry_zone_2_end_y"
+      }
+    },
+    "presenceEntity": "binary_sensor.${name}_occupancy",
+    "pirEntity": null,
+    "lightEntity": null,
+    "temperatureEntity": null,
+    "co2Entity": "sensor.${name}_co2"
+  }
+}

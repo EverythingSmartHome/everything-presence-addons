@@ -1,20 +1,34 @@
-name: "Everything Presence Zone Configurator"
-description: "Helps you to visually create zones for the Everything Presence Lite, a mmWave Presence Sensor for Home Assistant"
-version: "1.2.2"
-slug: "everything-presence-zone-configurator"
-init: false
+name: Everything Presence Zone Configurator
+version: 2.0.0
+slug: everything-presence-zone-configurator
+description: Helps you to visualise Everything Presence Lite and Everything Presence One, a mmWave Presence Sensor for Home Assistant with real-time tracking (Everything Presence Lite) and other advanced capabilities.
+url: https://github.com/everythingsmarthome/everything-presence-addons
 arch:
   - aarch64
   - amd64
   - armhf
   - armv7
-  - i386
 startup: services
 boot: auto
 ingress: true
-ingress_port: 8099
-ingress_entry: index.html
-panel_icon: "mdi:radar"
+ingress_port: 3000
+panel_icon: mdi:radar
+panel_title: Zone Configurator
+watchdog: "http://[HOST]:[PORT:3000]/api/health"
 ports:
-  8099/tcp: null
+  3000/tcp: null
+ports_description:
+  3000/tcp: Optional direct access (ingress preferred)
 homeassistant_api: true
+auth_api: true
+hassio_api: true
+stdin: true
+stdin_open: true
+init: false
+environment:
+  PORT: "3000"
+map:
+  - config:rw
+  - share:rw
+options: {}
+schema: {}
