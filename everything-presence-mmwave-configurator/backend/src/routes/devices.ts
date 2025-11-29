@@ -6,6 +6,7 @@ import type { IHaWriteClient } from '../ha/writeClient';
 import { ZoneWriter } from '../ha/zoneWriter';
 import { ZoneReader } from '../ha/zoneReader';
 import { RoomConfig, ZonePolygon, EntityMappings } from '../domain/types';
+import { EntityResolver } from '../domain/entityResolver';
 import { logger } from '../logger';
 
 export interface DevicesRouterDependencies {
@@ -32,7 +33,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
   });
 
   router.get('/:deviceId/zone-availability', async (req, res) => {
-    const { profileId, entityNamePrefix } = req.query;
+    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -48,19 +49,35 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       return res.status(400).json({ message: 'Profile does not define zones' });
     }
 
+    // Parse entityMappings if provided (JSON string in query param)
+    let entityMappings: EntityMappings | undefined;
+    if (entityMappingsJson && typeof entityMappingsJson === 'string') {
+      try {
+        entityMappings = JSON.parse(entityMappingsJson);
+      } catch {
+        logger.warn('Invalid entityMappings JSON in zone-availability query');
+      }
+    }
+
     try {
       const entityRegistry = await readTransport.listEntityRegistry();
       const prefix = entityNamePrefix as string;
 
       const availability: Record<string, { enabled: boolean; disabledBy: string | null }> = {};
 
-      // Check regular zones
+      // Check regular zones using EntityResolver
       if (zoneMap.zoneConfigEntities) {
         for (const [zoneKey, entities] of Object.entries(zoneMap.zoneConfigEntities)) {
           const zoneEntities = entities as Record<string, string>;
-          const beginXEntity = zoneEntities.beginX?.replace('${name}', prefix);
-          if (beginXEntity) {
-            const registryEntry = entityRegistry.find((e) => e.entity_id === beginXEntity);
+          const zoneSet = EntityResolver.resolveZoneEntitySet(
+            entityMappings,
+            prefix,
+            'zoneConfigEntities',
+            zoneKey,
+            zoneEntities
+          );
+          if (zoneSet?.beginX) {
+            const registryEntry = entityRegistry.find((e) => e.entity_id === zoneSet.beginX);
             availability[zoneKey] = {
               enabled: !registryEntry?.disabled_by,
               disabledBy: registryEntry?.disabled_by ?? null,
@@ -69,13 +86,19 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         }
       }
 
-      // Check exclusion zones
+      // Check exclusion zones using EntityResolver
       if (zoneMap.exclusionZoneConfigEntities) {
         for (const [zoneKey, entities] of Object.entries(zoneMap.exclusionZoneConfigEntities)) {
           const zoneEntities = entities as Record<string, string>;
-          const beginXEntity = zoneEntities.beginX?.replace('${name}', prefix);
-          if (beginXEntity) {
-            const registryEntry = entityRegistry.find((e) => e.entity_id === beginXEntity);
+          const zoneSet = EntityResolver.resolveZoneEntitySet(
+            entityMappings,
+            prefix,
+            'exclusionZoneConfigEntities',
+            zoneKey,
+            zoneEntities
+          );
+          if (zoneSet?.beginX) {
+            const registryEntry = entityRegistry.find((e) => e.entity_id === zoneSet.beginX);
             availability[zoneKey] = {
               enabled: !registryEntry?.disabled_by,
               disabledBy: registryEntry?.disabled_by ?? null,
@@ -84,13 +107,19 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         }
       }
 
-      // Check entry zones
+      // Check entry zones using EntityResolver
       if (zoneMap.entryZoneConfigEntities) {
         for (const [zoneKey, entities] of Object.entries(zoneMap.entryZoneConfigEntities)) {
           const zoneEntities = entities as Record<string, string>;
-          const beginXEntity = zoneEntities.beginX?.replace('${name}', prefix);
-          if (beginXEntity) {
-            const registryEntry = entityRegistry.find((e) => e.entity_id === beginXEntity);
+          const zoneSet = EntityResolver.resolveZoneEntitySet(
+            entityMappings,
+            prefix,
+            'entryZoneConfigEntities',
+            zoneKey,
+            zoneEntities
+          );
+          if (zoneSet?.beginX) {
+            const registryEntry = entityRegistry.find((e) => e.entity_id === zoneSet.beginX);
             availability[zoneKey] = {
               enabled: !registryEntry?.disabled_by,
               disabledBy: registryEntry?.disabled_by ?? null,
@@ -104,19 +133,33 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       let polygonZonesAvailable = false;
       let entryZonesAvailable = false;
 
-      // Check polygon zone 1 entity existence
+      // Check polygon zone 1 entity existence using EntityResolver
       if (zoneMap.polygonZoneEntities?.zone1) {
-        const polygonZone1Entity = zoneMap.polygonZoneEntities.zone1.replace('${name}', prefix);
-        const polygonEntry = entityRegistry.find((e) => e.entity_id === polygonZone1Entity);
-        polygonZonesAvailable = !!polygonEntry;
+        const polygonZone1Entity = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          prefix,
+          'polygonZoneEntities',
+          'zone1',
+          zoneMap.polygonZoneEntities.zone1
+        );
+        if (polygonZone1Entity) {
+          const polygonEntry = entityRegistry.find((e) => e.entity_id === polygonZone1Entity);
+          polygonZonesAvailable = !!polygonEntry;
+        }
       }
 
-      // Check entry zone 1 entity existence (using rectangle entry zone as indicator)
+      // Check entry zone 1 entity existence using EntityResolver
       if (zoneMap.entryZoneConfigEntities?.entry1) {
         const entryEntities = zoneMap.entryZoneConfigEntities.entry1 as Record<string, string>;
-        const entry1Entity = entryEntities.beginX?.replace('${name}', prefix);
-        if (entry1Entity) {
-          const entryEntry = entityRegistry.find((e) => e.entity_id === entry1Entity);
+        const entryZoneSet = EntityResolver.resolveZoneEntitySet(
+          entityMappings,
+          prefix,
+          'entryZoneConfigEntities',
+          'entry1',
+          entryEntities
+        );
+        if (entryZoneSet?.beginX) {
+          const entryEntry = entityRegistry.find((e) => e.entity_id === entryZoneSet.beginX);
           entryZonesAvailable = !!entryEntry;
         }
       }
@@ -201,7 +244,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
    * Get polygon mode status for a device.
    */
   router.get('/:deviceId/polygon-mode', async (req, res) => {
-    const { profileId, entityNamePrefix } = req.query;
+    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -223,8 +266,27 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       return res.json({ supported: false, enabled: false });
     }
 
+    // Parse entityMappings if provided (JSON string in query param)
+    let entityMappings: EntityMappings | undefined;
+    if (entityMappingsJson && typeof entityMappingsJson === 'string') {
+      try {
+        entityMappings = JSON.parse(entityMappingsJson);
+      } catch {
+        logger.warn('Invalid entityMappings JSON in polygon-mode query');
+      }
+    }
+
     try {
-      const entityId = entityTemplate.replace('${name}', entityNamePrefix as string);
+      // Use EntityResolver to get entity ID from mappings or template
+      const entityId = EntityResolver.resolve(
+        entityMappings,
+        entityNamePrefix as string,
+        'polygonZonesEnabledEntity',
+        entityTemplate
+      );
+      if (!entityId) {
+        return res.json({ supported: false, enabled: false });
+      }
       logger.info({ entityId, entityNamePrefix }, 'Checking polygon mode entity');
 
       const states = await readTransport.getStates([entityId]);

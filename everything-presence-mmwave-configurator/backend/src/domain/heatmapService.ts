@@ -1,6 +1,7 @@
 import { HaAuthConfig } from '../ha/types';
 import { logger } from '../logger';
-import { Point, Zone, isZonePolygon } from './types';
+import { Point, Zone, isZonePolygon, EntityMappings } from './types';
+import { EntityResolver } from './entityResolver';
 
 /**
  * Grid cell for heatmap visualization.
@@ -97,14 +98,15 @@ export class HeatmapService {
     entityNamePrefix: string,
     hours: number,
     resolution: number,
-    zones?: Zone[]
+    zones?: Zone[],
+    entityMappings?: EntityMappings
   ): Promise<HeatmapResponse> {
     const maxHours = 168; // 7 days max
     const clampedHours = Math.min(hours, maxHours);
     const clampedResolution = Math.max(100, Math.min(1000, resolution)); // 100mm to 1000mm cells
 
-    // Build entity list for targets 1-3
-    const entities = this.getTrackingEntities(entityNamePrefix);
+    // Build entity list for targets 1-3 using EntityResolver
+    const entities = this.getTrackingEntities(entityNamePrefix, entityMappings);
 
     // Fetch history from HA
     const history = await this.fetchHistory(entities, clampedHours);
@@ -154,12 +156,15 @@ export class HeatmapService {
 
   /**
    * Get entity IDs for target tracking (x,y coordinates for targets 1-3).
+   * Uses EntityResolver to check stored mappings first, with template fallback.
    */
-  private getTrackingEntities(entityNamePrefix: string): string[] {
+  private getTrackingEntities(entityNamePrefix: string, entityMappings?: EntityMappings): string[] {
     const entities: string[] = [];
     for (let i = 1; i <= 3; i++) {
-      entities.push(`sensor.${entityNamePrefix}_target_${i}_x`);
-      entities.push(`sensor.${entityNamePrefix}_target_${i}_y`);
+      const xEntity = EntityResolver.resolveTargetEntity(entityMappings, entityNamePrefix, i, 'x');
+      const yEntity = EntityResolver.resolveTargetEntity(entityMappings, entityNamePrefix, i, 'y');
+      if (xEntity) entities.push(xEntity);
+      if (yEntity) entities.push(yEntity);
     }
     return entities;
   }

@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { HeatmapResponse } from '../api/types';
+import { HeatmapResponse, EntityMappings } from '../api/types';
 import { fetchHeatmap } from '../api/client';
 
 interface UseHeatmapOptions {
   deviceId: string | null;
   profileId: string | null;
   entityNamePrefix: string | null;
+  entityMappings?: EntityMappings;
   hours: number;
   enabled: boolean;
 }
@@ -22,7 +23,7 @@ export const useHeatmap = (options: UseHeatmapOptions): UseHeatmapResult => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { deviceId, profileId, entityNamePrefix, hours, enabled } = options;
+  const { deviceId, profileId, entityNamePrefix, entityMappings, hours, enabled } = options;
 
   const load = useCallback(async () => {
     if (!enabled || !deviceId || !profileId || !entityNamePrefix) {
@@ -34,7 +35,7 @@ export const useHeatmap = (options: UseHeatmapOptions): UseHeatmapResult => {
     setError(null);
 
     try {
-      const response = await fetchHeatmap(deviceId, profileId, entityNamePrefix, hours);
+      const response = await fetchHeatmap(deviceId, profileId, entityNamePrefix, hours, 400, entityMappings);
       setData(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load heatmap');
@@ -42,7 +43,7 @@ export const useHeatmap = (options: UseHeatmapOptions): UseHeatmapResult => {
     } finally {
       setLoading(false);
     }
-  }, [deviceId, profileId, entityNamePrefix, hours, enabled]);
+  }, [deviceId, profileId, entityNamePrefix, entityMappings, hours, enabled]);
 
   useEffect(() => {
     load();
