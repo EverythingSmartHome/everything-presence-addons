@@ -173,6 +173,9 @@ export interface EntityMappings {
     target3?: TargetEntitySet;
   };
 
+  // Settings entities (device configuration controls)
+  settingsEntities?: Record<string, string>;
+
   // Allow additional custom mappings
   [key: string]: unknown;
 }

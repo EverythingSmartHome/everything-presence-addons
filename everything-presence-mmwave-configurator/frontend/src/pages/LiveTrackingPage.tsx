@@ -126,6 +126,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     deviceId: selectedRoom?.deviceId ?? null,
     profileId: selectedRoom?.profileId ?? null,
     entityNamePrefix,
+    entityMappings: selectedRoom?.entityMappings,
     hours: heatmapHours,
     enabled: heatmapEnabled && !!supportsHeatmap,
   });
@@ -333,7 +334,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         const deviceZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
 
         // Always sync device zones to local storage (device is source of truth)
@@ -352,7 +354,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
 
   // Fetch polygon mode status when room changes
   useEffect(() => {
@@ -377,7 +379,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         const status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
         setPolygonModeStatus(status);
       } catch (err) {
@@ -386,7 +389,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
 
   // Fetch polygon zones when polygon mode is enabled
   useEffect(() => {
@@ -411,7 +414,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         const zones = await fetchPolygonZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
         setPolygonZones(zones);
       } catch (err) {
@@ -420,7 +424,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonZones();
-  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices]);
+  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
 
   const handleAutoZoom = useCallback(() => {
     if (!selectedRoom || !selectedRoom.roomShell || !selectedRoom.roomShell.points.length) {

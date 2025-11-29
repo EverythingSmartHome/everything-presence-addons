@@ -80,7 +80,8 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
         entityNamePrefix as string,
         hoursNum,
         resolutionNum,
-        zones
+        zones,
+        entityMappings
       );
 
       return res.json(heatmap);

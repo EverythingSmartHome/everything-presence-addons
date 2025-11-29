@@ -3,6 +3,8 @@ import { Server } from 'http';
 import { logger } from '../logger';
 import type { IHaReadTransport, EntityState } from '../ha/readTransport';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
+import type { EntityMappings } from '../domain/types';
+import { EntityResolver } from '../domain/entityResolver';
 
 interface LiveClientSubscription {
   ws: WebSocket;
@@ -55,7 +57,7 @@ export function createLiveWebSocketServer(
         const message = JSON.parse(data.toString());
 
         if (message.type === 'subscribe') {
-          const { deviceId, profileId, entityNamePrefix } = message;
+          const { deviceId, profileId, entityNamePrefix, entityMappings } = message;
 
           if (!deviceId || !profileId) {
             ws.send(JSON.stringify({ type: 'error', error: 'deviceId and profileId required' }));
@@ -79,43 +81,58 @@ export function createLiveWebSocketServer(
             return;
           }
 
-          // Build list of entity IDs to monitor
+          // Parse entityMappings if provided (could be string or object)
+          let parsedMappings: EntityMappings | undefined;
+          if (entityMappings) {
+            if (typeof entityMappings === 'string') {
+              try {
+                parsedMappings = JSON.parse(entityMappings);
+              } catch {
+                logger.warn('Invalid entityMappings JSON in WebSocket message');
+              }
+            } else {
+              parsedMappings = entityMappings as EntityMappings;
+            }
+          }
+
+          // Build list of entity IDs to monitor using EntityResolver
           const entityIds = new Set<string>();
           const entityMap = profile.entityMap as any;
 
-          const addEntity = (pattern: string | null | undefined) => {
-            if (pattern) {
-              const entityId = pattern.replace('${name}', deviceName);
+          // Helper to resolve entity ID using EntityResolver (mappings first, then template fallback)
+          const addEntity = (mappingKey: string, pattern: string | null | undefined) => {
+            const entityId = EntityResolver.resolve(parsedMappings, deviceName, mappingKey, pattern);
+            if (entityId) {
               entityIds.add(entityId);
             }
           };
 
-          // Add all relevant entities
-          addEntity(entityMap.presenceEntity);
-          addEntity(entityMap.mmwaveEntity);
-          addEntity(entityMap.pirEntity);
-          addEntity(entityMap.temperatureEntity);
-          addEntity(entityMap.humidityEntity);
-          addEntity(entityMap.illuminanceEntity);
-          addEntity(entityMap.lightEntity);
-          addEntity(entityMap.co2Entity);
+          // Add all relevant entities (using mapping key + template)
+          addEntity('presenceEntity', entityMap.presenceEntity);
+          addEntity('mmwaveEntity', entityMap.mmwaveEntity);
+          addEntity('pirEntity', entityMap.pirEntity);
+          addEntity('temperatureEntity', entityMap.temperatureEntity);
+          addEntity('humidityEntity', entityMap.humidityEntity);
+          addEntity('illuminanceEntity', entityMap.illuminanceEntity);
+          addEntity('lightEntity', entityMap.lightEntity);
+          addEntity('co2Entity', entityMap.co2Entity);
 
           // Distance tracking entities (EP1)
-          addEntity(entityMap.distanceEntity);
-          addEntity(entityMap.speedEntity);
-          addEntity(entityMap.energyEntity);
-          addEntity(entityMap.targetCountEntity);
-          addEntity(entityMap.modeEntity);
+          addEntity('distanceEntity', entityMap.distanceEntity);
+          addEntity('speedEntity', entityMap.speedEntity);
+          addEntity('energyEntity', entityMap.energyEntity);
+          addEntity('targetCountEntity', entityMap.targetCountEntity);
+          addEntity('modeEntity', entityMap.modeEntity);
 
           // EP Lite tracking
-          addEntity(entityMap.trackingTargetCountEntity);
-          addEntity(entityMap.trackingTargetsEntity);
-          addEntity(entityMap.maxDistanceEntity);
-          addEntity(entityMap.installationAngleEntity);
+          addEntity('trackingTargetCountEntity', entityMap.trackingTargetCountEntity);
+          addEntity('trackingTargetsEntity', entityMap.trackingTargetsEntity);
+          addEntity('maxDistanceEntity', entityMap.maxDistanceEntity);
+          addEntity('installationAngleEntity', entityMap.installationAngleEntity);
 
           // EP1 config entities for distance overlays
-          addEntity(entityMap.distanceMaxEntity);
-          addEntity(entityMap.triggerDistanceEntity);
+          addEntity('distanceMaxEntity', entityMap.distanceMaxEntity);
+          addEntity('triggerDistanceEntity', entityMap.triggerDistanceEntity);
 
           // Add zone-specific target count entities (for EP Lite zones 2, 3, 4)
           if (entityMap.zoneConfigEntities) {
@@ -123,34 +140,40 @@ export function createLiveWebSocketServer(
             Object.keys(zones).forEach((zoneKey) => {
               const zone = zones[zoneKey];
               if (zone.targetCountEntity) {
-                addEntity(zone.targetCountEntity);
+                // Use mapping key like "zoneConfigEntities.zone1.targetCountEntity"
+                addEntity(`zoneConfigEntities.${zoneKey}.targetCountEntity`, zone.targetCountEntity);
               }
             });
           }
 
-          // Zone target counts (EP Lite)
+          // Zone target counts (EP Lite) - use EntityResolver for these
           const capabilities = profile.capabilities as any;
           if (capabilities?.zones) {
             for (let i = 1; i <= 4; i++) {
-              addEntity(`sensor.\${name}_zone_${i}_target_count`);
-              addEntity(`binary_sensor.\${name}_zone_${i}_occupancy`);
+              // Try to resolve from mappings first, fall back to template
+              const zoneTargetCountKey = `zoneTargetCount${i}Entity`;
+              const zoneOccupancyKey = `zoneOccupancy${i}Entity`;
+              addEntity(zoneTargetCountKey, `sensor.\${name}_zone_${i}_target_count`);
+              addEntity(zoneOccupancyKey, `binary_sensor.\${name}_zone_${i}_occupancy`);
             }
           }
 
           // Subscribe to target position entities (target_1, target_2, target_3)
+          // Use EntityResolver.resolveTargetEntity for proper mapping resolution
           for (let i = 1; i <= 3; i++) {
-            addEntity(`sensor.\${name}_target_${i}_x`);
-            addEntity(`sensor.\${name}_target_${i}_y`);
-            addEntity(`sensor.\${name}_target_${i}_distance`);
-            addEntity(`sensor.\${name}_target_${i}_speed`);
-            addEntity(`sensor.\${name}_target_${i}_angle`);
-            addEntity(`sensor.\${name}_target_${i}_resolution`);
-            addEntity(`binary_sensor.\${name}_target_${i}_active`);
+            const targetProps: Array<'x' | 'y' | 'distance' | 'speed' | 'angle' | 'resolution' | 'active'> =
+              ['x', 'y', 'distance', 'speed', 'angle', 'resolution', 'active'];
+            for (const prop of targetProps) {
+              const entityId = EntityResolver.resolveTargetEntity(parsedMappings, deviceName, i, prop);
+              if (entityId) {
+                entityIds.add(entityId);
+              }
+            }
           }
 
           // Subscribe to assumed presence entities (entry/exit feature)
-          addEntity(`binary_sensor.\${name}_assumed_present`);
-          addEntity(`sensor.\${name}_assumed_present_remaining`);
+          addEntity('assumedPresentEntity', `binary_sensor.\${name}_assumed_present`);
+          addEntity('assumedPresentRemainingEntity', `sensor.\${name}_assumed_present_remaining`);
 
           // Store subscription
           const subscriptionId = `${deviceId}-${Date.now()}`;

@@ -210,6 +210,22 @@ export class EntityDiscoveryService {
       }
     }
 
+    // Process settings entities (device configuration controls)
+    if (entityMap.settingsEntities && typeof entityMap.settingsEntities === 'object') {
+      suggestedMappings.settingsEntities = {};
+      const settingsConfig = entityMap.settingsEntities as Record<string, string>;
+      for (const [settingKey, template] of Object.entries(settingsConfig)) {
+        if (typeof template === 'string') {
+          // Settings are optional - device may have different firmware versions
+          const result = this.matchTemplate(`settingsEntities.${settingKey}`, template, deviceEntities, entitiesByDomain, true);
+          results.push(result);
+          if (result.matchedEntityId) {
+            (suggestedMappings.settingsEntities as Record<string, string>)[settingKey] = result.matchedEntityId;
+          }
+        }
+      }
+    }
+
     // Calculate statistics
     const matchedCount = results.filter((r) => r.matchedEntityId !== null).length;
     const unmatchedRequired = results.filter((r) => r.matchedEntityId === null && !r.isOptional).length;

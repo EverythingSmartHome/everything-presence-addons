@@ -1,4 +1,4 @@
-import { DiscoveredDevice, DeviceProfile, ZoneAvailabilityResponse, CustomFloorMaterial, CustomFurnitureType, HeatmapResponse } from './types';
+import { DiscoveredDevice, DeviceProfile, ZoneAvailabilityResponse, CustomFloorMaterial, CustomFurnitureType, HeatmapResponse, EntityMappings } from './types';
 import { AppSettings } from './types';
 
 const handle = async <T>(res: Response): Promise<T> => {
@@ -52,9 +52,13 @@ export const updateDeviceEntity = async (deviceId: string, entityId: string, val
 export const fetchZoneAvailability = async (
   deviceId: string,
   profileId: string,
-  entityNamePrefix: string
+  entityNamePrefix: string,
+  entityMappings?: EntityMappings
 ): Promise<ZoneAvailabilityResponse> => {
   const params = new URLSearchParams({ profileId, entityNamePrefix });
+  if (entityMappings) {
+    params.set('entityMappings', JSON.stringify(entityMappings));
+  }
   const res = await fetch(ingressAware(`api/devices/${deviceId}/zone-availability?${params}`));
   return handle<ZoneAvailabilityResponse>(res);
 };
@@ -130,7 +134,8 @@ export const fetchHeatmap = async (
   profileId: string,
   entityNamePrefix: string,
   hours: number = 24,
-  resolution: number = 400
+  resolution: number = 400,
+  entityMappings?: EntityMappings
 ): Promise<HeatmapResponse> => {
   const params = new URLSearchParams({
     profileId,
@@ -138,6 +143,9 @@ export const fetchHeatmap = async (
     hours: hours.toString(),
     resolution: resolution.toString(),
   });
+  if (entityMappings) {
+    params.set('entityMappings', JSON.stringify(entityMappings));
+  }
   const res = await fetch(ingressAware(`api/devices/${deviceId}/heatmap?${params}`));
   return handle<HeatmapResponse>(res);
 };

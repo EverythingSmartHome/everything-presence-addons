@@ -107,6 +107,23 @@
     "pirEntity": null,
     "lightEntity": null,
     "temperatureEntity": null,
-    "co2Entity": "sensor.${name}_co2"
+    "co2Entity": "sensor.${name}_co2",
+    "settingsEntities": {
+      "maxDistance": "number.${name}_max_distance",
+      "occupancyOffDelay": "number.${name}_occupancy_off_delay",
+      "zone1OffDelay": "number.${name}_zone_1_occupancy_off_delay",
+      "zone2OffDelay": "number.${name}_zone_2_occupancy_off_delay",
+      "zone3OffDelay": "number.${name}_zone_3_occupancy_off_delay",
+      "zone4OffDelay": "number.${name}_zone_4_occupancy_off_delay",
+      "installationAngle": "number.${name}_installation_angle",
+      "upsideDownMounting": "switch.${name}_upside_down_mounting",
+      "updateSpeed": "select.${name}_update_speed",
+      "trackingBehaviour": "select.${name}_tracking_behaviour",
+      "entryExitEnabled": "switch.${name}_entry_exit_enabled",
+      "exitThresholdPct": "number.${name}_exit_threshold_pct",
+      "assumePresentTimeout": "number.${name}_assume_present_timeout",
+      "staleTargetReset": "switch.${name}_stale_target_reset",
+      "staleTargetResetTimeout": "number.${name}_stale_target_reset_timeout"
+    }
   }
 }

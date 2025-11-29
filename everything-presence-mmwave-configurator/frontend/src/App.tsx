@@ -116,6 +116,7 @@ function App() {
               deviceId: selectedRoom.deviceId,
               profileId: selectedProfile.id,
               entityNamePrefix: selectedRoom.entityNamePrefix,
+              entityMappings: selectedRoom.entityMappings,
             }),
           );
         };
@@ -127,7 +128,8 @@ function App() {
             if (message.type === 'subscribed') {
               // Fetch initial state via REST as fallback
               const entityParam = selectedRoom.entityNamePrefix ? `&entityNamePrefix=${selectedRoom.entityNamePrefix}` : '';
-              const restUrl = ingressAware(`api/live/${selectedRoom.deviceId}/state?profileId=${selectedProfile.id}${entityParam}`);
+              const mappingsParam = selectedRoom.entityMappings ? `&entityMappings=${encodeURIComponent(JSON.stringify(selectedRoom.entityMappings))}` : '';
+              const restUrl = ingressAware(`api/live/${selectedRoom.deviceId}/state?profileId=${selectedProfile.id}${entityParam}${mappingsParam}`);
               fetch(restUrl)
                 .then((res) => res.json())
                 .then((data) => setLiveState(data.state))

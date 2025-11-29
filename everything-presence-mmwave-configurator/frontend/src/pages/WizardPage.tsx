@@ -207,7 +207,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       }
 
       try {
-        const response = await fetchZoneAvailability(currentDeviceId, currentProfileId, entityNamePrefix);
+        const response = await fetchZoneAvailability(currentDeviceId, currentProfileId, entityNamePrefix, selectedRoom?.entityMappings);
         setEntryZonesAvailable(response.entryZonesAvailable);
         setPolygonZonesAvailable(response.polygonZonesAvailable);
       } catch {
@@ -217,7 +217,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadFeatureAvailability();
-  }, [selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, deviceId, profileId, devices]);
+  }, [selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, profileId, devices]);
 
   // Dynamic steps based on room path
   const steps: StepKey[] = useMemo(() => {
@@ -698,7 +698,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         const fetchedZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         ) || [];
         const updatedRoom: RoomConfig = { ...selectedRoom, zones: fetchedZones };
         await updateRoom(selectedRoom.id, updatedRoom);
@@ -720,7 +721,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, deviceId, devices, onRoomUpdate]);
+  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, devices, onRoomUpdate]);
 
   // Fetch polygon mode status when entering zones step
   // This runs AFTER zones have been loaded to ensure room is fully initialized
@@ -752,7 +753,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         const status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
         setPolygonModeStatus(status);
 
@@ -761,7 +763,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           const zones = await fetchPolygonZonesFromDevice(
             selectedRoom.deviceId,
             selectedRoom.profileId,
-            entityNamePrefix
+            entityNamePrefix,
+            selectedRoom.entityMappings
           );
           setPolygonZones(zones);
         } else if (status.supported) {
@@ -783,7 +786,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, zonesLoadingComplete]);
+  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, zonesLoadingComplete]);
 
   // Track if we've auto-enabled Zone 1 for this room to avoid re-enabling if user manually disables
   const autoEnabledZoneRef = useRef<Set<string>>(new Set());
@@ -1008,10 +1011,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     try {
       if (polygonModeStatus.enabled) {
         // Push polygon zones to device
-        await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix);
+        await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, selectedRoom?.entityMappings);
       } else {
         // Push rectangular zones to device (device is source of truth)
-        await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix);
+        await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix, selectedRoom?.entityMappings);
         // Also update add-on storage to mirror device state
         await updateRoom(selectedRoom!.id, { zones: selectedRoom!.zones });
       }
@@ -1056,7 +1059,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         selectedRoom.deviceId,
         selectedRoom.profileId,
         entityNamePrefix,
-        true
+        true,
+        selectedRoom.entityMappings
       );
 
       // Convert existing rectangular zones to polygon zones (4-vertex rectangles)
@@ -1079,7 +1083,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           selectedRoom.deviceId,
           selectedRoom.profileId,
           convertedZones,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
       }
 

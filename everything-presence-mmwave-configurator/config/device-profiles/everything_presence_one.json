@@ -47,6 +47,26 @@
     "microMotionEntity": "switch.${name}_micro_motion_detection",
     "updateRateEntity": "select.${name}_distance_speed_update_rate",
     "co2Entity": "sensor.${name}_co2",
-    "zoneConfigEntities": null
+    "zoneConfigEntities": null,
+    "settingsEntities": {
+      "mmwaveMode": "select.${name}_mmwave_mode",
+      "mmwaveDistanceMin": "number.${name}_mmwave_minimum_distance",
+      "mmwaveDistanceMax": "number.${name}_mmwave_max_distance",
+      "mmwaveTriggerDistance": "number.${name}_mmwave_trigger_distance",
+      "mmwaveSensitivity": "number.${name}_mmwave_sustain_sensitivity",
+      "mmwaveTriggerSensitivity": "number.${name}_mmwave_trigger_sensitivity",
+      "mmwaveThresholdFactor": "number.${name}_mmwave_threshold_factor",
+      "mmwaveOnLatency": "number.${name}_mmwave_on_latency",
+      "mmwaveOffLatency": "number.${name}_mmwave_off_latency",
+      "occupancyOffLatency": "number.${name}_occupancy_off_latency",
+      "pirOffLatency": "number.${name}_pir_off_latency",
+      "pirOnLatency": "number.${name}_pir_on_latency",
+      "temperatureOffset": "number.${name}_temperature_offset",
+      "humidityOffset": "number.${name}_humidity_offset",
+      "illuminanceOffset": "number.${name}_illuminance_offset",
+      "microMotion": "switch.${name}_micro_motion_detection",
+      "mmwaveLed": "light.${name}_mmwave_led",
+      "updateRate": "select.${name}_distance_speed_update_rate"
+    }
   }
 }

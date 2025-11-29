@@ -1,4 +1,4 @@
-import { RoomConfig, ZoneRect, ZonePolygon } from './types';
+import { RoomConfig, ZoneRect, ZonePolygon, EntityMappings } from './types';
 import { ingressAware } from './client';
 
 const handle = async <T>(res: Response): Promise<T> => {
@@ -11,18 +11,32 @@ const handle = async <T>(res: Response): Promise<T> => {
 
 // ==================== RECTANGLE ZONE ENDPOINTS ====================
 
-export const fetchZonesFromDevice = async (deviceId: string, profileId: string, entityNamePrefix: string): Promise<ZoneRect[]> => {
+export const fetchZonesFromDevice = async (
+  deviceId: string,
+  profileId: string,
+  entityNamePrefix: string,
+  entityMappings?: EntityMappings
+): Promise<ZoneRect[]> => {
   const params = new URLSearchParams({ profileId, entityNamePrefix });
+  if (entityMappings) {
+    params.set('entityMappings', JSON.stringify(entityMappings));
+  }
   const res = await fetch(ingressAware(`api/devices/${deviceId}/zones?${params}`));
   const data = await handle<{ zones: ZoneRect[] }>(res);
   return data.zones;
 };
 
-export const pushZonesToDevice = async (deviceId: string, profileId: string, zones: RoomConfig['zones'], entityNamePrefix: string) => {
+export const pushZonesToDevice = async (
+  deviceId: string,
+  profileId: string,
+  zones: RoomConfig['zones'],
+  entityNamePrefix: string,
+  entityMappings?: EntityMappings
+) => {
   const res = await fetch(ingressAware(`api/devices/${deviceId}/zones`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, zones, entityNamePrefix }),
+    body: JSON.stringify({ profileId, zones, entityNamePrefix, entityMappings }),
   });
   return handle<{ ok: boolean }>(res);
 };
@@ -41,9 +55,13 @@ export interface PolygonModeStatus {
 export const fetchPolygonModeStatus = async (
   deviceId: string,
   profileId: string,
-  entityNamePrefix: string
+  entityNamePrefix: string,
+  entityMappings?: EntityMappings
 ): Promise<PolygonModeStatus> => {
   const params = new URLSearchParams({ profileId, entityNamePrefix });
+  if (entityMappings) {
+    params.set('entityMappings', JSON.stringify(entityMappings));
+  }
   const res = await fetch(ingressAware(`api/devices/${deviceId}/polygon-mode?${params}`));
   return handle<PolygonModeStatus>(res);
 };
@@ -55,12 +73,13 @@ export const setPolygonMode = async (
   deviceId: string,
   profileId: string,
   entityNamePrefix: string,
-  enabled: boolean
+  enabled: boolean,
+  entityMappings?: EntityMappings
 ): Promise<{ ok: boolean; enabled: boolean }> => {
   const res = await fetch(ingressAware(`api/devices/${deviceId}/polygon-mode`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, entityNamePrefix, enabled }),
+    body: JSON.stringify({ profileId, entityNamePrefix, enabled, entityMappings }),
   });
   return handle<{ ok: boolean; enabled: boolean }>(res);
 };
@@ -71,9 +90,13 @@ export const setPolygonMode = async (
 export const fetchPolygonZonesFromDevice = async (
   deviceId: string,
   profileId: string,
-  entityNamePrefix: string
+  entityNamePrefix: string,
+  entityMappings?: EntityMappings
 ): Promise<ZonePolygon[]> => {
   const params = new URLSearchParams({ profileId, entityNamePrefix });
+  if (entityMappings) {
+    params.set('entityMappings', JSON.stringify(entityMappings));
+  }
   const res = await fetch(ingressAware(`api/devices/${deviceId}/polygon-zones?${params}`));
   const data = await handle<{ zones: ZonePolygon[] }>(res);
   return data.zones;
@@ -86,12 +109,13 @@ export const pushPolygonZonesToDevice = async (
   deviceId: string,
   profileId: string,
   zones: ZonePolygon[],
-  entityNamePrefix: string
+  entityNamePrefix: string,
+  entityMappings?: EntityMappings
 ): Promise<{ ok: boolean }> => {
   const res = await fetch(ingressAware(`api/devices/${deviceId}/polygon-zones`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ profileId, zones, entityNamePrefix }),
+    body: JSON.stringify({ profileId, zones, entityNamePrefix, entityMappings }),
   });
   return handle<{ ok: boolean }>(res);
 };

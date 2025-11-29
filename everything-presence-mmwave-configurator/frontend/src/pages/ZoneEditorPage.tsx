@@ -272,7 +272,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         const deviceZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
 
         // Preserve labels from existing zones (labels are UI-only, not stored on device)
@@ -303,7 +304,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
 
   // Fetch zone availability from entity registry
   useEffect(() => {
@@ -332,7 +333,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         const response = await fetchZoneAvailability(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
         setZoneAvailability(response.availability);
         setPolygonZonesAvailable(response.polygonZonesAvailable);
@@ -346,7 +348,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadZoneAvailability();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
 
   // Fetch polygon mode status when room changes
   useEffect(() => {
@@ -371,7 +373,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         const status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
         setPolygonModeStatus(status);
       } catch (err) {
@@ -380,7 +383,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
 
   // Fetch polygon zones when polygon mode is enabled
   useEffect(() => {
@@ -405,7 +408,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         const zones = await fetchPolygonZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
         setPolygonZones(zones);
       } catch (err) {
@@ -414,7 +418,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadPolygonZones();
-  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices]);
+  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
 
   // Transform device-relative coordinates to room coordinates (keeping for reference, but not used since we get props)
   const deviceToRoom = (deviceX: number, deviceY: number) => {
@@ -511,7 +515,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         selectedRoom.deviceId,
         selectedRoom.profileId,
         entityNamePrefix,
-        newEnabled
+        newEnabled,
+        selectedRoom.entityMappings
       );
       setPolygonModeStatus({ ...polygonModeStatus, enabled: newEnabled });
 
@@ -521,7 +526,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         const zones = await fetchPolygonZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
-          entityNamePrefix
+          entityNamePrefix,
+          selectedRoom.entityMappings
         );
         setPolygonZones(zones);
       } else {
@@ -556,7 +562,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             selectedRoom.deviceId,
             effectiveProfile,
             polygonZones,
-            entityNamePrefix
+            entityNamePrefix,
+            selectedRoom.entityMappings
           );
         } else {
           // Save rectangle zones
@@ -567,7 +574,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           await validateZones(availableZones);
 
           // Push zones to device (device is source of truth)
-          await pushZonesToDevice(selectedRoom.deviceId, effectiveProfile, availableZones, entityNamePrefix);
+          await pushZonesToDevice(selectedRoom.deviceId, effectiveProfile, availableZones, entityNamePrefix, selectedRoom.entityMappings);
         }
       }
 

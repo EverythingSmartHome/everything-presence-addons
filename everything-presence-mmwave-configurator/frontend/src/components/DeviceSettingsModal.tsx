@@ -146,10 +146,24 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
   const entityPrefix = room.entityNamePrefix || '';
   const settingsConfig = isEP1 ? ep1Settings : eplSettings;
+  const settingsEntities = room.entityMappings?.settingsEntities;
+
+  // Helper to resolve entity ID from mappings or fallback to template
+  const resolveEntityId = (settingKey: string, domain: string, suffix: string): string | null => {
+    // First try stored mappings (source of truth)
+    if (settingsEntities?.[settingKey]) {
+      return settingsEntities[settingKey];
+    }
+    // Fallback to template construction
+    if (entityPrefix) {
+      return `${domain}.${entityPrefix}_${suffix}`;
+    }
+    return null;
+  };
 
   // Fetch current settings from HA
   useEffect(() => {
-    if (!isOpen || !entityPrefix) return;
+    if (!isOpen || (!entityPrefix && !settingsEntities)) return;
 
     const fetchSettings = async () => {
       setLoading(true);
@@ -159,7 +173,9 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
       for (const setting of settingsConfig) {
         const domain = setting.domain || (setting.type === 'switch' ? 'switch' : setting.type === 'select' ? 'select' : 'number');
-        const entityId = `${domain}.${entityPrefix}_${setting.entitySuffix}`;
+        const entityId = resolveEntityId(setting.key, domain, setting.entitySuffix);
+
+        if (!entityId) continue;
 
         try {
           const response = await fetch(ingressAware(`api/live/ha/states/${entityId}`));
@@ -189,7 +205,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
     };
 
     fetchSettings();
-  }, [isOpen, entityPrefix, settingsConfig]);
+  }, [isOpen, entityPrefix, settingsEntities, settingsConfig]);
 
   const updateSetting = async (key: string, newValue: string | number | boolean) => {
     const setting = settings[key];
