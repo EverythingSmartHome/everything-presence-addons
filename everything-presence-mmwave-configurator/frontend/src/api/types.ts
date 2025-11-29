@@ -104,20 +104,110 @@ export interface Door {
   swingSide: 'left' | 'right'; // Which side the hinge is on
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Entity Mapping Types
+// ─────────────────────────────────────────────────────────────────
+
+export interface ZoneEntitySet {
+  beginX: string;
+  endX: string;
+  beginY: string;
+  endY: string;
+  offDelay?: string;
+}
+
+export interface TargetEntitySet {
+  x: string;
+  y: string;
+  speed?: string;
+  resolution?: string;
+  angle?: string;
+  distance?: string;
+  active?: string;
+}
+
+export interface EntityMappings {
+  discoveredAt: string;
+  autoMatchedCount: number;
+  manuallyMappedCount: number;
+
+  presenceEntity?: string;
+  mmwaveEntity?: string;
+  pirEntity?: string;
+  temperatureEntity?: string;
+  humidityEntity?: string;
+  illuminanceEntity?: string;
+  co2Entity?: string;
+
+  distanceEntity?: string;
+  speedEntity?: string;
+  energyEntity?: string;
+  targetCountEntity?: string;
+  modeEntity?: string;
+
+  maxDistanceEntity?: string;
+  installationAngleEntity?: string;
+  polygonZonesEnabledEntity?: string;
+  trackingTargetCountEntity?: string;
+
+  zoneConfigEntities?: {
+    zone1?: ZoneEntitySet;
+    zone2?: ZoneEntitySet;
+    zone3?: ZoneEntitySet;
+    zone4?: ZoneEntitySet;
+  };
+
+  exclusionZoneConfigEntities?: {
+    exclusion1?: ZoneEntitySet;
+    exclusion2?: ZoneEntitySet;
+  };
+
+  entryZoneConfigEntities?: {
+    entry1?: ZoneEntitySet;
+    entry2?: ZoneEntitySet;
+  };
+
+  polygonZoneEntities?: {
+    zone1?: string;
+    zone2?: string;
+    zone3?: string;
+    zone4?: string;
+  };
+
+  polygonExclusionEntities?: {
+    exclusion1?: string;
+    exclusion2?: string;
+  };
+
+  polygonEntryEntities?: {
+    entry1?: string;
+    entry2?: string;
+  };
+
+  trackingTargets?: {
+    target1?: TargetEntitySet;
+    target2?: TargetEntitySet;
+    target3?: TargetEntitySet;
+  };
+
+  [key: string]: unknown;
+}
+
 export interface RoomConfig {
   id: string;
   name: string;
   deviceId?: string;
-  entityNamePrefix?: string; // e.g., "bedroom_ep_lite" - used to construct entity IDs
   profileId?: string;
   units: 'metric' | 'imperial';
   zones: ZoneRect[];
+  entityMappings?: EntityMappings;  // NEW: Resolved entity IDs from discovery
+  entityNamePrefix?: string;        // DEPRECATED: Legacy fallback
   roomShell?: RoomShell;
   roomShellFillMode?: 'overlay' | 'material';
   floorMaterial?: 'wood-oak' | 'wood-walnut' | 'wood-cherry' | 'wood-ash' | 'wood-mahogany' | 'wood-herringbone' | 'carpet-beige' | 'carpet-gray' | 'carpet-charcoal' | 'carpet-navy' | 'carpet-burgundy' | 'tile-white' | 'tile-gray' | 'tile-terracotta' | 'marble-white' | 'marble-black' | 'slate' | 'concrete' | 'vinyl-light' | 'none';
   devicePlacement?: DevicePlacement;
-  furniture?: FurnitureInstance[]; // Added furniture support
-  doors?: Door[]; // Added door support
+  furniture?: FurnitureInstance[];
+  doors?: Door[];
   metadata?: Record<string, unknown>;
 }
 

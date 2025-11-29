@@ -492,6 +492,25 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         </div>
       )}
 
+      {/* Entity Sync Nudge Banner - shown for rooms with device but no entity mappings */}
+      {/* Positioned below the Room selector dropdown (top-20) */}
+      {selectedRoom && selectedRoom.deviceId && !selectedRoom.entityMappings && onNavigate && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 max-w-xl rounded-xl border border-yellow-500/50 bg-yellow-500/10 backdrop-blur px-5 py-2.5 shadow-xl animate-in slide-in-from-top-4 fade-in">
+          <div className="flex items-center gap-3">
+            <span className="text-yellow-400">⚠</span>
+            <p className="text-xs text-yellow-100">
+              Entity mappings not configured.{' '}
+              <button
+                onClick={() => onNavigate('settings')}
+                className="underline hover:text-yellow-50 font-medium"
+              >
+                Re-sync in Settings
+              </button>
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Navigation (top left) */}
       {onBack && (
         <button

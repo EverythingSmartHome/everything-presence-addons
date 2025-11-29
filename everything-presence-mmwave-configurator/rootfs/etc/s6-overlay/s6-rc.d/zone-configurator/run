@@ -1,4 +1,5 @@
 #!/usr/bin/with-contenv bashio
+
 set -euo pipefail
 
 cd /app

@@ -66,14 +66,129 @@ export interface Door {
   swingSide: 'left' | 'right';
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Entity Mapping Types - Resolved entity IDs stored after discovery
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Set of entity IDs for a zone's coordinate entities.
+ */
+export interface ZoneEntitySet {
+  beginX: string;
+  endX: string;
+  beginY: string;
+  endY: string;
+  offDelay?: string;
+}
+
+/**
+ * Set of entity IDs for a tracking target.
+ */
+export interface TargetEntitySet {
+  x: string;
+  y: string;
+  speed?: string;
+  resolution?: string;
+  angle?: string;
+  distance?: string;
+  active?: string;
+}
+
+/**
+ * Resolved entity mappings - actual entity IDs stored after discovery.
+ * These replace runtime template resolution with direct lookups.
+ */
+export interface EntityMappings {
+  // Discovery metadata
+  discoveredAt: string;           // ISO timestamp of discovery
+  autoMatchedCount: number;       // How many were auto-matched
+  manuallyMappedCount: number;    // How many user manually mapped
+
+  // Core presence/sensor entities
+  presenceEntity?: string;
+  mmwaveEntity?: string;
+  pirEntity?: string;
+  temperatureEntity?: string;
+  humidityEntity?: string;
+  illuminanceEntity?: string;
+  co2Entity?: string;
+
+  // Distance/tracking entities (EP1)
+  distanceEntity?: string;
+  speedEntity?: string;
+  energyEntity?: string;
+  targetCountEntity?: string;
+  modeEntity?: string;
+
+  // Configuration entities
+  maxDistanceEntity?: string;
+  installationAngleEntity?: string;
+  polygonZonesEnabledEntity?: string;
+
+  // EPL tracking target count
+  trackingTargetCountEntity?: string;
+
+  // Zone configuration entities (EPL rectangular zones)
+  zoneConfigEntities?: {
+    zone1?: ZoneEntitySet;
+    zone2?: ZoneEntitySet;
+    zone3?: ZoneEntitySet;
+    zone4?: ZoneEntitySet;
+  };
+
+  // Exclusion zone entities (EPL)
+  exclusionZoneConfigEntities?: {
+    exclusion1?: ZoneEntitySet;
+    exclusion2?: ZoneEntitySet;
+  };
+
+  // Entry zone entities (EPL)
+  entryZoneConfigEntities?: {
+    entry1?: ZoneEntitySet;
+    entry2?: ZoneEntitySet;
+  };
+
+  // Polygon zone text entities (EPL)
+  polygonZoneEntities?: {
+    zone1?: string;
+    zone2?: string;
+    zone3?: string;
+    zone4?: string;
+  };
+
+  polygonExclusionEntities?: {
+    exclusion1?: string;
+    exclusion2?: string;
+  };
+
+  polygonEntryEntities?: {
+    entry1?: string;
+    entry2?: string;
+  };
+
+  // Tracking target entities (EPL)
+  trackingTargets?: {
+    target1?: TargetEntitySet;
+    target2?: TargetEntitySet;
+    target3?: TargetEntitySet;
+  };
+
+  // Allow additional custom mappings
+  [key: string]: unknown;
+}
+
 export interface RoomConfig {
   id: string;
   name: string;
   deviceId?: string;
-  entityNamePrefix?: string; // e.g., "bedroom_ep_lite" - used to construct entity IDs
   profileId?: string;
   units: 'metric' | 'imperial';
   zones: ZoneRect[];
+
+  // Entity identification - NEW: entityMappings is preferred
+  entityMappings?: EntityMappings;  // Resolved entity IDs from discovery
+  entityNamePrefix?: string;        // DEPRECATED: Legacy fallback for template resolution
+
   roomShell?: RoomShell;
   roomShellFillMode?: 'overlay' | 'material';
   floorMaterial?: 'wood-oak' | 'wood-walnut' | 'carpet-beige' | 'carpet-gray' | 'carpet-blue' | 'carpet-brown' | 'carpet-green' | 'tile' | 'laminate' | 'concrete' | 'none';
