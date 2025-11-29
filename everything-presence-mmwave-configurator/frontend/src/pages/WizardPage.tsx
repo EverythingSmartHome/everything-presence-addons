@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, FurnitureInstance, FurnitureType, Door } from '../api/types';
+import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, FurnitureInstance, FurnitureType, Door, EntityMappings } from '../api/types';
 import { RoomCanvas, Point, DevicePlacement } from '../components/RoomCanvas';
 import { ZoneCanvas } from '../components/ZoneCanvas';
 import { ZoneEditor } from '../components/ZoneEditor';
@@ -7,6 +7,7 @@ import { FurnitureLibrary } from '../components/FurnitureLibrary';
 import { FurnitureEditor } from '../components/FurnitureEditor';
 import { DoorEditor } from '../components/DoorEditor';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
+import { EntityDiscovery } from '../components/EntityDiscovery';
 import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
@@ -19,7 +20,7 @@ interface WizardPageProps {
   selectedDeviceId?: string | null;
   selectedProfileId?: string | null;
   onBack?: () => void;
-  onCreateRoom: (name: string, deviceId: string | null, profileId: string | null) => Promise<RoomConfig>;
+  onCreateRoom: (name: string, deviceId: string | null, profileId: string | null, entityMappings?: EntityMappings) => Promise<RoomConfig>;
   onSelectRoom: (roomId: string | null, profileId?: string | null) => void;
   onGoRoomBuilder: (roomId: string | null, profileId?: string | null) => void;
   onGoZoneEditor: (roomId: string | null, profileId?: string | null) => void;
@@ -37,6 +38,7 @@ interface WizardPageProps {
 
 type StepKey =
   | 'device'
+  | 'entityDiscovery'
   | 'roomChoice'
   | 'roomDetails'
   | 'outline'
@@ -78,6 +80,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [pushingZones, setPushingZones] = useState(false);
   const [pushSuccess, setPushSuccess] = useState(false);
+
+  // Entity discovery mappings (discovered after device selection)
+  const [discoveredMappings, setDiscoveredMappings] = useState<EntityMappings | null>(null);
 
   // Canvas controls for embedded room drawing
   const [canvasZoom, setCanvasZoom] = useState(1.1);
@@ -216,24 +221,24 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Dynamic steps based on room path
   const steps: StepKey[] = useMemo(() => {
-    const base: StepKey[] = ['device', 'roomChoice'];
+    const base: StepKey[] = ['device', 'entityDiscovery', 'roomChoice'];
 
     // Check if current profile supports zones
     const supportsZones = currentProfile?.capabilities?.zones !== false;
 
     if (roomPath === 'skip') {
-      // Skip room setup: device → roomChoice → (zones if supported) → finish
+      // Skip room setup: device → entityDiscovery → roomChoice → (zones if supported) → finish
       return supportsZones ? [...base, 'zones', 'finish'] : [...base, 'finish'];
     }
 
     if (roomPath === 'existing') {
-      // Use existing room: device → roomChoice → roomDetails → placement → (zones if supported) → finish
+      // Use existing room: device → entityDiscovery → roomChoice → roomDetails → placement → (zones if supported) → finish
       return supportsZones
         ? [...base, 'roomDetails', 'placement', 'zones', 'finish']
         : [...base, 'roomDetails', 'placement', 'finish'];
     }
 
-    // New room (default): device → roomChoice → roomDetails → outline → doors → furniture → placement → (zones if supported) → finish
+    // New room (default): device → entityDiscovery → roomChoice → roomDetails → outline → doors → furniture → placement → (zones if supported) → finish
     return supportsZones
       ? [...base, 'roomDetails', 'outline', 'doors', 'furniture', 'placement', 'zones', 'finish']
       : [...base, 'roomDetails', 'outline', 'doors', 'furniture', 'placement', 'finish'];
@@ -241,7 +246,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const [stepIndex, setStepIndex] = useState<number>(() => {
     // Initialize with default 'new' room path steps for initialStep lookup
-    const defaultSteps: StepKey[] = ['device', 'roomChoice', 'roomDetails', 'outline', 'doors', 'furniture', 'placement', 'zones', 'finish'];
+    const defaultSteps: StepKey[] = ['device', 'entityDiscovery', 'roomChoice', 'roomDetails', 'outline', 'doors', 'furniture', 'placement', 'zones', 'finish'];
     const idx = defaultSteps.indexOf(initialStep as StepKey);
     return idx >= 0 ? idx : 0;
   });
@@ -841,6 +846,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const canNext =
     (currentStep === 'device' && !!deviceId) ||
+    (currentStep === 'entityDiscovery' && !!discoveredMappings) ||
     (currentStep === 'roomChoice' && !!roomPath) ||
     (currentStep === 'roomDetails'
       ? roomPath === 'existing'
@@ -897,7 +903,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     setCreating(true);
     setError(null);
     try {
-      const room = await onCreateRoom(newRoomName.trim(), deviceId, profileId);
+      const room = await onCreateRoom(newRoomName.trim(), deviceId, profileId, discoveredMappings ?? undefined);
       setRoomId(room.id);
       onSelectRoom(room.id, room.profileId ?? profileId ?? null);
       setNewRoomName('');
@@ -907,6 +913,16 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleEntityDiscoveryComplete = (mappings: EntityMappings) => {
+    setDiscoveredMappings(mappings);
+    nextStep();
+  };
+
+  const handleEntityDiscoveryCancel = () => {
+    // Go back to device selection
+    prevStep();
   };
 
   const handleZonesChange = async (zones: ZoneRect[]) => {
@@ -1829,6 +1845,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             <div className="text-xs text-slate-500">•</div>
             <div className="text-xs text-slate-400">
               {currentStep === 'device' && 'Select device'}
+              {currentStep === 'entityDiscovery' && 'Discover entities'}
               {currentStep === 'roomChoice' && 'Choose room path'}
               {currentStep === 'roomDetails' && 'Bind/create room'}
               {currentStep === 'outline' && 'Draw outline'}
@@ -1948,6 +1965,20 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Entity Discovery step */}
+      {currentStep === 'entityDiscovery' && deviceId && profileId && (
+        <div className={`${slideAnimationClass} h-full`}>
+          <EntityDiscovery
+            deviceId={deviceId}
+            profileId={profileId}
+            deviceName={selectedDevice?.name ?? 'Unknown Device'}
+            onComplete={handleEntityDiscoveryComplete}
+            onCancel={handleEntityDiscoveryCancel}
+            onBack={prevStep}
+          />
         </div>
       )}
 

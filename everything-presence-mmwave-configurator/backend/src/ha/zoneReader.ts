@@ -1,6 +1,7 @@
 import type { IHaReadTransport } from './readTransport';
-import { ZoneRect, ZonePolygon } from '../domain/types';
+import { ZoneRect, ZonePolygon, EntityMappings } from '../domain/types';
 import { textToPolygon } from '../domain/polygonUtils';
+import { EntityResolver } from '../domain/entityResolver';
 import { logger } from '../logger';
 
 export class ZoneReader {
@@ -12,22 +13,30 @@ export class ZoneReader {
 
   /**
    * Read polygon zones from text entities.
+   * @param entityMap - Profile entity template map
+   * @param entityNamePrefix - Legacy entity name prefix (for fallback)
+   * @param entityMappings - Discovered entity mappings (preferred, optional)
    */
-  async readPolygonZones(entityMap: any, entityNamePrefix: string): Promise<ZonePolygon[]> {
-    logger.debug({ entityNamePrefix, hasPolygonZoneEntities: !!entityMap.polygonZoneEntities }, 'Starting polygon zone read');
+  async readPolygonZones(
+    entityMap: any,
+    entityNamePrefix: string,
+    entityMappings?: EntityMappings
+  ): Promise<ZonePolygon[]> {
+    logger.debug({ entityNamePrefix, hasPolygonZoneEntities: !!entityMap.polygonZoneEntities, hasMappings: !!entityMappings }, 'Starting polygon zone read');
     const zones: ZonePolygon[] = [];
-
-    const resolveEntity = (template: string | null | undefined): string | null => {
-      if (!template) return null;
-      return template.replace('${name}', entityNamePrefix);
-    };
 
     // Regular polygon zones
     if (entityMap.polygonZoneEntities) {
       const polyMap = entityMap.polygonZoneEntities;
       for (let i = 1; i <= 4; i++) {
         const key = `zone${i}`;
-        const entityId = resolveEntity(polyMap[key]);
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonZoneEntities',
+          key,
+          polyMap[key]
+        );
         logger.debug({ key, entityId }, 'Checking polygon zone entity');
         if (!entityId) continue;
 
@@ -57,7 +66,13 @@ export class ZoneReader {
       const polyMap = entityMap.polygonExclusionEntities;
       for (let i = 1; i <= 2; i++) {
         const key = `exclusion${i}`;
-        const entityId = resolveEntity(polyMap[key]);
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonExclusionEntities',
+          key,
+          polyMap[key]
+        );
         if (!entityId) continue;
 
         try {
@@ -85,7 +100,13 @@ export class ZoneReader {
       const polyMap = entityMap.polygonEntryEntities;
       for (let i = 1; i <= 2; i++) {
         const key = `entry${i}`;
-        const entityId = resolveEntity(polyMap[key]);
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonEntryEntities',
+          key,
+          polyMap[key]
+        );
         if (!entityId) continue;
 
         try {
@@ -114,8 +135,15 @@ export class ZoneReader {
 
   /**
    * Read rectangular zones from number entities.
+   * @param zoneMap - Profile entity template map
+   * @param entityNamePrefix - Legacy entity name prefix (for fallback)
+   * @param entityMappings - Discovered entity mappings (preferred, optional)
    */
-  async readZones(zoneMap: any, entityNamePrefix: string): Promise<ZoneRect[]> {
+  async readZones(
+    zoneMap: any,
+    entityNamePrefix: string,
+    entityMappings?: EntityMappings
+  ): Promise<ZoneRect[]> {
     const zones: ZoneRect[] = [];
 
     const regularZoneMap = zoneMap.zoneConfigEntities || zoneMap;
@@ -125,12 +153,17 @@ export class ZoneReader {
       if (!mapping) continue;
 
       try {
-        const beginXEntity = mapping.beginX?.replace('${name}', entityNamePrefix);
-        const endXEntity = mapping.endX?.replace('${name}', entityNamePrefix);
-        const beginYEntity = mapping.beginY?.replace('${name}', entityNamePrefix);
-        const endYEntity = mapping.endY?.replace('${name}', entityNamePrefix);
+        // Use EntityResolver to get entities (mappings first, then template fallback)
+        const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+          entityMappings,
+          entityNamePrefix,
+          'zoneConfigEntities',
+          key,
+          mapping
+        );
 
-        if (!beginXEntity || !endXEntity || !beginYEntity || !endYEntity) continue;
+        if (!zoneEntitySet) continue;
+        const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity } = zoneEntitySet;
 
         const [beginXState, endXState, beginYState, endYState] = await Promise.all([
           this.readTransport.getState(beginXEntity),
@@ -180,12 +213,16 @@ export class ZoneReader {
         if (!mapping) continue;
 
         try {
-          const beginXEntity = mapping.beginX?.replace('${name}', entityNamePrefix);
-          const endXEntity = mapping.endX?.replace('${name}', entityNamePrefix);
-          const beginYEntity = mapping.beginY?.replace('${name}', entityNamePrefix);
-          const endYEntity = mapping.endY?.replace('${name}', entityNamePrefix);
+          const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+            entityMappings,
+            entityNamePrefix,
+            'exclusionZoneConfigEntities',
+            key,
+            mapping
+          );
 
-          if (!beginXEntity || !endXEntity || !beginYEntity || !endYEntity) continue;
+          if (!zoneEntitySet) continue;
+          const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity } = zoneEntitySet;
 
           const [beginXState, endXState, beginYState, endYState] = await Promise.all([
             this.readTransport.getState(beginXEntity),
@@ -233,12 +270,16 @@ export class ZoneReader {
         if (!mapping) continue;
 
         try {
-          const beginXEntity = mapping.beginX?.replace('${name}', entityNamePrefix);
-          const endXEntity = mapping.endX?.replace('${name}', entityNamePrefix);
-          const beginYEntity = mapping.beginY?.replace('${name}', entityNamePrefix);
-          const endYEntity = mapping.endY?.replace('${name}', entityNamePrefix);
+          const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+            entityMappings,
+            entityNamePrefix,
+            'entryZoneConfigEntities',
+            key,
+            mapping
+          );
 
-          if (!beginXEntity || !endXEntity || !beginYEntity || !endYEntity) continue;
+          if (!zoneEntitySet) continue;
+          const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity } = zoneEntitySet;
 
           const [beginXState, endXState, beginYState, endYState] = await Promise.all([
             this.readTransport.getState(beginXEntity),

@@ -5,7 +5,7 @@ import type { IHaReadTransport } from '../ha/readTransport';
 import type { IHaWriteClient } from '../ha/writeClient';
 import { ZoneWriter } from '../ha/zoneWriter';
 import { ZoneReader } from '../ha/zoneReader';
-import { RoomConfig, ZonePolygon } from '../domain/types';
+import { RoomConfig, ZonePolygon, EntityMappings } from '../domain/types';
 import { logger } from '../logger';
 
 export interface DevicesRouterDependencies {
@@ -129,7 +129,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
   });
 
   router.get('/:deviceId/zones', async (req, res) => {
-    const { profileId, entityNamePrefix } = req.query;
+    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -145,8 +145,18 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       return res.status(400).json({ message: 'Profile does not define zones' });
     }
 
+    // Parse entityMappings if provided (JSON string in query param)
+    let entityMappings: EntityMappings | undefined;
+    if (entityMappingsJson && typeof entityMappingsJson === 'string') {
+      try {
+        entityMappings = JSON.parse(entityMappingsJson);
+      } catch {
+        logger.warn('Invalid entityMappings JSON in query');
+      }
+    }
+
     try {
-      const zones = await zoneReader.readZones(zoneMap, entityNamePrefix as string);
+      const zones = await zoneReader.readZones(zoneMap, entityNamePrefix as string, entityMappings);
       return res.json({ zones });
     } catch (error) {
       logger.error({ error }, 'Failed to read zones');
@@ -158,6 +168,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const profileId = (req.body?.profileId as string | undefined) ?? (req.body?.profile_id as string | undefined);
     const entityNamePrefix = (req.body?.entityNamePrefix as string | undefined) ?? (req.body?.entity_name_prefix as string | undefined);
     const zones = (req.body?.zones as RoomConfig['zones']) ?? [];
+    const entityMappings = req.body?.entityMappings as EntityMappings | undefined;
 
     if (!profileId) {
       return res.status(400).json({ message: 'profileId is required' });
@@ -176,7 +187,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     }
 
     try {
-      await zoneWriter.applyZones(zoneMap, zones, entityNamePrefix);
+      await zoneWriter.applyZones(zoneMap, zones, entityNamePrefix, entityMappings);
       return res.json({ ok: true });
     } catch (error) {
       logger.error({ error }, 'Failed to apply zones');
@@ -252,6 +263,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const profileId = req.body?.profileId as string | undefined;
     const entityNamePrefix = req.body?.entityNamePrefix as string | undefined;
     const enabled = req.body?.enabled as boolean | undefined;
+    const entityMappings = req.body?.entityMappings as EntityMappings | undefined;
 
     if (!profileId || !entityNamePrefix || enabled === undefined) {
       return res.status(400).json({ message: 'profileId, entityNamePrefix, and enabled are required' });
@@ -265,7 +277,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const entityMap = profile.entityMap as any;
 
     try {
-      await zoneWriter.setPolygonMode(entityMap, entityNamePrefix, enabled);
+      await zoneWriter.setPolygonMode(entityMap, entityNamePrefix, enabled, entityMappings);
       return res.json({ ok: true, enabled });
     } catch (error) {
       logger.error({ error }, 'Failed to set polygon mode');
@@ -277,7 +289,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
    * Get polygon zones from device text entities.
    */
   router.get('/:deviceId/polygon-zones', async (req, res) => {
-    const { profileId, entityNamePrefix } = req.query;
+    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -290,8 +302,18 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
 
     const entityMap = profile.entityMap as any;
 
+    // Parse entityMappings if provided (JSON string in query param)
+    let entityMappings: EntityMappings | undefined;
+    if (entityMappingsJson && typeof entityMappingsJson === 'string') {
+      try {
+        entityMappings = JSON.parse(entityMappingsJson);
+      } catch {
+        logger.warn('Invalid entityMappings JSON in query');
+      }
+    }
+
     try {
-      const zones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string);
+      const zones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string, entityMappings);
       return res.json({ zones });
     } catch (error) {
       logger.error({ error }, 'Failed to read polygon zones');
@@ -306,6 +328,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const profileId = req.body?.profileId as string | undefined;
     const entityNamePrefix = req.body?.entityNamePrefix as string | undefined;
     const zones = req.body?.zones as ZonePolygon[] | undefined;
+    const entityMappings = req.body?.entityMappings as EntityMappings | undefined;
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -319,7 +342,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const entityMap = profile.entityMap as any;
 
     try {
-      await zoneWriter.applyPolygonZones(entityMap, zones ?? [], entityNamePrefix);
+      await zoneWriter.applyPolygonZones(entityMap, zones ?? [], entityNamePrefix, entityMappings);
       return res.json({ ok: true });
     } catch (error) {
       logger.error({ error }, 'Failed to apply polygon zones');

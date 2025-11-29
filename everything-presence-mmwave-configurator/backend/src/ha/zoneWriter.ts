@@ -1,6 +1,7 @@
 import { IHaWriteClient } from './writeClient';
-import { ZoneRect, ZonePolygon } from '../domain/types';
+import { ZoneRect, ZonePolygon, EntityMappings } from '../domain/types';
 import { polygonToText } from '../domain/polygonUtils';
+import { EntityResolver } from '../domain/entityResolver';
 import { logger } from '../logger';
 
 interface ZoneEntityConfig {
@@ -24,20 +25,20 @@ export class ZoneWriter {
 
   /**
    * Write polygon zones to device text entities.
+   * @param entityMap - Profile entity template map
+   * @param zones - Zones to write
+   * @param entityNamePrefix - Legacy entity name prefix (for fallback)
+   * @param entityMappings - Discovered entity mappings (preferred, optional)
    */
   async applyPolygonZones(
     entityMap: any,
     zones: ZonePolygon[],
-    entityNamePrefix: string
+    entityNamePrefix: string,
+    entityMappings?: EntityMappings
   ): Promise<void> {
     const tasks: Promise<unknown>[] = [];
 
-    const resolveEntity = (template: string | null | undefined): string | null => {
-      if (!template) return null;
-      return template.replace('${name}', entityNamePrefix);
-    };
-
-    logger.debug({ entityNamePrefix, zoneCount: zones.length }, 'Applying polygon zones');
+    logger.debug({ entityNamePrefix, zoneCount: zones.length, hasMappings: !!entityMappings }, 'Applying polygon zones');
 
     const regularZones = zones.filter(z => z.type === 'regular');
     const exclusionZones = zones.filter(z => z.type === 'exclusion');
@@ -48,7 +49,13 @@ export class ZoneWriter {
       const polyMap = entityMap.polygonZoneEntities;
       regularZones.forEach((zone, idx) => {
         const key = `zone${idx + 1}`;
-        const entityId = resolveEntity(polyMap[key]);
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonZoneEntities',
+          key,
+          polyMap[key]
+        );
         if (entityId) {
           const textValue = polygonToText(zone.vertices);
           logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting polygon zone');
@@ -59,7 +66,14 @@ export class ZoneWriter {
       // Clear unused slots
       const maxZones = Object.keys(polyMap).length;
       for (let i = regularZones.length; i < maxZones; i++) {
-        const entityId = resolveEntity(polyMap[`zone${i + 1}`]);
+        const key = `zone${i + 1}`;
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonZoneEntities',
+          key,
+          polyMap[key]
+        );
         if (entityId) {
           tasks.push(this.writeClient.setTextEntity(entityId, ''));
         }
@@ -71,7 +85,13 @@ export class ZoneWriter {
       const polyMap = entityMap.polygonExclusionEntities;
       exclusionZones.forEach((zone, idx) => {
         const key = `exclusion${idx + 1}`;
-        const entityId = resolveEntity(polyMap[key]);
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonExclusionEntities',
+          key,
+          polyMap[key]
+        );
         if (entityId) {
           const textValue = polygonToText(zone.vertices);
           logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting exclusion polygon');
@@ -81,7 +101,14 @@ export class ZoneWriter {
 
       const maxExclusions = Object.keys(polyMap).length;
       for (let i = exclusionZones.length; i < maxExclusions; i++) {
-        const entityId = resolveEntity(polyMap[`exclusion${i + 1}`]);
+        const key = `exclusion${i + 1}`;
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonExclusionEntities',
+          key,
+          polyMap[key]
+        );
         if (entityId) {
           tasks.push(this.writeClient.setTextEntity(entityId, ''));
         }
@@ -93,7 +120,13 @@ export class ZoneWriter {
       const polyMap = entityMap.polygonEntryEntities;
       entryZones.forEach((zone, idx) => {
         const key = `entry${idx + 1}`;
-        const entityId = resolveEntity(polyMap[key]);
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonEntryEntities',
+          key,
+          polyMap[key]
+        );
         if (entityId) {
           const textValue = polygonToText(zone.vertices);
           logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting entry polygon');
@@ -103,7 +136,14 @@ export class ZoneWriter {
 
       const maxEntries = Object.keys(polyMap).length;
       for (let i = entryZones.length; i < maxEntries; i++) {
-        const entityId = resolveEntity(polyMap[`entry${i + 1}`]);
+        const key = `entry${i + 1}`;
+        const entityId = EntityResolver.resolvePolygonZoneEntity(
+          entityMappings,
+          entityNamePrefix,
+          'polygonEntryEntities',
+          key,
+          polyMap[key]
+        );
         if (entityId) {
           tasks.push(this.writeClient.setTextEntity(entityId, ''));
         }
@@ -116,31 +156,55 @@ export class ZoneWriter {
 
   /**
    * Toggle polygon zone mode on the device.
+   * @param entityMap - Profile entity template map
+   * @param entityNamePrefix - Legacy entity name prefix (for fallback)
+   * @param enabled - Whether to enable or disable polygon mode
+   * @param entityMappings - Discovered entity mappings (preferred, optional)
    */
-  async setPolygonMode(entityMap: any, entityNamePrefix: string, enabled: boolean): Promise<void> {
+  async setPolygonMode(
+    entityMap: any,
+    entityNamePrefix: string,
+    enabled: boolean,
+    entityMappings?: EntityMappings
+  ): Promise<void> {
     const entityTemplate = entityMap.polygonZonesEnabledEntity;
-    if (!entityTemplate) {
+    if (!entityTemplate && !entityMappings?.polygonZonesEnabledEntity) {
       logger.debug('No polygon mode entity configured');
       return;
     }
 
-    const entityId = entityTemplate.replace('${name}', entityNamePrefix);
+    const entityId = EntityResolver.resolve(
+      entityMappings,
+      entityNamePrefix,
+      'polygonZonesEnabledEntity',
+      entityTemplate
+    );
+
+    if (!entityId) {
+      logger.debug('Could not resolve polygon mode entity');
+      return;
+    }
+
     logger.info({ entityId, enabled }, 'Setting polygon mode');
     await this.writeClient.setSwitchEntity(entityId, enabled);
   }
 
   /**
    * Write rectangular zones to device number entities.
+   * @param zoneMap - Profile entity template map
+   * @param zones - Zones to write
+   * @param entityNamePrefix - Legacy entity name prefix (for fallback)
+   * @param entityMappings - Discovered entity mappings (preferred, optional)
    */
-  async applyZones(zoneMap: any, zones: ZoneRect[], entityNamePrefix: string): Promise<void> {
+  async applyZones(
+    zoneMap: any,
+    zones: ZoneRect[],
+    entityNamePrefix: string,
+    entityMappings?: EntityMappings
+  ): Promise<void> {
     const tasks: Promise<unknown>[] = [];
 
-    const resolveEntity = (template: string | null | undefined): string | null => {
-      if (!template) return null;
-      return template.replace('${name}', entityNamePrefix);
-    };
-
-    logger.debug({ entityNamePrefix, zoneCount: zones.length }, 'Applying rectangular zones');
+    logger.debug({ entityNamePrefix, zoneCount: zones.length, hasMappings: !!entityMappings }, 'Applying rectangular zones');
 
     const regularZones = zones.filter(z => z.type === 'regular');
     const exclusionZones = zones.filter(z => z.type === 'exclusion');
@@ -154,18 +218,21 @@ export class ZoneWriter {
         const mapping = regularMap[key];
         if (!mapping) return;
 
-        const updates: Array<{ entity: string; value: number }> = [];
-        const beginX = resolveEntity(mapping.beginX);
-        const endX = resolveEntity(mapping.endX);
-        const beginY = resolveEntity(mapping.beginY);
-        const endY = resolveEntity(mapping.endY);
-        const offDelay = resolveEntity(mapping.offDelay);
+        const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+          entityMappings,
+          entityNamePrefix,
+          'zoneConfigEntities',
+          key,
+          mapping
+        );
+        if (!zoneEntitySet) return;
 
-        if (beginX) updates.push({ entity: beginX, value: zone.x });
-        if (endX) updates.push({ entity: endX, value: zone.x + zone.width });
-        if (beginY) updates.push({ entity: beginY, value: zone.y });
-        if (endY) updates.push({ entity: endY, value: zone.y + zone.height });
-        if (offDelay) updates.push({ entity: offDelay, value: 15 });
+        const updates: Array<{ entity: string; value: number }> = [];
+        if (zoneEntitySet.beginX) updates.push({ entity: zoneEntitySet.beginX, value: zone.x });
+        if (zoneEntitySet.endX) updates.push({ entity: zoneEntitySet.endX, value: zone.x + zone.width });
+        if (zoneEntitySet.beginY) updates.push({ entity: zoneEntitySet.beginY, value: zone.y });
+        if (zoneEntitySet.endY) updates.push({ entity: zoneEntitySet.endY, value: zone.y + zone.height });
+        if (zoneEntitySet.offDelay) updates.push({ entity: zoneEntitySet.offDelay, value: 15 });
 
         updates.forEach(({ entity, value }) => {
           tasks.push(this.writeClient.setNumberEntity(entity, value));
@@ -181,16 +248,20 @@ export class ZoneWriter {
         const mapping = exclusionMap[key];
         if (!mapping) return;
 
-        const updates: Array<{ entity: string; value: number }> = [];
-        const beginX = resolveEntity(mapping.beginX);
-        const endX = resolveEntity(mapping.endX);
-        const beginY = resolveEntity(mapping.beginY);
-        const endY = resolveEntity(mapping.endY);
+        const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+          entityMappings,
+          entityNamePrefix,
+          'exclusionZoneConfigEntities',
+          key,
+          mapping
+        );
+        if (!zoneEntitySet) return;
 
-        if (beginX) updates.push({ entity: beginX, value: zone.x });
-        if (endX) updates.push({ entity: endX, value: zone.x + zone.width });
-        if (beginY) updates.push({ entity: beginY, value: zone.y });
-        if (endY) updates.push({ entity: endY, value: zone.y + zone.height });
+        const updates: Array<{ entity: string; value: number }> = [];
+        if (zoneEntitySet.beginX) updates.push({ entity: zoneEntitySet.beginX, value: zone.x });
+        if (zoneEntitySet.endX) updates.push({ entity: zoneEntitySet.endX, value: zone.x + zone.width });
+        if (zoneEntitySet.beginY) updates.push({ entity: zoneEntitySet.beginY, value: zone.y });
+        if (zoneEntitySet.endY) updates.push({ entity: zoneEntitySet.endY, value: zone.y + zone.height });
 
         updates.forEach(({ entity, value }) => {
           tasks.push(this.writeClient.setNumberEntity(entity, value));
@@ -206,16 +277,20 @@ export class ZoneWriter {
         const mapping = entryMap[key];
         if (!mapping) return;
 
-        const updates: Array<{ entity: string; value: number }> = [];
-        const beginX = resolveEntity(mapping.beginX);
-        const endX = resolveEntity(mapping.endX);
-        const beginY = resolveEntity(mapping.beginY);
-        const endY = resolveEntity(mapping.endY);
+        const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+          entityMappings,
+          entityNamePrefix,
+          'entryZoneConfigEntities',
+          key,
+          mapping
+        );
+        if (!zoneEntitySet) return;
 
-        if (beginX) updates.push({ entity: beginX, value: zone.x });
-        if (endX) updates.push({ entity: endX, value: zone.x + zone.width });
-        if (beginY) updates.push({ entity: beginY, value: zone.y });
-        if (endY) updates.push({ entity: endY, value: zone.y + zone.height });
+        const updates: Array<{ entity: string; value: number }> = [];
+        if (zoneEntitySet.beginX) updates.push({ entity: zoneEntitySet.beginX, value: zone.x });
+        if (zoneEntitySet.endX) updates.push({ entity: zoneEntitySet.endX, value: zone.x + zone.width });
+        if (zoneEntitySet.beginY) updates.push({ entity: zoneEntitySet.beginY, value: zone.y });
+        if (zoneEntitySet.endY) updates.push({ entity: zoneEntitySet.endY, value: zone.y + zone.height });
 
         updates.forEach(({ entity, value }) => {
           tasks.push(this.writeClient.setNumberEntity(entity, value));

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchRooms, deleteRoom } from '../api/rooms';
+import { fetchRooms, deleteRoom, updateRoom } from '../api/rooms';
 import {
   fetchCustomFloors,
   createCustomFloor,
@@ -8,7 +8,8 @@ import {
   createCustomFurniture,
   deleteCustomFurniture,
 } from '../api/client';
-import { RoomConfig, CustomFloorMaterial, CustomFurnitureType } from '../api/types';
+import { RoomConfig, CustomFloorMaterial, CustomFurnitureType, EntityMappings } from '../api/types';
+import { EntityDiscovery } from '../components/EntityDiscovery';
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -21,6 +22,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
+  const [syncingRoom, setSyncingRoom] = useState<RoomConfig | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Custom assets state
   const [customFloors, setCustomFloors] = useState<CustomFloorMaterial[]>([]);
@@ -81,6 +84,39 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
     } finally {
       setDeletingRoomId(null);
     }
+  };
+
+  const handleStartSync = (room: RoomConfig) => {
+    if (!room.deviceId || !room.profileId) {
+      setError('This room is not linked to a device. Re-sync requires a linked device.');
+      return;
+    }
+    setSyncingRoom(room);
+    setIsSyncing(true);
+  };
+
+  const handleSyncComplete = async (mappings: EntityMappings) => {
+    if (!syncingRoom) return;
+
+    try {
+      await updateRoom(syncingRoom.id, { entityMappings: mappings });
+      // Update local state
+      setRooms((prev) =>
+        prev.map((r) => (r.id === syncingRoom.id ? { ...r, entityMappings: mappings } : r))
+      );
+      setSuccess(`Entity mappings updated for "${syncingRoom.name}"`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update entity mappings');
+    } finally {
+      setSyncingRoom(null);
+      setIsSyncing(false);
+    }
+  };
+
+  const handleSyncCancel = () => {
+    setSyncingRoom(null);
+    setIsSyncing(false);
   };
 
   const handleExportRoom = (room: RoomConfig) => {
@@ -408,7 +444,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                     key={room.id}
                     className="flex items-center justify-between rounded-lg border border-slate-700/50 bg-slate-800/50 p-4"
                   >
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <div className="font-semibold text-white">{room.name}</div>
                       <div className="text-sm text-slate-400">
                         {room.zones?.length || 0} zones configured
@@ -417,8 +453,26 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                           <span className="ml-2">· {room.furniture.length} furniture items</span>
                         )}
                       </div>
+                      {room.entityMappings ? (
+                        <div className="text-xs text-emerald-400 mt-1">
+                          ✓ Entities synced ({room.entityMappings.autoMatchedCount || 0} auto-matched)
+                        </div>
+                      ) : room.deviceId ? (
+                        <div className="text-xs text-yellow-400 mt-1">
+                          ⚠ Entities not synced - consider re-syncing
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      {room.deviceId && room.profileId && (
+                        <button
+                          onClick={() => handleStartSync(room)}
+                          className="rounded-lg border border-cyan-600/50 bg-cyan-600/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition-all hover:bg-cyan-600/20"
+                          title="Re-discover and sync entity mappings"
+                        >
+                          🔄 Re-sync Entities
+                        </button>
+                      )}
                       <button
                         onClick={() => handleExportRoom(room)}
                         className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20"
@@ -721,6 +775,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
         </div>
       )}
       </div>
+
+      {/* Entity Re-sync Modal */}
+      {isSyncing && syncingRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-2xl max-h-[90vh] mx-4 rounded-xl overflow-hidden shadow-2xl">
+            <EntityDiscovery
+              deviceId={syncingRoom.deviceId!}
+              profileId={syncingRoom.profileId!}
+              deviceName={syncingRoom.entityNamePrefix || syncingRoom.name}
+              onComplete={handleSyncComplete}
+              onCancel={handleSyncCancel}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

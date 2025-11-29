@@ -3,6 +3,8 @@ import { logger } from '../logger';
 import type { IHaReadTransport } from '../ha/readTransport';
 import type { IHaWriteClient } from '../ha/writeClient';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
+import type { EntityMappings } from '../domain/types';
+import { EntityResolver } from '../domain/entityResolver';
 
 export function createLiveRouter(
   readTransport: IHaReadTransport,
@@ -14,12 +16,12 @@ export function createLiveRouter(
   /**
    * GET /api/live/:deviceId/state
    * Get current live state for a device (presence, distance, target count, etc.)
-   * Query params: profileId (required), entityNamePrefix (optional, will use deviceId as fallback)
+   * Query params: profileId (required), entityNamePrefix (optional), entityMappings (optional JSON)
    */
   router.get('/:deviceId/state', async (req, res) => {
     try {
       const { deviceId } = req.params;
-      const { profileId, entityNamePrefix } = req.query;
+      const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
 
       if (!deviceId) {
         return res.status(400).json({ error: 'deviceId required' });
@@ -38,17 +40,27 @@ export function createLiveRouter(
         return res.status(400).json({ error: 'Could not determine entity name prefix' });
       }
 
+      // Parse entityMappings if provided (JSON string in query param)
+      let entityMappings: EntityMappings | undefined;
+      if (entityMappingsJson && typeof entityMappingsJson === 'string') {
+        try {
+          entityMappings = JSON.parse(entityMappingsJson);
+        } catch {
+          logger.warn('Invalid entityMappings JSON in query');
+        }
+      }
+
       const liveState: any = {
         deviceId,
         profileId: profile.id,
         timestamp: Date.now(),
       };
 
-      // Helper to get entity state by pattern
-      const getEntityState = async (pattern: string | null) => {
-        if (!pattern) return null;
+      // Helper to get entity state by pattern using EntityResolver
+      const getEntityState = async (mappingKey: string, template: string | null) => {
+        const entityId = EntityResolver.resolve(entityMappings, deviceName, mappingKey, template);
+        if (!entityId) return null;
         try {
-          const entityId = pattern.replace('${name}', deviceName);
           const state = await readTransport.getState(entityId);
           return state;
         } catch (err) {
@@ -63,61 +75,61 @@ export function createLiveRouter(
 
       // Presence states
       if (entityMap.presenceEntity) {
-        const presenceState = await getEntityState(entityMap.presenceEntity);
+        const presenceState = await getEntityState('presenceEntity', entityMap.presenceEntity);
         liveState.presence = presenceState?.state === 'on';
       }
 
       if (entityMap.mmwaveEntity) {
-        const mmwaveState = await getEntityState(entityMap.mmwaveEntity);
+        const mmwaveState = await getEntityState('mmwaveEntity', entityMap.mmwaveEntity);
         liveState.mmwave = mmwaveState?.state === 'on';
       }
 
       if (capabilities?.sensors?.pir && entityMap.pirEntity) {
-        const pirState = await getEntityState(entityMap.pirEntity);
+        const pirState = await getEntityState('pirEntity', entityMap.pirEntity);
         liveState.pir = pirState?.state === 'on';
       }
 
       // Environmental sensors (EP1)
       if (capabilities?.sensors?.temperature && entityMap.temperatureEntity) {
-        const tempState = await getEntityState(entityMap.temperatureEntity);
+        const tempState = await getEntityState('temperatureEntity', entityMap.temperatureEntity);
         liveState.temperature = tempState ? parseFloat(tempState.state) : null;
       }
 
       if (capabilities?.sensors?.humidity && entityMap.humidityEntity) {
-        const humidityState = await getEntityState(entityMap.humidityEntity);
+        const humidityState = await getEntityState('humidityEntity', entityMap.humidityEntity);
         liveState.humidity = humidityState ? parseFloat(humidityState.state) : null;
       }
 
       if (capabilities?.sensors?.illuminance && entityMap.illuminanceEntity) {
-        const illuminanceState = await getEntityState(entityMap.illuminanceEntity);
+        const illuminanceState = await getEntityState('illuminanceEntity', entityMap.illuminanceEntity);
         liveState.illuminance = illuminanceState ? parseFloat(illuminanceState.state) : null;
       }
 
       // Distance tracking (EP1)
       if (capabilities?.distanceOnlyTracking && entityMap.distanceEntity) {
-        const distanceState = await getEntityState(entityMap.distanceEntity);
+        const distanceState = await getEntityState('distanceEntity', entityMap.distanceEntity);
         liveState.distance = distanceState ? parseFloat(distanceState.state) : null;
 
         // Additional distance mode data
         if (entityMap.speedEntity) {
-          const speedState = await getEntityState(entityMap.speedEntity);
+          const speedState = await getEntityState('speedEntity', entityMap.speedEntity);
           liveState.speed = speedState ? parseFloat(speedState.state) : null;
         }
 
         if (entityMap.energyEntity) {
-          const energyState = await getEntityState(entityMap.energyEntity);
+          const energyState = await getEntityState('energyEntity', entityMap.energyEntity);
           liveState.energy = energyState ? parseInt(energyState.state, 10) : null;
         }
 
         if (entityMap.targetCountEntity) {
-          const targetCountState = await getEntityState(entityMap.targetCountEntity);
+          const targetCountState = await getEntityState('targetCountEntity', entityMap.targetCountEntity);
           liveState.targetCount = targetCountState ? parseInt(targetCountState.state, 10) : 0;
         }
       }
 
       // Target count for EP Lite
       if (capabilities?.tracking && entityMap.trackingTargetCountEntity) {
-        const targetCountState = await getEntityState(entityMap.trackingTargetCountEntity);
+        const targetCountState = await getEntityState('trackingTargetCountEntity', entityMap.trackingTargetCountEntity);
         liveState.targetCount = targetCountState ? parseInt(targetCountState.state, 10) : 0;
       }
 
@@ -125,85 +137,64 @@ export function createLiveRouter(
       if (capabilities?.tracking) {
         const targets: any[] = [];
 
+        // Helper to get target entity state using EntityResolver
+        const getTargetState = async (targetNum: number, property: 'x' | 'y' | 'speed' | 'resolution' | 'angle' | 'distance' | 'active') => {
+          const entityId = EntityResolver.resolveTargetEntity(entityMappings, deviceName, targetNum, property);
+          if (!entityId) return null;
+          try {
+            const state = await readTransport.getState(entityId);
+            return state;
+          } catch (err) {
+            return null;
+          }
+        };
+
         // Fetch up to 3 targets
         for (let i = 1; i <= 3; i++) {
           const target: any = { id: i, x: null, y: null };
 
           // Fetch active status
-          try {
-            const activeEntityId = `binary_sensor.${deviceName}_target_${i}_active`;
-            const activeState = await readTransport.getState(activeEntityId);
-            target.active = activeState?.state === 'on';
-          } catch (err) {
-            // Entity might not exist
+          const activeState = await getTargetState(i, 'active');
+          if (activeState) {
+            target.active = activeState.state === 'on';
           }
 
           // Fetch coordinates
-          try {
-            const xEntityId = `sensor.${deviceName}_target_${i}_x`;
-            const xState = await readTransport.getState(xEntityId);
-            if (xState && xState.state !== 'unavailable' && xState.state !== 'unknown') {
-              target.x = parseFloat(xState.state);
-              if (isNaN(target.x)) target.x = null;
-            }
-          } catch (err) {
-            // Entity might not exist
+          const xState = await getTargetState(i, 'x');
+          if (xState && xState.state !== 'unavailable' && xState.state !== 'unknown') {
+            target.x = parseFloat(xState.state);
+            if (isNaN(target.x)) target.x = null;
           }
 
-          try {
-            const yEntityId = `sensor.${deviceName}_target_${i}_y`;
-            const yState = await readTransport.getState(yEntityId);
-            if (yState && yState.state !== 'unavailable' && yState.state !== 'unknown') {
-              target.y = parseFloat(yState.state);
-              if (isNaN(target.y)) target.y = null;
-            }
-          } catch (err) {
-            // Entity might not exist
+          const yState = await getTargetState(i, 'y');
+          if (yState && yState.state !== 'unavailable' && yState.state !== 'unknown') {
+            target.y = parseFloat(yState.state);
+            if (isNaN(target.y)) target.y = null;
           }
 
           // Fetch additional target data
-          try {
-            const distanceEntityId = `sensor.${deviceName}_target_${i}_distance`;
-            const distanceState = await readTransport.getState(distanceEntityId);
-            if (distanceState && distanceState.state !== 'unavailable' && distanceState.state !== 'unknown') {
-              target.distance = parseFloat(distanceState.state);
-              if (isNaN(target.distance)) target.distance = null;
-            }
-          } catch (err) {
-            // Entity might not exist
+          const distanceState = await getTargetState(i, 'distance');
+          if (distanceState && distanceState.state !== 'unavailable' && distanceState.state !== 'unknown') {
+            target.distance = parseFloat(distanceState.state);
+            if (isNaN(target.distance)) target.distance = null;
           }
 
-          try {
-            const speedEntityId = `sensor.${deviceName}_target_${i}_speed`;
-            const speedState = await readTransport.getState(speedEntityId);
-            if (speedState && speedState.state !== 'unavailable' && speedState.state !== 'unknown') {
-              target.speed = parseFloat(speedState.state);
-              if (isNaN(target.speed)) target.speed = null;
-            }
-          } catch (err) {
-            // Entity might not exist
+          const speedState = await getTargetState(i, 'speed');
+          if (speedState && speedState.state !== 'unavailable' && speedState.state !== 'unknown') {
+            target.speed = parseFloat(speedState.state);
+            if (isNaN(target.speed)) target.speed = null;
           }
 
-          try {
-            const angleEntityId = `sensor.${deviceName}_target_${i}_angle`;
-            const angleState = await readTransport.getState(angleEntityId);
-            if (angleState && angleState.state !== 'unavailable' && angleState.state !== 'unknown') {
-              target.angle = parseFloat(angleState.state);
-              if (isNaN(target.angle)) target.angle = null;
-            }
-          } catch (err) {
-            // Entity might not exist
+          const angleState = await getTargetState(i, 'angle');
+          if (angleState && angleState.state !== 'unavailable' && angleState.state !== 'unknown') {
+            target.angle = parseFloat(angleState.state);
+            if (isNaN(target.angle)) target.angle = null;
           }
 
-          try {
-            const resolutionEntityId = `sensor.${deviceName}_target_${i}_resolution`;
-            const resolutionState = await readTransport.getState(resolutionEntityId);
-            if (resolutionState && resolutionState.state !== 'unavailable' && resolutionState.state !== 'unknown') {
-              target.resolution = parseFloat(resolutionState.state);
-              if (isNaN(target.resolution)) target.resolution = null;
-            }
-          } catch (err) {
-            // Entity might not exist
+          const resolutionState = await getTargetState(i, 'resolution');
+          if (resolutionState && resolutionState.state !== 'unavailable' && resolutionState.state !== 'unknown') {
+            target.resolution = parseFloat(resolutionState.state);
+            if (isNaN(target.resolution)) target.resolution = null;
           }
 
           // Only add target if it has any data (active status or coordinates)
@@ -220,7 +211,7 @@ export function createLiveRouter(
       // Max distance for EPL (tracking devices)
       if (capabilities?.tracking && entityMap.maxDistanceEntity) {
         const config: any = liveState.config || {};
-        const maxDistanceState = await getEntityState(entityMap.maxDistanceEntity);
+        const maxDistanceState = await getEntityState('maxDistanceEntity', entityMap.maxDistanceEntity);
         config.distanceMax = maxDistanceState ? parseFloat(maxDistanceState.state) : null;
         liveState.config = config;
       }
@@ -228,7 +219,7 @@ export function createLiveRouter(
       // Installation angle for EPL (tracking devices)
       if (capabilities?.tracking && entityMap.installationAngleEntity) {
         const config: any = liveState.config || {};
-        const installationAngleState = await getEntityState(entityMap.installationAngleEntity);
+        const installationAngleState = await getEntityState('installationAngleEntity', entityMap.installationAngleEntity);
         config.installationAngle = installationAngleState ? parseFloat(installationAngleState.state) : 0;
         liveState.config = config;
       }
@@ -238,57 +229,57 @@ export function createLiveRouter(
         const config: any = {};
 
         if (entityMap.modeEntity) {
-          const modeState = await getEntityState(entityMap.modeEntity);
+          const modeState = await getEntityState('modeEntity', entityMap.modeEntity);
           config.mode = modeState?.state || null;
         }
 
         if (entityMap.distanceMinEntity) {
-          const minState = await getEntityState(entityMap.distanceMinEntity);
+          const minState = await getEntityState('distanceMinEntity', entityMap.distanceMinEntity);
           config.distanceMin = minState ? parseFloat(minState.state) : null;
         }
 
         if (entityMap.distanceMaxEntity) {
-          const maxState = await getEntityState(entityMap.distanceMaxEntity);
+          const maxState = await getEntityState('distanceMaxEntity', entityMap.distanceMaxEntity);
           config.distanceMax = maxState ? parseFloat(maxState.state) : null;
         }
 
         if (entityMap.triggerDistanceEntity) {
-          const triggerState = await getEntityState(entityMap.triggerDistanceEntity);
+          const triggerState = await getEntityState('triggerDistanceEntity', entityMap.triggerDistanceEntity);
           config.triggerDistance = triggerState ? parseFloat(triggerState.state) : null;
         }
 
         if (entityMap.sensitivityEntity) {
-          const sensState = await getEntityState(entityMap.sensitivityEntity);
+          const sensState = await getEntityState('sensitivityEntity', entityMap.sensitivityEntity);
           config.sensitivity = sensState ? parseInt(sensState.state, 10) : null;
         }
 
         if (entityMap.triggerSensitivityEntity) {
-          const triggerSensState = await getEntityState(entityMap.triggerSensitivityEntity);
+          const triggerSensState = await getEntityState('triggerSensitivityEntity', entityMap.triggerSensitivityEntity);
           config.triggerSensitivity = triggerSensState ? parseInt(triggerSensState.state, 10) : null;
         }
 
         if (entityMap.offLatencyEntity) {
-          const offLatencyState = await getEntityState(entityMap.offLatencyEntity);
+          const offLatencyState = await getEntityState('offLatencyEntity', entityMap.offLatencyEntity);
           config.offLatency = offLatencyState ? parseInt(offLatencyState.state, 10) : null;
         }
 
         if (entityMap.onLatencyEntity) {
-          const onLatencyState = await getEntityState(entityMap.onLatencyEntity);
+          const onLatencyState = await getEntityState('onLatencyEntity', entityMap.onLatencyEntity);
           config.onLatency = onLatencyState ? parseInt(onLatencyState.state, 10) : null;
         }
 
         if (entityMap.thresholdFactorEntity) {
-          const thresholdState = await getEntityState(entityMap.thresholdFactorEntity);
+          const thresholdState = await getEntityState('thresholdFactorEntity', entityMap.thresholdFactorEntity);
           config.thresholdFactor = thresholdState ? parseInt(thresholdState.state, 10) : null;
         }
 
         if (entityMap.microMotionEntity) {
-          const microMotionState = await getEntityState(entityMap.microMotionEntity);
+          const microMotionState = await getEntityState('microMotionEntity', entityMap.microMotionEntity);
           config.microMotionEnabled = microMotionState?.state === 'on';
         }
 
         if (entityMap.updateRateEntity) {
-          const updateRateState = await getEntityState(entityMap.updateRateEntity);
+          const updateRateState = await getEntityState('updateRateEntity', entityMap.updateRateEntity);
           config.updateRate = updateRateState?.state || null;
         }
 

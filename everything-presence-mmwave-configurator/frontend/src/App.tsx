@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { fetchDevices, fetchProfiles, fetchSettings, updateSettings, ingressAware } from './api/client';
 import { createRoom, fetchRooms } from './api/rooms';
-import { DiscoveredDevice, RoomConfig, LiveState } from './api/types';
+import { DiscoveredDevice, RoomConfig, LiveState, EntityMappings } from './api/types';
 import { ZoneEditorPage } from './pages/ZoneEditorPage';
 import { RoomBuilderPage } from './pages/RoomBuilderPage';
 import { WizardPage } from './pages/WizardPage';
@@ -435,13 +435,14 @@ function App() {
               updateSettings({ wizardStep: 'device' }).catch(() => null);
               setView('dashboard');
             }}
-            onCreateRoom={async (name, deviceId, profileId) => {
-              // Find the selected device to get its entityNamePrefix
+            onCreateRoom={async (name, deviceId, profileId, entityMappings) => {
+              // Find the selected device to get its entityNamePrefix (legacy fallback)
               const selectedDevice = deviceId ? devices.find(d => d.id === deviceId) : undefined;
               const result = await createRoom({
                 name,
                 deviceId: deviceId || undefined,
                 entityNamePrefix: selectedDevice?.entityNamePrefix,
+                entityMappings: entityMappings,
                 profileId: profileId || undefined,
                 units: 'metric',
                 zones: [],

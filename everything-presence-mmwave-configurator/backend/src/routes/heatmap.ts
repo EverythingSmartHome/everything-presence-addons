@@ -4,6 +4,7 @@ import { DeviceProfileLoader } from '../domain/deviceProfiles';
 import { ZoneReader } from '../ha/zoneReader';
 import type { IHaReadTransport } from '../ha/readTransport';
 import type { HaAuthConfig } from '../ha/types';
+import type { EntityMappings } from '../domain/types';
 import { logger } from '../logger';
 
 export interface HeatmapRouterDependencies {
@@ -24,7 +25,7 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
    * Generate heatmap data from HA history.
    */
   router.get('/:deviceId/heatmap', async (req, res) => {
-    const { profileId, entityNamePrefix, hours, resolution } = req.query;
+    const { profileId, entityNamePrefix, hours, resolution, entityMappings: entityMappingsJson } = req.query;
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -44,13 +45,23 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
     const hoursNum = Math.min(168, Math.max(1, parseInt(hours as string) || 24));
     const resolutionNum = Math.max(100, Math.min(1000, parseInt(resolution as string) || 400));
 
+    // Parse entityMappings if provided (JSON string in query param)
+    let entityMappings: EntityMappings | undefined;
+    if (entityMappingsJson && typeof entityMappingsJson === 'string') {
+      try {
+        entityMappings = JSON.parse(entityMappingsJson);
+      } catch {
+        logger.warn('Invalid entityMappings JSON in query');
+      }
+    }
+
     try {
       // Get current zones for zone stats calculation
       const entityMap = profile.entityMap as Record<string, unknown>;
       let zones;
       try {
-        const polygonZones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string);
-        const rectZones = await zoneReader.readZones(entityMap, entityNamePrefix as string);
+        const polygonZones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string, entityMappings);
+        const rectZones = await zoneReader.readZones(entityMap, entityNamePrefix as string, entityMappings);
         // Deduplicate zones by ID (prefer polygon zones if both exist)
         const zoneMap = new Map<string, typeof polygonZones[0] | typeof rectZones[0]>();
         for (const zone of rectZones) {

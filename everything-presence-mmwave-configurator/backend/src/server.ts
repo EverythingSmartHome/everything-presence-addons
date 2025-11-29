@@ -6,6 +6,7 @@ import { AppConfig } from './config';
 import { logger } from './logger';
 import { createMetaRouter } from './routes/meta';
 import { createDevicesRouter, DevicesRouterDependencies } from './routes/devices';
+import { createEntityDiscoveryRouter } from './routes/entityDiscovery';
 import { createRoomsRouter } from './routes/rooms';
 import { createZonesRouter } from './routes/zones';
 import { createSettingsRouter } from './routes/settings';
@@ -56,6 +57,10 @@ export const createServer = (config: AppConfig, deps?: ServerDependencies): expr
       profileLoader: deps.profileLoader,
     };
     app.use('/api/devices', createDevicesRouter(devicesDeps));
+    app.use('/api/devices', createEntityDiscoveryRouter({
+      readTransport: deps.readTransport,
+      profileLoader: deps.profileLoader,
+    }));
     app.use('/api/devices', createHeatmapRouter({
       haConfig: config.ha,
       readTransport: deps.readTransport,
