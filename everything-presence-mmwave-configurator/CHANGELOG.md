@@ -1,3 +1,9 @@
+## 2.0.2
+
+- Fix issue where entities were not correctly discovered during setup. by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Create UI flow during setup to correctly discover entities and allow user to re-map them by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Create UI flow in settings to re-sync devices that have already been added by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
 ## 2.0.0 - Complete Rewrite
 
 Version 2.0 is a complete rewrite of the Zone Configurator with a new modern UI and significantly expanded functionality by [@EverythingSmartHome](https://github.com/EverythingSmartHome).
