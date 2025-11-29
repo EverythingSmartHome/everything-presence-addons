@@ -778,8 +778,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
 
       {/* Entity Re-sync Modal */}
       {isSyncing && syncingRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 overflow-y-auto">
-          <div className="w-full max-w-2xl min-h-[400px] max-h-[90vh] rounded-xl overflow-hidden shadow-2xl flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-2xl h-[85vh] max-h-[700px] rounded-xl shadow-2xl flex flex-col bg-slate-900 overflow-hidden">
             <EntityDiscovery
               deviceId={syncingRoom.deviceId!}
               profileId={syncingRoom.profileId!}
