@@ -5,6 +5,8 @@ import type { IHaReadTransport, EntityState } from '../ha/readTransport';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
 import type { EntityMappings } from '../domain/types';
 import { EntityResolver } from '../domain/entityResolver';
+import { deviceEntityService } from '../domain/deviceEntityService';
+import { deviceMappingStorage } from '../config/deviceMappingStorage';
 
 interface LiveClientSubscription {
   ws: WebSocket;
@@ -95,13 +97,37 @@ export function createLiveWebSocketServer(
             }
           }
 
+          // Check if device has device-level mappings (preferred)
+          const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
+
+          // Signal MAPPING_NOT_FOUND if no device mapping and no legacy mappings provided
+          const hasMappings = hasDeviceMapping || !!parsedMappings;
+          if (!hasMappings) {
+            logger.warn({ deviceId, profileId }, 'No device mappings found - entity resolution may fail');
+            // Send warning to client - they should run entity discovery
+            ws.send(JSON.stringify({
+              type: 'warning',
+              code: 'MAPPING_NOT_FOUND',
+              message: 'No entity mappings found for this device. Run entity discovery to auto-match entities.',
+              deviceId,
+            }));
+          }
+
           // Build list of entity IDs to monitor using EntityResolver
           const entityIds = new Set<string>();
           const entityMap = profile.entityMap as any;
 
-          // Helper to resolve entity ID using EntityResolver (mappings first, then template fallback)
+          // Helper to resolve entity ID - tries device mapping first, then legacy
           const addEntity = (mappingKey: string, pattern: string | null | undefined) => {
-            const entityId = EntityResolver.resolve(parsedMappings, deviceName, mappingKey, pattern);
+            let entityId: string | null = null;
+            // Try device-level mapping first
+            if (hasDeviceMapping) {
+              entityId = deviceEntityService.getEntityId(deviceId, mappingKey);
+            }
+            // Fallback to legacy resolution
+            if (!entityId) {
+              entityId = EntityResolver.resolve(parsedMappings, deviceName, mappingKey, pattern);
+            }
             if (entityId) {
               entityIds.add(entityId);
             }
@@ -159,12 +185,27 @@ export function createLiveWebSocketServer(
           }
 
           // Subscribe to target position entities (target_1, target_2, target_3)
-          // Use EntityResolver.resolveTargetEntity for proper mapping resolution
+          // Tries device mapping first, then legacy resolution
           for (let i = 1; i <= 3; i++) {
             const targetProps: Array<'x' | 'y' | 'distance' | 'speed' | 'angle' | 'resolution' | 'active'> =
               ['x', 'y', 'distance', 'speed', 'angle', 'resolution', 'active'];
+
+            // Try to get all target entities from device mapping first
+            let targetSet = null;
+            if (hasDeviceMapping) {
+              targetSet = deviceEntityService.getTargetEntities(deviceId, i);
+            }
+
             for (const prop of targetProps) {
-              const entityId = EntityResolver.resolveTargetEntity(parsedMappings, deviceName, i, prop);
+              let entityId: string | null = null;
+              // Try device mapping first
+              if (targetSet && targetSet[prop]) {
+                entityId = targetSet[prop] as string;
+              }
+              // Fallback to legacy resolution
+              if (!entityId) {
+                entityId = EntityResolver.resolveTargetEntity(parsedMappings, deviceName, i, prop);
+              }
               if (entityId) {
                 entityIds.add(entityId);
               }
@@ -208,6 +249,7 @@ export function createLiveWebSocketServer(
                 profileId,
                 entities: entityIdArray,
                 initialStates: initialStateData,
+                hasMappings,
               }),
             );
           } catch (err) {
@@ -219,6 +261,7 @@ export function createLiveWebSocketServer(
                 deviceId,
                 profileId,
                 entities: Array.from(entityIds),
+                hasMappings,
               }),
             );
           }

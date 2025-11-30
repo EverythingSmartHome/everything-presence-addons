@@ -24,6 +24,278 @@
     "maxRangeMeters": 25,
     "fieldOfViewDegrees": 120
   },
+  "entities": {
+    "presence": {
+      "template": "binary_sensor.${name}_occupancy",
+      "category": "sensor",
+      "subcategory": "presence",
+      "label": "Occupancy",
+      "required": true
+    },
+    "mmwave": {
+      "template": "binary_sensor.${name}_mmwave",
+      "category": "sensor",
+      "subcategory": "presence",
+      "label": "mmWave",
+      "required": false
+    },
+    "pir": {
+      "template": "binary_sensor.${name}_pir",
+      "category": "sensor",
+      "subcategory": "presence",
+      "label": "PIR",
+      "required": false
+    },
+    "temperature": {
+      "template": "sensor.${name}_temperature",
+      "category": "sensor",
+      "subcategory": "environment",
+      "label": "Temperature",
+      "required": false
+    },
+    "humidity": {
+      "template": "sensor.${name}_humidity",
+      "category": "sensor",
+      "subcategory": "environment",
+      "label": "Humidity",
+      "required": false
+    },
+    "illuminance": {
+      "template": "sensor.${name}_illuminance",
+      "category": "sensor",
+      "subcategory": "environment",
+      "label": "Illuminance",
+      "required": false
+    },
+    "co2": {
+      "template": "sensor.${name}_co2",
+      "category": "sensor",
+      "subcategory": "environment",
+      "label": "CO2",
+      "required": false
+    },
+    "distance": {
+      "template": "sensor.${name}_mmwave_target_distance",
+      "category": "tracking",
+      "property": "distance",
+      "required": false
+    },
+    "speed": {
+      "template": "sensor.${name}_mmwave_target_speed",
+      "category": "tracking",
+      "property": "speed",
+      "required": false
+    },
+    "energy": {
+      "template": "sensor.${name}_mmwave_target_energy",
+      "category": "tracking",
+      "property": "energy",
+      "required": false
+    },
+    "targetCount": {
+      "template": "sensor.${name}_mmwave_target_count",
+      "category": "tracking",
+      "property": "targetCount",
+      "required": false
+    },
+    "mmwaveMode": {
+      "template": "select.${name}_mmwave_mode",
+      "category": "setting",
+      "group": "mmWave",
+      "label": "mmWave Mode",
+      "controlType": "select",
+      "required": false
+    },
+    "mmwaveDistanceMin": {
+      "template": "number.${name}_mmwave_minimum_distance",
+      "category": "setting",
+      "group": "mmWave",
+      "label": "Minimum Distance",
+      "controlType": "number",
+      "min": 0,
+      "max": 2500,
+      "step": 1,
+      "unit": "cm",
+      "required": false
+    },
+    "mmwaveDistanceMax": {
+      "template": "number.${name}_mmwave_max_distance",
+      "category": "setting",
+      "group": "mmWave",
+      "label": "Maximum Distance",
+      "controlType": "number",
+      "min": 0,
+      "max": 2500,
+      "step": 1,
+      "unit": "cm",
+      "required": false
+    },
+    "mmwaveTriggerDistance": {
+      "template": "number.${name}_mmwave_trigger_distance",
+      "category": "setting",
+      "group": "mmWave",
+      "label": "Trigger Distance",
+      "controlType": "number",
+      "min": 0,
+      "max": 2500,
+      "step": 1,
+      "unit": "cm",
+      "required": false
+    },
+    "mmwaveSensitivity": {
+      "template": "number.${name}_mmwave_sustain_sensitivity",
+      "category": "setting",
+      "group": "mmWave",
+      "label": "Sustain Sensitivity",
+      "controlType": "number",
+      "min": 0,
+      "max": 9,
+      "step": 1,
+      "required": false
+    },
+    "mmwaveTriggerSensitivity": {
+      "template": "number.${name}_mmwave_trigger_sensitivity",
+      "category": "setting",
+      "group": "mmWave",
+      "label": "Trigger Sensitivity",
+      "controlType": "number",
+      "min": 0,
+      "max": 9,
+      "step": 1,
+      "required": false
+    },
+    "mmwaveThresholdFactor": {
+      "template": "number.${name}_mmwave_threshold_factor",
+      "category": "setting",
+      "group": "mmWave",
+      "label": "Threshold Factor",
+      "controlType": "number",
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "required": false
+    },
+    "mmwaveOnLatency": {
+      "template": "number.${name}_mmwave_on_latency",
+      "category": "setting",
+      "group": "Latency",
+      "label": "mmWave On Latency",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 0.1,
+      "unit": "s",
+      "required": false
+    },
+    "mmwaveOffLatency": {
+      "template": "number.${name}_mmwave_off_latency",
+      "category": "setting",
+      "group": "Latency",
+      "label": "mmWave Off Latency",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 0.1,
+      "unit": "s",
+      "required": false
+    },
+    "occupancyOffLatency": {
+      "template": "number.${name}_occupancy_off_latency",
+      "category": "setting",
+      "group": "Latency",
+      "label": "Occupancy Off Latency",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 1,
+      "unit": "s",
+      "required": false
+    },
+    "pirOnLatency": {
+      "template": "number.${name}_pir_on_latency",
+      "category": "setting",
+      "group": "Latency",
+      "label": "PIR On Latency",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 0.1,
+      "unit": "s",
+      "required": false
+    },
+    "pirOffLatency": {
+      "template": "number.${name}_pir_off_latency",
+      "category": "setting",
+      "group": "Latency",
+      "label": "PIR Off Latency",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 0.1,
+      "unit": "s",
+      "required": false
+    },
+    "temperatureOffset": {
+      "template": "number.${name}_temperature_offset",
+      "category": "setting",
+      "group": "Calibration",
+      "label": "Temperature Offset",
+      "controlType": "number",
+      "min": -10,
+      "max": 10,
+      "step": 0.1,
+      "unit": "C",
+      "required": false
+    },
+    "humidityOffset": {
+      "template": "number.${name}_humidity_offset",
+      "category": "setting",
+      "group": "Calibration",
+      "label": "Humidity Offset",
+      "controlType": "number",
+      "min": -20,
+      "max": 20,
+      "step": 1,
+      "unit": "%",
+      "required": false
+    },
+    "illuminanceOffset": {
+      "template": "number.${name}_illuminance_offset",
+      "category": "setting",
+      "group": "Calibration",
+      "label": "Illuminance Offset",
+      "controlType": "number",
+      "min": -1000,
+      "max": 1000,
+      "step": 1,
+      "unit": "lx",
+      "required": false
+    },
+    "microMotion": {
+      "template": "switch.${name}_micro_motion_detection",
+      "category": "setting",
+      "group": "Advanced",
+      "label": "Micro Motion Detection",
+      "controlType": "switch",
+      "required": false
+    },
+    "mmwaveLed": {
+      "template": "light.${name}_mmwave_led",
+      "category": "setting",
+      "group": "Advanced",
+      "label": "mmWave LED",
+      "controlType": "light",
+      "required": false
+    },
+    "updateRate": {
+      "template": "select.${name}_distance_speed_update_rate",
+      "category": "setting",
+      "group": "Advanced",
+      "label": "Update Rate",
+      "controlType": "select",
+      "required": false
+    }
+  },
   "entityMap": {
     "presenceEntity": "binary_sensor.${name}_occupancy",
     "mmwaveEntity": "binary_sensor.${name}_mmwave",

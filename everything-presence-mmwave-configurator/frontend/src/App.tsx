@@ -7,6 +7,7 @@ import { RoomBuilderPage } from './pages/RoomBuilderPage';
 import { WizardPage } from './pages/WizardPage';
 import { LiveTrackingPage } from './pages/LiveTrackingPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { DeviceMappingsProvider } from './contexts/DeviceMappingsContext';
 
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="glass-card p-6">
@@ -125,7 +126,16 @@ function App() {
           try {
             const message = JSON.parse(event.data);
 
-            if (message.type === 'subscribed') {
+            if (message.type === 'warning' && message.code === 'MAPPING_NOT_FOUND') {
+              // Device has no entity mappings - user should run entity discovery
+              console.warn('MAPPING_NOT_FOUND:', message.message);
+              // Set error to prompt user to configure entity mappings
+              setError('Entity mappings not found. Please run entity discovery in the wizard to configure this device.');
+            } else if (message.type === 'subscribed') {
+              // Check if mappings are available
+              if (message.hasMappings === false) {
+                console.warn('Device subscribed but no mappings available');
+              }
               // Fetch initial state via REST as fallback
               const entityParam = selectedRoom.entityNamePrefix ? `&entityNamePrefix=${selectedRoom.entityNamePrefix}` : '';
               const mappingsParam = selectedRoom.entityMappings ? `&entityMappings=${encodeURIComponent(JSON.stringify(selectedRoom.entityMappings))}` : '';
@@ -421,9 +431,10 @@ function App() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <main>
-        {view === 'dashboard' && dashboard}
+    <DeviceMappingsProvider>
+      <div className="min-h-screen bg-slate-950 text-slate-100">
+        <main>
+          {view === 'dashboard' && dashboard}
         {view === 'wizard' && (
           <WizardPage
             devices={devices}
@@ -573,8 +584,9 @@ function App() {
             }}
           />
         )}
-      </main>
-    </div>
+        </main>
+      </div>
+    </DeviceMappingsProvider>
   );
 }
 

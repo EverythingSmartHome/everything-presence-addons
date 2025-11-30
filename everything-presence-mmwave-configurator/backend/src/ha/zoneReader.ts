@@ -2,6 +2,7 @@ import type { IHaReadTransport } from './readTransport';
 import { ZoneRect, ZonePolygon, EntityMappings } from '../domain/types';
 import { textToPolygon } from '../domain/polygonUtils';
 import { EntityResolver } from '../domain/entityResolver';
+import { deviceEntityService } from '../domain/deviceEntityService';
 import { logger } from '../logger';
 
 export class ZoneReader {
@@ -16,13 +17,15 @@ export class ZoneReader {
    * @param entityMap - Profile entity template map
    * @param entityNamePrefix - Legacy entity name prefix (for fallback)
    * @param entityMappings - Discovered entity mappings (preferred, optional)
+   * @param deviceId - Device ID for device-level mapping lookup (preferred, optional)
    */
   async readPolygonZones(
     entityMap: any,
     entityNamePrefix: string,
-    entityMappings?: EntityMappings
+    entityMappings?: EntityMappings,
+    deviceId?: string
   ): Promise<ZonePolygon[]> {
-    logger.debug({ entityNamePrefix, hasPolygonZoneEntities: !!entityMap.polygonZoneEntities, hasMappings: !!entityMappings }, 'Starting polygon zone read');
+    logger.debug({ entityNamePrefix, deviceId, hasPolygonZoneEntities: !!entityMap.polygonZoneEntities, hasMappings: !!entityMappings }, 'Starting polygon zone read');
     const zones: ZonePolygon[] = [];
 
     // Regular polygon zones
@@ -30,14 +33,21 @@ export class ZoneReader {
       const polyMap = entityMap.polygonZoneEntities;
       for (let i = 1; i <= 4; i++) {
         const key = `zone${i}`;
-        const entityId = EntityResolver.resolvePolygonZoneEntity(
-          entityMappings,
-          entityNamePrefix,
-          'polygonZoneEntities',
-          key,
-          polyMap[key]
-        );
-        logger.debug({ key, entityId }, 'Checking polygon zone entity');
+        // Try device-level mapping first (preferred), then fall back to legacy resolution
+        let entityId: string | null = null;
+        if (deviceId) {
+          entityId = deviceEntityService.getPolygonZoneEntity(deviceId, 'polygon', i);
+        }
+        if (!entityId) {
+          entityId = EntityResolver.resolvePolygonZoneEntity(
+            entityMappings,
+            entityNamePrefix,
+            'polygonZoneEntities',
+            key,
+            polyMap[key]
+          );
+        }
+        logger.debug({ key, entityId, usedDeviceMapping: !!deviceId && !!entityId }, 'Checking polygon zone entity');
         if (!entityId) continue;
 
         try {
@@ -66,13 +76,20 @@ export class ZoneReader {
       const polyMap = entityMap.polygonExclusionEntities;
       for (let i = 1; i <= 2; i++) {
         const key = `exclusion${i}`;
-        const entityId = EntityResolver.resolvePolygonZoneEntity(
-          entityMappings,
-          entityNamePrefix,
-          'polygonExclusionEntities',
-          key,
-          polyMap[key]
-        );
+        // Try device-level mapping first
+        let entityId: string | null = null;
+        if (deviceId) {
+          entityId = deviceEntityService.getPolygonZoneEntity(deviceId, 'polygonExclusion', i);
+        }
+        if (!entityId) {
+          entityId = EntityResolver.resolvePolygonZoneEntity(
+            entityMappings,
+            entityNamePrefix,
+            'polygonExclusionEntities',
+            key,
+            polyMap[key]
+          );
+        }
         if (!entityId) continue;
 
         try {
@@ -100,13 +117,20 @@ export class ZoneReader {
       const polyMap = entityMap.polygonEntryEntities;
       for (let i = 1; i <= 2; i++) {
         const key = `entry${i}`;
-        const entityId = EntityResolver.resolvePolygonZoneEntity(
-          entityMappings,
-          entityNamePrefix,
-          'polygonEntryEntities',
-          key,
-          polyMap[key]
-        );
+        // Try device-level mapping first
+        let entityId: string | null = null;
+        if (deviceId) {
+          entityId = deviceEntityService.getPolygonZoneEntity(deviceId, 'polygonEntry', i);
+        }
+        if (!entityId) {
+          entityId = EntityResolver.resolvePolygonZoneEntity(
+            entityMappings,
+            entityNamePrefix,
+            'polygonEntryEntities',
+            key,
+            polyMap[key]
+          );
+        }
         if (!entityId) continue;
 
         try {
@@ -138,11 +162,13 @@ export class ZoneReader {
    * @param zoneMap - Profile entity template map
    * @param entityNamePrefix - Legacy entity name prefix (for fallback)
    * @param entityMappings - Discovered entity mappings (preferred, optional)
+   * @param deviceId - Device ID for device-level mapping lookup (preferred, optional)
    */
   async readZones(
     zoneMap: any,
     entityNamePrefix: string,
-    entityMappings?: EntityMappings
+    entityMappings?: EntityMappings,
+    deviceId?: string
   ): Promise<ZoneRect[]> {
     const zones: ZoneRect[] = [];
 
@@ -150,17 +176,20 @@ export class ZoneReader {
     for (let i = 1; i <= 4; i++) {
       const key = `zone${i}`;
       const mapping = regularZoneMap[key];
-      if (!mapping) continue;
+      if (!mapping && !deviceId) continue;
 
       try {
-        // Use EntityResolver to get entities (mappings first, then template fallback)
-        const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
-          entityMappings,
-          entityNamePrefix,
-          'zoneConfigEntities',
-          key,
-          mapping
-        );
+        // Try device-level mapping first (preferred), then fall back to legacy resolution
+        let zoneEntitySet = deviceId ? deviceEntityService.getZoneEntitySet(deviceId, 'regular', i) : null;
+        if (!zoneEntitySet) {
+          zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+            entityMappings,
+            entityNamePrefix,
+            'zoneConfigEntities',
+            key,
+            mapping
+          );
+        }
 
         if (!zoneEntitySet) continue;
         const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity } = zoneEntitySet;
@@ -205,21 +234,25 @@ export class ZoneReader {
     }
 
     // Exclusion zones (occupancy masks)
-    if (zoneMap.exclusionZoneConfigEntities) {
-      const exclusionMap = zoneMap.exclusionZoneConfigEntities;
+    if (zoneMap.exclusionZoneConfigEntities || deviceId) {
+      const exclusionMap = zoneMap.exclusionZoneConfigEntities || {};
       for (let i = 1; i <= 2; i++) {
         const key = `exclusion${i}`;
         const mapping = exclusionMap[key];
-        if (!mapping) continue;
+        if (!mapping && !deviceId) continue;
 
         try {
-          const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
-            entityMappings,
-            entityNamePrefix,
-            'exclusionZoneConfigEntities',
-            key,
-            mapping
-          );
+          // Try device-level mapping first
+          let zoneEntitySet = deviceId ? deviceEntityService.getZoneEntitySet(deviceId, 'exclusion', i) : null;
+          if (!zoneEntitySet) {
+            zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+              entityMappings,
+              entityNamePrefix,
+              'exclusionZoneConfigEntities',
+              key,
+              mapping
+            );
+          }
 
           if (!zoneEntitySet) continue;
           const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity } = zoneEntitySet;
@@ -262,21 +295,25 @@ export class ZoneReader {
     }
 
     // Entry zones
-    if (zoneMap.entryZoneConfigEntities) {
-      const entryMap = zoneMap.entryZoneConfigEntities;
+    if (zoneMap.entryZoneConfigEntities || deviceId) {
+      const entryMap = zoneMap.entryZoneConfigEntities || {};
       for (let i = 1; i <= 2; i++) {
         const key = `entry${i}`;
         const mapping = entryMap[key];
-        if (!mapping) continue;
+        if (!mapping && !deviceId) continue;
 
         try {
-          const zoneEntitySet = EntityResolver.resolveZoneEntitySet(
-            entityMappings,
-            entityNamePrefix,
-            'entryZoneConfigEntities',
-            key,
-            mapping
-          );
+          // Try device-level mapping first
+          let zoneEntitySet = deviceId ? deviceEntityService.getZoneEntitySet(deviceId, 'entry', i) : null;
+          if (!zoneEntitySet) {
+            zoneEntitySet = EntityResolver.resolveZoneEntitySet(
+              entityMappings,
+              entityNamePrefix,
+              'entryZoneConfigEntities',
+              key,
+              mapping
+            );
+          }
 
           if (!zoneEntitySet) continue;
           const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity } = zoneEntitySet;

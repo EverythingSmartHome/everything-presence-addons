@@ -405,8 +405,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-slate-400">Loading...</div>
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-200">
+            <div
+              className="h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-cyan-400"
+              aria-label="Loading"
+            />
+            <div className="text-sm text-slate-400">Loading rooms and custom assets…</div>
           </div>
         ) : (
           <div className="space-y-6">

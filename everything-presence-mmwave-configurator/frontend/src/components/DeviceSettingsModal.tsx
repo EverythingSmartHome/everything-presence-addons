@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LiveState, RoomConfig } from '../api/types';
 import { ingressAware } from '../api/client';
+import { useDeviceSettings } from '../contexts/DeviceMappingsContext';
+import { SettingsGroup, SettingEntity } from '../api/deviceMappings';
 
 interface DeviceSettingsModalProps {
   isOpen: boolean;
@@ -10,79 +12,11 @@ interface DeviceSettingsModalProps {
   isEP1: boolean;
 }
 
-interface SettingConfig {
-  key: string;
-  entitySuffix: string;
-  label: string;
-  type: 'number' | 'select' | 'switch';
-  domain?: 'number' | 'select' | 'switch' | 'light';
-  min?: number;
-  max?: number;
-  step?: number;
-  unit?: string;
-  options?: string[];
-  group: string;
-  description?: string;
-}
-
 interface SettingState {
   value: string | number | boolean;
   entityId: string;
   loading: boolean;
 }
-
-// EPL Settings Configuration
-const eplSettings: SettingConfig[] = [
-  // Detection
-  { key: 'maxDistance', entitySuffix: 'max_distance', label: 'Max Distance', type: 'number', min: 0, max: 600, step: 1, unit: 'cm', group: 'Detection' },
-  { key: 'occupancyOffDelay', entitySuffix: 'occupancy_off_delay', label: 'Occupancy Off Delay', type: 'number', min: 0, max: 600, step: 1, unit: 's', group: 'Detection' },
-  // Zone delays
-  { key: 'zone1OffDelay', entitySuffix: 'zone_1_occupancy_off_delay', label: 'Zone 1', type: 'number', min: 0, max: 600, step: 1, unit: 's', group: 'Zone Off Delays' },
-  { key: 'zone2OffDelay', entitySuffix: 'zone_2_occupancy_off_delay', label: 'Zone 2', type: 'number', min: 0, max: 600, step: 1, unit: 's', group: 'Zone Off Delays' },
-  { key: 'zone3OffDelay', entitySuffix: 'zone_3_occupancy_off_delay', label: 'Zone 3', type: 'number', min: 0, max: 600, step: 1, unit: 's', group: 'Zone Off Delays' },
-  { key: 'zone4OffDelay', entitySuffix: 'zone_4_occupancy_off_delay', label: 'Zone 4', type: 'number', min: 0, max: 600, step: 1, unit: 's', group: 'Zone Off Delays' },
-  // Installation
-  { key: 'installationAngle', entitySuffix: 'installation_angle', label: 'Installation Angle', type: 'number', min: -45, max: 45, step: 1, unit: '°', group: 'Installation', description: 'Compensates for horizontal mounting angle (yaw). Use when the device is mounted at an angle but you want to draw zones straight. The coordinate system is rotated so zones align with the room.' },
-  { key: 'upsideDownMounting', entitySuffix: 'upside_down_mounting', label: 'Upside Down Mounting', type: 'switch', group: 'Installation', description: 'Enable if the device is mounted upside down (e.g., on a ceiling).' },
-  // Tracking
-  { key: 'updateSpeed', entitySuffix: 'update_speed', label: 'Update Speed', type: 'select', options: ['Faster (0.1s)', 'Fast (0.2s)', 'Normal (0.3s)', 'Slow (0.4s)', 'Slower (0.5s)'], group: 'Tracking' },
-  { key: 'trackingBehaviour', entitySuffix: 'tracking_behaviour', label: 'Tracking Behaviour', type: 'select', options: ['None', 'Targets Position', 'Above + Zone count', 'Above + Targets active', 'Above + Distance and Angle', 'Above + Speed and Resolution'], group: 'Tracking' },
-  // Entry/Exit
-  { key: 'entryExitEnabled', entitySuffix: 'entry_exit_enabled', label: 'Enabled', type: 'switch', group: 'Entry/Exit Detection' },
-  { key: 'exitThresholdPct', entitySuffix: 'exit_threshold_pct', label: 'Exit Threshold', type: 'number', min: 0, max: 100, step: 1, unit: '%', group: 'Entry/Exit Detection' },
-  { key: 'assumePresentTimeout', entitySuffix: 'assume_present_timeout', label: 'Assume Present Timeout', type: 'number', min: 0, max: 600, step: 1, unit: 's', group: 'Entry/Exit Detection' },
-  // Advanced
-  { key: 'staleTargetReset', entitySuffix: 'stale_target_reset', label: 'Stale Target Reset', type: 'switch', group: 'Advanced' },
-  { key: 'staleTargetResetTimeout', entitySuffix: 'stale_target_reset_timeout', label: 'Reset Timeout', type: 'number', min: 1, max: 60, step: 1, unit: 's', group: 'Advanced' },
-];
-
-// EP1 Settings Configuration
-const ep1Settings: SettingConfig[] = [
-  // mmWave Detection
-  { key: 'mmwaveMode', entitySuffix: 'mmwave_mode', label: 'mmWave Mode', type: 'select', options: ['Presence Detection', 'Distance and Speed'], group: 'mmWave Detection' },
-  { key: 'mmwaveDistanceMin', entitySuffix: 'mmwave_minimum_distance', label: 'Min Distance', type: 'number', min: 0.6, max: 25, step: 0.1, unit: 'm', group: 'mmWave Detection' },
-  { key: 'mmwaveDistanceMax', entitySuffix: 'mmwave_max_distance', label: 'Max Distance', type: 'number', min: 0, max: 25, step: 0.1, unit: 'm', group: 'mmWave Detection' },
-  { key: 'mmwaveTriggerDistance', entitySuffix: 'mmwave_trigger_distance', label: 'Trigger Distance', type: 'number', min: 0, max: 25, step: 0.1, unit: 'm', group: 'mmWave Detection' },
-  // Sensitivity
-  { key: 'mmwaveSensitivity', entitySuffix: 'mmwave_sustain_sensitivity', label: 'Sustain Sensitivity', type: 'number', min: 0, max: 9, step: 1, unit: '', group: 'Sensitivity' },
-  { key: 'mmwaveTriggerSensitivity', entitySuffix: 'mmwave_trigger_sensitivity', label: 'Trigger Sensitivity', type: 'number', min: 0, max: 9, step: 1, unit: '', group: 'Sensitivity' },
-  { key: 'mmwaveThresholdFactor', entitySuffix: 'mmwave_threshold_factor', label: 'Threshold Factor', type: 'number', min: 1, max: 20, step: 1, unit: '', group: 'Sensitivity' },
-  // Latency
-  { key: 'mmwaveOnLatency', entitySuffix: 'mmwave_on_latency', label: 'mmWave On Latency', type: 'number', min: 0, max: 2, step: 0.25, unit: 's', group: 'Latency' },
-  { key: 'mmwaveOffLatency', entitySuffix: 'mmwave_off_latency', label: 'mmWave Off Latency', type: 'number', min: 1, max: 600, step: 5, unit: 's', group: 'Latency' },
-  { key: 'occupancyOffLatency', entitySuffix: 'occupancy_off_latency', label: 'Occupancy Off Latency', type: 'number', min: 1, max: 600, step: 5, unit: 's', group: 'Latency' },
-  { key: 'pirOffLatency', entitySuffix: 'pir_off_latency', label: 'PIR Off Latency', type: 'number', min: 1, max: 120, step: 1, unit: 's', group: 'Latency' },
-  { key: 'pirOnLatency', entitySuffix: 'pir_on_latency', label: 'PIR On Latency', type: 'number', min: 0, max: 1, step: 0.1, unit: 's', group: 'Latency' },
-  // Sensor Offsets
-  { key: 'temperatureOffset', entitySuffix: 'temperature_offset', label: 'Temperature Offset', type: 'number', min: -20, max: 20, step: 0.1, unit: '°C', group: 'Sensor Offsets' },
-  { key: 'humidityOffset', entitySuffix: 'humidity_offset', label: 'Humidity Offset', type: 'number', min: -50, max: 50, step: 0.1, unit: '%', group: 'Sensor Offsets' },
-  { key: 'illuminanceOffset', entitySuffix: 'illuminance_offset', label: 'Illuminance Offset', type: 'number', min: -50, max: 50, step: 1, unit: 'lx', group: 'Sensor Offsets' },
-  // Switches
-  { key: 'microMotion', entitySuffix: 'micro_motion_detection', label: 'Micro-motion Detection', type: 'switch', group: 'Features' },
-  { key: 'mmwaveLed', entitySuffix: 'mmwave_led', label: 'mmWave LED', type: 'switch', domain: 'light', group: 'Features' },
-  // Update Rate
-  { key: 'updateRate', entitySuffix: 'distance_speed_update_rate', label: 'Update Rate', type: 'select', options: ['0.3s', '0.4s', '0.5s'], group: 'Features' },
-];
 
 // Number input component with local state (updates on blur/enter)
 const NumberInput: React.FC<{
@@ -140,78 +74,92 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
   liveState,
   isEP1,
 }) => {
-  const [settings, setSettings] = useState<Record<string, SettingState>>({});
-  const [loading, setLoading] = useState(true);
+  const [settingValues, setSettingValues] = useState<Record<string, SettingState>>({});
+  const [fetchingValues, setFetchingValues] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const entityPrefix = room.entityNamePrefix || '';
-  const settingsConfig = isEP1 ? ep1Settings : eplSettings;
-  const settingsEntities = room.entityMappings?.settingsEntities;
+  // Use the new device mappings context to get settings dynamically
+  const { settings: settingsGroups, loading: settingsLoading, error: settingsError } = useDeviceSettings(room.deviceId);
 
-  // Helper to resolve entity ID from mappings or fallback to template
-  const resolveEntityId = (settingKey: string, domain: string, suffix: string): string | null => {
-    // First try stored mappings (source of truth)
-    if (settingsEntities?.[settingKey]) {
-      return settingsEntities[settingKey];
-    }
-    // Fallback to template construction
-    if (entityPrefix) {
-      return `${domain}.${entityPrefix}_${suffix}`;
-    }
-    return null;
-  };
-
-  // Fetch current settings from HA
+  // Fetch current values from HA when settings are loaded
   useEffect(() => {
-    if (!isOpen || (!entityPrefix && !settingsEntities)) return;
+    if (!isOpen || settingsLoading || !settingsGroups.length) return;
 
-    const fetchSettings = async () => {
-      setLoading(true);
+    const fetchSettingValues = async () => {
+      setFetchingValues(true);
       setError(null);
 
       const newSettings: Record<string, SettingState> = {};
+      const failedEntities: string[] = [];
 
-      for (const setting of settingsConfig) {
-        const domain = setting.domain || (setting.type === 'switch' ? 'switch' : setting.type === 'select' ? 'select' : 'number');
-        const entityId = resolveEntityId(setting.key, domain, setting.entitySuffix);
+      // Flatten all settings from all groups
+      const allSettings = settingsGroups.flatMap(group => group.settings);
 
-        if (!entityId) continue;
+      // Fetch all settings in parallel for better performance
+      const fetchPromises = allSettings.map(async (setting) => {
+        if (!setting.entityId) return null;
 
         try {
-          const response = await fetch(ingressAware(`api/live/ha/states/${entityId}`));
+          const response = await fetch(ingressAware(`api/live/ha/states/${setting.entityId}`));
+
           if (response.ok) {
             const data = await response.json();
             let value: string | number | boolean = data.state;
 
-            if (setting.type === 'number') {
+            // Convert based on control type
+            if (setting.controlType === 'number') {
               value = parseFloat(data.state) || 0;
-            } else if (setting.type === 'switch') {
+            } else if (setting.controlType === 'switch' || setting.controlType === 'light') {
               value = data.state === 'on';
             }
 
-            newSettings[setting.key] = {
-              value,
-              entityId,
-              loading: false,
+            return {
+              key: setting.key,
+              state: {
+                value,
+                entityId: setting.entityId,
+                loading: false,
+              },
             };
+          } else if (response.status === 404) {
+            failedEntities.push(setting.entityId);
+            return null;
+          } else {
+            console.warn(`[DeviceSettings] Failed to fetch ${setting.entityId}: ${response.status}`);
+            failedEntities.push(setting.entityId);
+            return null;
           }
-        } catch {
-          // Entity might not exist, skip it
+        } catch (err) {
+          console.warn(`[DeviceSettings] Error fetching ${setting.entityId}:`, err);
+          failedEntities.push(setting.entityId);
+          return null;
+        }
+      });
+
+      const results = await Promise.all(fetchPromises);
+
+      for (const result of results) {
+        if (result) {
+          newSettings[result.key] = result.state;
         }
       }
 
-      setSettings(newSettings);
-      setLoading(false);
+      if (failedEntities.length > 0 && process.env.NODE_ENV === 'development') {
+        console.log('[DeviceSettings] Failed to fetch entities:', failedEntities);
+      }
+
+      setSettingValues(newSettings);
+      setFetchingValues(false);
     };
 
-    fetchSettings();
-  }, [isOpen, entityPrefix, settingsEntities, settingsConfig]);
+    fetchSettingValues();
+  }, [isOpen, settingsLoading, settingsGroups]);
 
   const updateSetting = async (key: string, newValue: string | number | boolean) => {
-    const setting = settings[key];
-    if (!setting || !room.deviceId) return;
+    const settingState = settingValues[key];
+    if (!settingState || !room.deviceId) return;
 
-    setSettings((prev) => ({
+    setSettingValues((prev) => ({
       ...prev,
       [key]: { ...prev[key], loading: true },
     }));
@@ -222,7 +170,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          entityId: setting.entityId,
+          entityId: settingState.entityId,
           value: newValue,
         }),
       });
@@ -231,14 +179,14 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
         throw new Error('Failed to update setting');
       }
 
-      setSettings((prev) => ({
+      setSettingValues((prev) => ({
         ...prev,
         [key]: { ...prev[key], value: newValue, loading: false },
       }));
       setError(null);
     } catch (err) {
       setError(`Failed to update setting`);
-      setSettings((prev) => ({
+      setSettingValues((prev) => ({
         ...prev,
         [key]: { ...prev[key], loading: false },
       }));
@@ -247,60 +195,53 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Group settings by their group property
-  const groupedSettings = settingsConfig.reduce((acc, config) => {
-    if (!acc[config.group]) {
-      acc[config.group] = [];
-    }
-    acc[config.group].push(config);
-    return acc;
-  }, {} as Record<string, SettingConfig[]>);
+  const loading = settingsLoading || fetchingValues;
 
-  const renderSetting = (config: SettingConfig) => {
-    const setting = settings[config.key];
-    if (!setting) return null;
+  const renderSetting = (setting: SettingEntity) => {
+    const state = settingValues[setting.key];
+    if (!state) return null;
 
     return (
-      <div key={config.key} className="py-2">
+      <div key={setting.key} className="py-2">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-300">{config.label}</span>
+          <span className="text-sm text-slate-300">{setting.label || setting.key}</span>
           <div className="flex items-center gap-2">
-          {config.type === 'number' && (
+          {setting.controlType === 'number' && (
             <NumberInput
-              value={setting.value as number}
-              min={config.min}
-              max={config.max}
-              step={config.step}
-              unit={config.unit}
-              disabled={setting.loading}
-              onSave={(val) => updateSetting(config.key, val)}
+              value={state.value as number}
+              min={setting.min}
+              max={setting.max}
+              step={setting.step}
+              unit={setting.unit}
+              disabled={state.loading}
+              onSave={(val) => updateSetting(setting.key, val)}
             />
           )}
 
-          {config.type === 'switch' && (
+          {(setting.controlType === 'switch' || setting.controlType === 'light') && (
             <button
-              onClick={() => updateSetting(config.key, !(setting.value as boolean))}
-              disabled={setting.loading}
+              onClick={() => updateSetting(setting.key, !(state.value as boolean))}
+              disabled={state.loading}
               className={`relative w-11 h-6 rounded-full transition-colors ${
-                setting.value ? 'bg-aqua-500' : 'bg-slate-600'
-              } ${setting.loading ? 'opacity-50' : ''}`}
+                state.value ? 'bg-aqua-500' : 'bg-slate-600'
+              } ${state.loading ? 'opacity-50' : ''}`}
             >
               <div
                 className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                  setting.value ? 'translate-x-6' : 'translate-x-1'
+                  state.value ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
             </button>
           )}
 
-          {config.type === 'select' && config.options && (
+          {setting.controlType === 'select' && setting.options && (
             <select
-              value={setting.value as string}
-              onChange={(e) => updateSetting(config.key, e.target.value)}
-              disabled={setting.loading}
+              value={state.value as string}
+              onChange={(e) => updateSetting(setting.key, e.target.value)}
+              disabled={state.loading}
               className="px-2 py-1.5 text-sm bg-slate-800/70 border border-slate-700 rounded-lg focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-50 max-w-[160px]"
             >
-              {config.options.map((opt) => (
+              {setting.options.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
                 </option>
@@ -308,26 +249,26 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             </select>
           )}
 
-          {setting.loading && (
+          {state.loading && (
             <div className="w-4 h-4 border-2 border-aqua-500 border-t-transparent rounded-full animate-spin" />
           )}
           </div>
         </div>
-        {config.description && (
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">{config.description}</p>
+        {setting.description && (
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed">{setting.description}</p>
         )}
       </div>
     );
   };
 
-  const renderGroup = (groupName: string, configs: SettingConfig[]) => {
-    const renderedSettings = configs.map(renderSetting).filter(Boolean);
+  const renderGroup = (group: SettingsGroup) => {
+    const renderedSettings = group.settings.map(renderSetting).filter(Boolean);
     if (renderedSettings.length === 0) return null;
 
     return (
-      <div key={groupName} className="mb-5">
+      <div key={group.group} className="mb-5">
         <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2 pb-1 border-b border-slate-700">
-          {groupName}
+          {group.group}
         </h4>
         <div className="space-y-1">{renderedSettings}</div>
       </div>
@@ -362,10 +303,15 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
                 Loading settings...
               </div>
             </div>
-          ) : Object.keys(settings).length === 0 ? (
+          ) : settingsError ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="text-red-400 text-sm mb-2">Failed to load settings</div>
+              <div className="text-slate-500 text-xs">{settingsError}</div>
+            </div>
+          ) : settingsGroups.length === 0 || Object.keys(settingValues).length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="text-slate-400 text-sm mb-2">No settings found</div>
-              <div className="text-slate-500 text-xs">Device may not be available or entity names may differ</div>
+              <div className="text-slate-500 text-xs">Device may not have mappings or settings configured</div>
             </div>
           ) : (
             <>
@@ -375,9 +321,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
                 </div>
               )}
 
-              {Object.entries(groupedSettings).map(([groupName, configs]) =>
-                renderGroup(groupName, configs)
-              )}
+              {settingsGroups.map(group => renderGroup(group))}
             </>
           )}
         </div>

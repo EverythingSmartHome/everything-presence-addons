@@ -18,6 +18,7 @@ import { HourlyActivityChart } from '../components/HourlyActivityChart';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useHeatmap } from '../hooks/useHeatmap';
+import { useDeviceMappings, useDeviceMapping } from '../contexts/DeviceMappingsContext';
 
 // Recording mode trail point
 interface RecordedPoint {
@@ -114,6 +115,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const supportsHeatmap = selectedProfile?.capabilities &&
     (selectedProfile.capabilities as { tracking?: boolean }).tracking === true && !isEP1;
 
+  // Device mappings context - used to check if device has valid entity mappings
+  // useDeviceMapping triggers loading the mapping into cache, useDeviceMappings provides the check
+  const { hasValidMappings } = useDeviceMappings();
+  const { mapping: deviceMapping, loading: mappingLoading } = useDeviceMapping(selectedRoom?.deviceId);
+  // Check validity: mapping must be loaded AND have presence entity
+  const deviceHasValidMappings = !mappingLoading && deviceMapping !== null &&
+    !!(deviceMapping.mappings.presence || deviceMapping.mappings.presenceEntity);
+
   // Derive entityNamePrefix for heatmap
   const entityNamePrefix = useMemo(() => {
     if (selectedRoom?.entityNamePrefix) return selectedRoom.entityNamePrefix;
@@ -121,12 +130,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     return device?.entityNamePrefix ?? null;
   }, [selectedRoom, devices]);
 
-  // Heatmap data
+  // Heatmap data - skip entityMappings if device has valid mappings stored
   const { data: heatmapData, loading: heatmapLoading, refresh: refreshHeatmap } = useHeatmap({
     deviceId: selectedRoom?.deviceId ?? null,
     profileId: selectedRoom?.profileId ?? null,
     entityNamePrefix,
-    entityMappings: selectedRoom?.entityMappings,
+    entityMappings: deviceHasValidMappings ? undefined : selectedRoom?.entityMappings,
     hours: heatmapHours,
     enabled: heatmapEnabled && !!supportsHeatmap,
   });
@@ -331,11 +340,13 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const deviceZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
 
         // Always sync device zones to local storage (device is source of truth)
@@ -354,7 +365,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
 
   // Fetch polygon mode status when room changes
   useEffect(() => {
@@ -376,11 +387,13 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonModeStatus(status);
       } catch (err) {
@@ -389,7 +402,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
 
   // Fetch polygon zones when polygon mode is enabled
   useEffect(() => {
@@ -411,11 +424,13 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const zones = await fetchPolygonZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonZones(zones);
       } catch (err) {
@@ -424,7 +439,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonZones();
-  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
 
   const handleAutoZoom = useCallback(() => {
     if (!selectedRoom || !selectedRoom.roomShell || !selectedRoom.roomShell.points.length) {
@@ -496,9 +511,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         </div>
       )}
 
-      {/* Entity Sync Nudge Banner - shown for rooms with device but no entity mappings */}
+      {/* Entity Sync Nudge Banner - shown for rooms with device but no valid entity mappings */}
       {/* Positioned below the Room selector dropdown (top-20) */}
-      {selectedRoom && selectedRoom.deviceId && !selectedRoom.entityMappings && onNavigate && (
+      {/* Don't show while mapping is loading to avoid flash of warning */}
+      {selectedRoom && selectedRoom.deviceId && !mappingLoading && !deviceHasValidMappings && onNavigate && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 max-w-xl rounded-xl border border-yellow-500/50 bg-yellow-500/10 backdrop-blur px-5 py-2.5 shadow-xl animate-in slide-in-from-top-4 fade-in">
           <div className="flex items-center gap-3">
             <span className="text-yellow-400">⚠</span>

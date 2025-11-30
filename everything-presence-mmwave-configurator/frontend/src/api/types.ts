@@ -11,8 +11,48 @@ export interface DeviceProfileLimits {
   maxZones?: number;
   maxExclusionZones?: number;
   maxEntryZones?: number;
+  maxTargets?: number;
   maxRangeMeters?: number;
   fieldOfViewDegrees?: number;
+}
+
+/**
+ * Entity category for classification and dynamic loading.
+ */
+export type EntityCategory = 'sensor' | 'setting' | 'zone' | 'tracking';
+
+/**
+ * Zone type for zone entities.
+ */
+export type ZoneType = 'regular' | 'exclusion' | 'entry' | 'polygon' | 'polygonExclusion' | 'polygonEntry';
+
+/**
+ * Control type for settings entities.
+ */
+export type ControlType = 'number' | 'switch' | 'select' | 'light' | 'text';
+
+/**
+ * Entity definition in the device profile.
+ */
+export interface EntityDefinition {
+  template: string;
+  category: EntityCategory;
+  required: boolean;
+  subcategory?: string;
+  group?: string;
+  label?: string;
+  controlType?: ControlType;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  description?: string;
+  options?: string[];
+  zoneType?: ZoneType;
+  zoneIndex?: number;
+  coord?: string;
+  targetIndex?: number;
+  property?: string;
 }
 
 export interface DeviceProfile {
@@ -21,6 +61,9 @@ export interface DeviceProfile {
   manufacturer: string;
   capabilities: unknown;
   limits: DeviceProfileLimits;
+  /** New categorized entity definitions */
+  entities?: Record<string, EntityDefinition>;
+  /** Legacy entity map (for backward compatibility) */
   entityMap: Record<string, unknown>;
   iconUrl?: string;
 }
