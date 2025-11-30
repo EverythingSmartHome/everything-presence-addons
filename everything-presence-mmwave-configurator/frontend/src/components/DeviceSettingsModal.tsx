@@ -143,16 +143,43 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
   const [settings, setSettings] = useState<Record<string, SettingState>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deviceMapping, setDeviceMapping] = useState<Record<string, string> | null>(null);
+  const [mappingLoading, setMappingLoading] = useState(true);
 
   const entityPrefix = room.entityNamePrefix || '';
   const settingsConfig = isEP1 ? ep1Settings : eplSettings;
-  const settingsEntities = room.entityMappings?.settingsEntities;
 
-  // Helper to resolve entity ID from mappings or fallback to template
+  // Fetch device mapping from backend
+  useEffect(() => {
+    if (!isOpen || !room.deviceId) {
+      setMappingLoading(false);
+      return;
+    }
+
+    const fetchMapping = async () => {
+      setMappingLoading(true);
+      try {
+        const response = await fetch(ingressAware(`api/device-mappings/${room.deviceId}`));
+        if (response.ok) {
+          const data = await response.json();
+          setDeviceMapping(data.mapping?.mappings || null);
+        } else {
+          setDeviceMapping(null);
+        }
+      } catch {
+        setDeviceMapping(null);
+      }
+      setMappingLoading(false);
+    };
+
+    fetchMapping();
+  }, [isOpen, room.deviceId]);
+
+  // Helper to resolve entity ID from device mappings or fallback to template
   const resolveEntityId = (settingKey: string, domain: string, suffix: string): string | null => {
-    // First try stored mappings (source of truth)
-    if (settingsEntities?.[settingKey]) {
-      return settingsEntities[settingKey];
+    // First try device mappings (new source of truth)
+    if (deviceMapping?.[settingKey]) {
+      return deviceMapping[settingKey];
     }
     // Fallback to template construction
     if (entityPrefix) {
@@ -163,7 +190,10 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
   // Fetch current settings from HA
   useEffect(() => {
-    if (!isOpen || (!entityPrefix && !settingsEntities)) return;
+    // Wait for device mapping to load, then fetch settings
+    if (!isOpen || mappingLoading) return;
+    // Need either device mapping or entityPrefix to resolve entities
+    if (!deviceMapping && !entityPrefix) return;
 
     const fetchSettings = async () => {
       setLoading(true);
@@ -205,7 +235,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
     };
 
     fetchSettings();
-  }, [isOpen, entityPrefix, settingsEntities, settingsConfig]);
+  }, [isOpen, entityPrefix, deviceMapping, mappingLoading, settingsConfig]);
 
   const updateSetting = async (key: string, newValue: string | number | boolean) => {
     const setting = settings[key];
@@ -355,7 +385,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
         {/* Content */}
         <div className="px-5 py-4 overflow-y-auto max-h-[calc(85vh-120px)]">
-          {loading ? (
+          {(loading || mappingLoading) ? (
             <div className="flex items-center justify-center py-12">
               <div className="flex items-center gap-3 text-slate-400 text-sm">
                 <div className="w-5 h-5 border-2 border-aqua-500 border-t-transparent rounded-full animate-spin" />
