@@ -1,3 +1,9 @@
+## 2.0.4
+- Fix issue where zooming would get constantly reset by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Improve saving of zones by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Improve page load times by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix 502 errors on opening of live dashboard by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
 ## 2.0.3
 - Refactor to separate device entity mappings from room configs, making device mappings the single source of truth stored at the device level by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
 
