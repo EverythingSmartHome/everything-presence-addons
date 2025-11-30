@@ -1,11 +1,38 @@
 import type { EntityMappings, RoomConfig, ZoneEntitySet } from './types';
 import { logger } from '../logger';
+import { deviceMappingStorage } from '../config/deviceMappingStorage';
+import { deviceEntityService } from './deviceEntityService';
+
+// Track devices for which we've already logged deprecation warnings
+const deprecationWarned = new Set<string>();
 
 /**
  * Utility for resolving entity IDs from stored mappings or template patterns.
  * Provides backward compatibility during migration from entityNamePrefix to entityMappings.
+ *
+ * PREFERRED: Use deviceEntityService for new code. This class is maintained for
+ * backward compatibility during migration.
  */
 export class EntityResolver {
+  /**
+   * Resolve an entity ID directly from device-level storage.
+   * This is the preferred method for new code.
+   *
+   * @param deviceId - Home Assistant device ID
+   * @param entityKey - Key in the device mappings (e.g., "presence", "maxDistance")
+   * @returns Resolved entity ID or null if not found
+   */
+  static resolveFromDevice(deviceId: string, entityKey: string): string | null {
+    return deviceEntityService.getEntityId(deviceId, entityKey);
+  }
+
+  /**
+   * Check if a device has mappings in device-level storage.
+   */
+  static hasDeviceMappings(deviceId: string): boolean {
+    return deviceMappingStorage.hasMapping(deviceId);
+  }
+
   /**
    * Check if a room has entity mappings configured.
    */
@@ -193,32 +220,130 @@ export class EntityResolver {
   /**
    * Create a resolver function for a specific room.
    * Useful for repeated resolution in loops.
+   *
+   * UPDATED: Now tries device-level mappings first, then falls back to room.entityMappings.
+   * Uses getEffectivePrefix to derive the most reliable prefix from mappings.
    */
   static createResolver(room: RoomConfig) {
-    const { entityMappings, entityNamePrefix } = room;
+    const { entityMappings, deviceId } = room;
+    // Use effective prefix derived from mappings (more reliable than potentially corrupted entityNamePrefix)
+    const effectivePrefix = EntityResolver.getEffectivePrefix(room);
+
+    // Check if device has mappings in device-level storage (preferred)
+    const hasDeviceMapping = deviceId ? deviceMappingStorage.hasMapping(deviceId) : false;
+
+    // Log deprecation warning once per device when falling back to room mappings
+    if (!hasDeviceMapping && entityMappings && deviceId && !deprecationWarned.has(deviceId)) {
+      logger.warn(
+        { deviceId, roomId: room.id },
+        'Using deprecated room.entityMappings - device needs migration to device-level storage'
+      );
+      deprecationWarned.add(deviceId);
+    }
 
     return {
-      resolve: (mappingKey: string, template: string | null | undefined) =>
-        EntityResolver.resolve(entityMappings, entityNamePrefix, mappingKey, template),
+      /**
+       * Resolve an entity by mapping key.
+       * Tries device-level mapping first, then room.entityMappings, then template.
+       */
+      resolve: (mappingKey: string, template: string | null | undefined): string | null => {
+        // Try device-level mapping first (preferred)
+        if (hasDeviceMapping && deviceId) {
+          const deviceResult = deviceEntityService.getEntityId(deviceId, mappingKey);
+          if (deviceResult) return deviceResult;
+        }
 
+        // Fall back to room.entityMappings (deprecated)
+        return EntityResolver.resolve(entityMappings, effectivePrefix, mappingKey, template);
+      },
+
+      /**
+       * Resolve zone coordinate entities.
+       * Tries device-level mapping first for zone entity sets.
+       */
       resolveZone: (
         groupKey: 'zoneConfigEntities' | 'exclusionZoneConfigEntities' | 'entryZoneConfigEntities',
         zoneKey: string,
         templateGroup: Record<string, string> | undefined
-      ) =>
-        EntityResolver.resolveZoneEntitySet(entityMappings, entityNamePrefix, groupKey, zoneKey, templateGroup),
+      ) => {
+        // Try device-level mapping first
+        if (hasDeviceMapping && deviceId) {
+          const zoneType = groupKey === 'zoneConfigEntities' ? 'regular'
+            : groupKey === 'exclusionZoneConfigEntities' ? 'exclusion' : 'entry';
+          const zoneIndex = parseInt(zoneKey.replace(/\D/g, ''), 10) || 1;
+          const deviceResult = deviceEntityService.getZoneEntitySet(deviceId, zoneType, zoneIndex);
+          if (deviceResult) return deviceResult;
+        }
 
+        // Fall back to room.entityMappings
+        return EntityResolver.resolveZoneEntitySet(entityMappings, effectivePrefix, groupKey, zoneKey, templateGroup);
+      },
+
+      /**
+       * Resolve polygon zone entity.
+       * Tries device-level mapping first.
+       */
       resolvePolygon: (
         groupKey: 'polygonZoneEntities' | 'polygonExclusionEntities' | 'polygonEntryEntities',
         zoneKey: string,
         template: string | undefined
-      ) =>
-        EntityResolver.resolvePolygonZoneEntity(entityMappings, entityNamePrefix, groupKey, zoneKey, template),
+      ) => {
+        // Try device-level mapping first
+        if (hasDeviceMapping && deviceId) {
+          const zoneType = groupKey === 'polygonZoneEntities' ? 'polygon'
+            : groupKey === 'polygonExclusionEntities' ? 'polygonExclusion' : 'polygonEntry';
+          const zoneIndex = parseInt(zoneKey.replace(/\D/g, ''), 10) || 1;
+          const deviceResult = deviceEntityService.getPolygonZoneEntity(deviceId, zoneType, zoneIndex);
+          if (deviceResult) return deviceResult;
+        }
 
-      resolveTarget: (targetNum: number, property: 'x' | 'y' | 'speed' | 'resolution' | 'angle' | 'distance' | 'active') =>
-        EntityResolver.resolveTargetEntity(entityMappings, entityNamePrefix, targetNum, property),
+        // Fall back to room.entityMappings
+        return EntityResolver.resolvePolygonZoneEntity(entityMappings, effectivePrefix, groupKey, zoneKey, template);
+      },
 
-      hasMappings: () => EntityResolver.hasMappings(room),
+      /**
+       * Resolve tracking target entity.
+       * Tries device-level mapping first.
+       */
+      resolveTarget: (targetNum: number, property: 'x' | 'y' | 'speed' | 'resolution' | 'angle' | 'distance' | 'active') => {
+        // Try device-level mapping first
+        if (hasDeviceMapping && deviceId) {
+          const targetSet = deviceEntityService.getTargetEntities(deviceId, targetNum);
+          if (targetSet && targetSet[property]) {
+            return targetSet[property] as string;
+          }
+        }
+
+        // Fall back to room.entityMappings
+        return EntityResolver.resolveTargetEntity(entityMappings, effectivePrefix, targetNum, property);
+      },
+
+      /**
+       * Check if room has any entity mappings (device or room level).
+       */
+      hasMappings: () => hasDeviceMapping || EntityResolver.hasMappings(room),
+
+      /**
+       * Check if device has device-level mappings (preferred).
+       */
+      hasDeviceMappings: () => hasDeviceMapping,
+
+      /**
+       * Get the effective entity prefix.
+       */
+      getPrefix: () => effectivePrefix,
+
+      /**
+       * Get the device ID for this room.
+       */
+      getDeviceId: () => deviceId,
     };
+  }
+
+  /**
+   * Clear the deprecation warning cache (for testing).
+   */
+  static clearDeprecationWarnings(): void {
+    deprecationWarned.clear();
   }
 }

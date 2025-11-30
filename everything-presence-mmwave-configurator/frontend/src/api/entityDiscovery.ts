@@ -1,5 +1,6 @@
 import { ingressAware } from './client';
 import { EntityMappings } from './types';
+import { DeviceMapping } from './deviceMappings';
 
 /**
  * Entity registry entry from Home Assistant.
@@ -117,6 +118,37 @@ export const validateMappings = async (
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Validation failed: ${res.status} ${res.statusText} - ${text}`);
+  }
+
+  return res.json();
+};
+
+/**
+ * Discover entities and save to device mapping storage.
+ * This is the primary method to wire frontend discovery to device mappings.
+ */
+export interface DiscoverAndSaveResult {
+  mapping: DeviceMapping;
+  discovery: DiscoveryResult;
+}
+
+export const discoverAndSaveEntities = async (
+  deviceId: string,
+  profileId: string,
+  deviceName: string
+): Promise<DiscoverAndSaveResult> => {
+  const res = await fetch(
+    ingressAware(`api/devices/${deviceId}/discover-and-save`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId, deviceName }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Discover and save failed: ${res.status} ${res.statusText} - ${text}`);
   }
 
   return res.json();

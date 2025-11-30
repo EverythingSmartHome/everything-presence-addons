@@ -2,7 +2,32 @@ import type { IHaReadTransport } from '../ha/readTransport';
 import type { EntityRegistryEntry } from '../ha/types';
 import type { DeviceProfileLoader } from './deviceProfiles';
 import type { EntityMappings, ZoneEntitySet, TargetEntitySet } from './types';
+import { deviceMappingStorage, DeviceMapping } from '../config/deviceMappingStorage';
 import { logger } from '../logger';
+
+/**
+ * Entity definition from profile.entities with template for discovery.
+ */
+interface EntityDefinitionWithTemplate {
+  template: string;
+  category: 'sensor' | 'setting' | 'zone' | 'tracking';
+  required: boolean;
+  subcategory?: string;
+  group?: string;
+  label?: string;
+  controlType?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  description?: string;
+  options?: string[];
+  zoneType?: string;
+  zoneIndex?: number;
+  coord?: string;
+  targetIndex?: number;
+  property?: string;
+}
 
 /**
  * Confidence level for entity matching.
@@ -55,6 +80,7 @@ export class EntityDiscoveryService {
 
   /**
    * Discover and match entities for a device against a profile.
+   * Prefers profile.entities metadata when available, falls back to legacy entityMap.
    */
   async discoverEntities(deviceId: string, profileId: string): Promise<DiscoveryResult> {
     logger.info({ deviceId, profileId }, 'Starting entity discovery');
@@ -90,8 +116,9 @@ export class EntityDiscoveryService {
     // Group entities by domain for faster lookup
     const entitiesByDomain = this.groupEntitiesByDomain(deviceEntities);
 
-    // Get the entity map from the profile
-    const entityMap = profile.entityMap as Record<string, unknown>;
+    // Check for new entities metadata format
+    const profileEntities = (profile as unknown as Record<string, unknown>).entities as Record<string, EntityDefinitionWithTemplate> | undefined;
+    const entityMap = (profile as unknown as Record<string, unknown>).entityMap as Record<string, unknown>;
     const capabilities = profile.capabilities as Record<string, unknown>;
 
     // Match all entities
@@ -102,128 +129,27 @@ export class EntityDiscoveryService {
       manuallyMappedCount: 0,
     };
 
-    // Define optional entity keys - these are add-on sensors that not all devices have
-    const optionalEntityKeys = new Set([
-      'co2Entity',           // CO2 sensor add-on
-      'pirEntity',           // PIR sensor (not on all models)
-      'vocEntity',           // VOC sensor add-on
-      'pm25Entity',          // PM2.5 sensor add-on
-      'pressureEntity',      // Pressure sensor add-on
-      'lightEntity',         // Some models don't have light sensor
-    ]);
-
-    // Process flat entity mappings (presenceEntity, temperatureEntity, etc.)
-    for (const [key, template] of Object.entries(entityMap)) {
-      if (typeof template === 'string') {
-        const isOptional = optionalEntityKeys.has(key);
-        const result = this.matchTemplate(key, template, deviceEntities, entitiesByDomain, isOptional);
-        results.push(result);
-        if (result.matchedEntityId) {
-          (suggestedMappings as Record<string, unknown>)[key] = result.matchedEntityId;
-        }
-      }
-    }
-
-    // Process zone config entities (zoneConfigEntities, exclusionZoneConfigEntities, etc.)
-    if (entityMap.zoneConfigEntities && typeof entityMap.zoneConfigEntities === 'object') {
-      suggestedMappings.zoneConfigEntities = {};
-      const zoneConfig = entityMap.zoneConfigEntities as Record<string, Record<string, string>>;
-      for (const [zoneKey, zoneEntities] of Object.entries(zoneConfig)) {
-        const zoneSet = this.matchZoneEntitySet(`zoneConfigEntities.${zoneKey}`, zoneEntities, deviceEntities, entitiesByDomain, results);
-        if (zoneSet) {
-          (suggestedMappings.zoneConfigEntities as Record<string, ZoneEntitySet>)[zoneKey] = zoneSet;
-        }
-      }
-    }
-
-    // Process exclusion zone entities
-    if (entityMap.exclusionZoneConfigEntities && typeof entityMap.exclusionZoneConfigEntities === 'object') {
-      suggestedMappings.exclusionZoneConfigEntities = {};
-      const exclusionConfig = entityMap.exclusionZoneConfigEntities as Record<string, Record<string, string>>;
-      for (const [zoneKey, zoneEntities] of Object.entries(exclusionConfig)) {
-        const zoneSet = this.matchZoneEntitySet(`exclusionZoneConfigEntities.${zoneKey}`, zoneEntities, deviceEntities, entitiesByDomain, results);
-        if (zoneSet) {
-          (suggestedMappings.exclusionZoneConfigEntities as Record<string, ZoneEntitySet>)[zoneKey] = zoneSet;
-        }
-      }
-    }
-
-    // Process entry zone entities
-    if (entityMap.entryZoneConfigEntities && typeof entityMap.entryZoneConfigEntities === 'object') {
-      suggestedMappings.entryZoneConfigEntities = {};
-      const entryConfig = entityMap.entryZoneConfigEntities as Record<string, Record<string, string>>;
-      for (const [zoneKey, zoneEntities] of Object.entries(entryConfig)) {
-        const zoneSet = this.matchZoneEntitySet(`entryZoneConfigEntities.${zoneKey}`, zoneEntities, deviceEntities, entitiesByDomain, results);
-        if (zoneSet) {
-          (suggestedMappings.entryZoneConfigEntities as Record<string, ZoneEntitySet>)[zoneKey] = zoneSet;
-        }
-      }
-    }
-
-    // Process polygon zone entities
-    if (entityMap.polygonZoneEntities && typeof entityMap.polygonZoneEntities === 'object') {
-      suggestedMappings.polygonZoneEntities = {};
-      const polygonConfig = entityMap.polygonZoneEntities as Record<string, string>;
-      for (const [zoneKey, template] of Object.entries(polygonConfig)) {
-        const result = this.matchTemplate(`polygonZoneEntities.${zoneKey}`, template, deviceEntities, entitiesByDomain, true);
-        results.push(result);
-        if (result.matchedEntityId) {
-          (suggestedMappings.polygonZoneEntities as Record<string, string>)[zoneKey] = result.matchedEntityId;
-        }
-      }
-    }
-
-    // Process polygon exclusion entities
-    if (entityMap.polygonExclusionEntities && typeof entityMap.polygonExclusionEntities === 'object') {
-      suggestedMappings.polygonExclusionEntities = {};
-      const polygonConfig = entityMap.polygonExclusionEntities as Record<string, string>;
-      for (const [zoneKey, template] of Object.entries(polygonConfig)) {
-        const result = this.matchTemplate(`polygonExclusionEntities.${zoneKey}`, template, deviceEntities, entitiesByDomain, true);
-        results.push(result);
-        if (result.matchedEntityId) {
-          (suggestedMappings.polygonExclusionEntities as Record<string, string>)[zoneKey] = result.matchedEntityId;
-        }
-      }
-    }
-
-    // Process polygon entry entities
-    if (entityMap.polygonEntryEntities && typeof entityMap.polygonEntryEntities === 'object') {
-      suggestedMappings.polygonEntryEntities = {};
-      const polygonConfig = entityMap.polygonEntryEntities as Record<string, string>;
-      for (const [zoneKey, template] of Object.entries(polygonConfig)) {
-        const result = this.matchTemplate(`polygonEntryEntities.${zoneKey}`, template, deviceEntities, entitiesByDomain, true);
-        results.push(result);
-        if (result.matchedEntityId) {
-          (suggestedMappings.polygonEntryEntities as Record<string, string>)[zoneKey] = result.matchedEntityId;
-        }
-      }
-    }
-
-    // Add tracking target entities if tracking is supported
-    if (capabilities?.tracking) {
-      suggestedMappings.trackingTargets = {};
-      for (let i = 1; i <= 3; i++) {
-        const targetSet = this.matchTrackingTargetEntities(`target${i}`, i, deviceEntities, entitiesByDomain, results);
-        if (targetSet) {
-          (suggestedMappings.trackingTargets as Record<string, TargetEntitySet>)[`target${i}`] = targetSet;
-        }
-      }
-    }
-
-    // Process settings entities (device configuration controls)
-    if (entityMap.settingsEntities && typeof entityMap.settingsEntities === 'object') {
-      suggestedMappings.settingsEntities = {};
-      const settingsConfig = entityMap.settingsEntities as Record<string, string>;
-      for (const [settingKey, template] of Object.entries(settingsConfig)) {
-        if (typeof template === 'string') {
-          // Settings are optional - device may have different firmware versions
-          const result = this.matchTemplate(`settingsEntities.${settingKey}`, template, deviceEntities, entitiesByDomain, true);
-          results.push(result);
-          if (result.matchedEntityId) {
-            (suggestedMappings.settingsEntities as Record<string, string>)[settingKey] = result.matchedEntityId;
-          }
-        }
-      }
+    // Use profile.entities metadata when available (preferred)
+    if (profileEntities) {
+      logger.info({ deviceId, profileId }, 'Using profile.entities metadata for discovery');
+      this.discoverUsingEntitiesMetadata(
+        profileEntities,
+        deviceEntities,
+        entitiesByDomain,
+        results,
+        suggestedMappings
+      );
+    } else {
+      // Fallback to legacy entityMap
+      logger.info({ deviceId, profileId }, 'Using legacy entityMap for discovery');
+      this.discoverUsingLegacyEntityMap(
+        entityMap,
+        capabilities,
+        deviceEntities,
+        entitiesByDomain,
+        results,
+        suggestedMappings
+      );
     }
 
     // Calculate statistics
@@ -436,6 +362,274 @@ export class EntityDiscoveryService {
   }
 
   /**
+   * Discover entities using profile.entities metadata (new format).
+   * Each entity definition has a template, category, and required flag.
+   */
+  private discoverUsingEntitiesMetadata(
+    profileEntities: Record<string, EntityDefinitionWithTemplate>,
+    deviceEntities: EntityRegistryEntry[],
+    entitiesByDomain: Map<string, EntityRegistryEntry[]>,
+    results: EntityMatchResult[],
+    suggestedMappings: Partial<EntityMappings>
+  ): void {
+    // Initialize nested structures for zone/tracking entities
+    suggestedMappings.zoneConfigEntities = {};
+    suggestedMappings.exclusionZoneConfigEntities = {};
+    suggestedMappings.entryZoneConfigEntities = {};
+    suggestedMappings.polygonZoneEntities = {};
+    suggestedMappings.polygonExclusionEntities = {};
+    suggestedMappings.polygonEntryEntities = {};
+    suggestedMappings.trackingTargets = {};
+    suggestedMappings.settingsEntities = {};
+
+    for (const [entityKey, def] of Object.entries(profileEntities)) {
+      if (!def.template) continue;
+
+      const isOptional = !def.required;
+      const result = this.matchTemplate(entityKey, def.template, deviceEntities, entitiesByDomain, isOptional);
+      results.push(result);
+
+      if (result.matchedEntityId) {
+        // Place entity in correct location based on category and metadata
+        this.placeMatchedEntity(entityKey, result.matchedEntityId, def, suggestedMappings);
+      }
+    }
+  }
+
+  /**
+   * Place a matched entity into the correct location in suggestedMappings.
+   * Uses entity definition metadata (category, zoneType, zoneIndex, etc.)
+   */
+  private placeMatchedEntity(
+    entityKey: string,
+    entityId: string,
+    def: EntityDefinitionWithTemplate,
+    suggestedMappings: Partial<EntityMappings>
+  ): void {
+    const category = def.category;
+
+    if (category === 'sensor') {
+      // Core sensors go at the root with Entity suffix for legacy compatibility
+      const legacyKey = entityKey.endsWith('Entity') ? entityKey : `${entityKey}Entity`;
+      (suggestedMappings as Record<string, unknown>)[legacyKey] = entityId;
+    } else if (category === 'setting') {
+      // Settings go into settingsEntities
+      if (suggestedMappings.settingsEntities) {
+        suggestedMappings.settingsEntities[entityKey] = entityId;
+      }
+    } else if (category === 'zone') {
+      // Zone entities - use zoneType and zoneIndex to determine placement
+      this.placeZoneEntity(entityKey, entityId, def, suggestedMappings);
+    } else if (category === 'tracking') {
+      // Tracking targets - use targetIndex and property
+      this.placeTrackingEntity(entityKey, entityId, def, suggestedMappings);
+    }
+  }
+
+  /**
+   * Place a zone entity into the correct nested structure.
+   */
+  private placeZoneEntity(
+    entityKey: string,
+    entityId: string,
+    def: EntityDefinitionWithTemplate,
+    suggestedMappings: Partial<EntityMappings>
+  ): void {
+    const zoneType = def.zoneType;
+    const zoneIndex = def.zoneIndex ?? 1;
+    const coord = def.coord;
+
+    // Cast to Record for dynamic key access
+    const zoneConfig = suggestedMappings.zoneConfigEntities as Record<string, ZoneEntitySet | undefined>;
+    const exclusionConfig = suggestedMappings.exclusionZoneConfigEntities as Record<string, ZoneEntitySet | undefined>;
+    const entryConfig = suggestedMappings.entryZoneConfigEntities as Record<string, ZoneEntitySet | undefined>;
+    const polygonZones = suggestedMappings.polygonZoneEntities as Record<string, string | undefined>;
+    const polygonExclusions = suggestedMappings.polygonExclusionEntities as Record<string, string | undefined>;
+    const polygonEntries = suggestedMappings.polygonEntryEntities as Record<string, string | undefined>;
+
+    if (zoneType === 'regular' && coord) {
+      const zoneKey = `zone${zoneIndex}`;
+      if (!zoneConfig[zoneKey]) {
+        zoneConfig[zoneKey] = {} as ZoneEntitySet;
+      }
+      (zoneConfig[zoneKey] as unknown as Record<string, string>)[coord] = entityId;
+    } else if (zoneType === 'exclusion' && coord) {
+      const zoneKey = `exclusion${zoneIndex}`;
+      if (!exclusionConfig[zoneKey]) {
+        exclusionConfig[zoneKey] = {} as ZoneEntitySet;
+      }
+      (exclusionConfig[zoneKey] as unknown as Record<string, string>)[coord] = entityId;
+    } else if (zoneType === 'entry' && coord) {
+      const zoneKey = `entry${zoneIndex}`;
+      if (!entryConfig[zoneKey]) {
+        entryConfig[zoneKey] = {} as ZoneEntitySet;
+      }
+      (entryConfig[zoneKey] as unknown as Record<string, string>)[coord] = entityId;
+    } else if (zoneType === 'polygon') {
+      polygonZones[`zone${zoneIndex}`] = entityId;
+    } else if (zoneType === 'polygonExclusion') {
+      polygonExclusions[`exclusion${zoneIndex}`] = entityId;
+    } else if (zoneType === 'polygonEntry') {
+      polygonEntries[`entry${zoneIndex}`] = entityId;
+    }
+  }
+
+  /**
+   * Place a tracking entity into the correct nested structure.
+   */
+  private placeTrackingEntity(
+    entityKey: string,
+    entityId: string,
+    def: EntityDefinitionWithTemplate,
+    suggestedMappings: Partial<EntityMappings>
+  ): void {
+    const targetIndex = def.targetIndex ?? 1;
+    const property = def.property;
+
+    if (!property) return;
+
+    // Cast to Record for dynamic key access
+    const trackingTargets = suggestedMappings.trackingTargets as Record<string, TargetEntitySet | undefined>;
+    const targetKey = `target${targetIndex}`;
+
+    if (!trackingTargets[targetKey]) {
+      trackingTargets[targetKey] = {} as TargetEntitySet;
+    }
+    (trackingTargets[targetKey] as unknown as Record<string, string>)[property] = entityId;
+  }
+
+  /**
+   * Discover entities using legacy entityMap format.
+   * This is the fallback for profiles without the new entities metadata.
+   */
+  private discoverUsingLegacyEntityMap(
+    entityMap: Record<string, unknown>,
+    capabilities: Record<string, unknown> | undefined,
+    deviceEntities: EntityRegistryEntry[],
+    entitiesByDomain: Map<string, EntityRegistryEntry[]>,
+    results: EntityMatchResult[],
+    suggestedMappings: Partial<EntityMappings>
+  ): void {
+    // Define optional entity keys - these are add-on sensors that not all devices have
+    const optionalEntityKeys = new Set([
+      'co2Entity', 'pirEntity', 'vocEntity', 'pm25Entity', 'pressureEntity', 'lightEntity',
+    ]);
+
+    // Process flat entity mappings (presenceEntity, temperatureEntity, etc.)
+    for (const [key, template] of Object.entries(entityMap)) {
+      if (typeof template === 'string') {
+        const isOptional = optionalEntityKeys.has(key);
+        const result = this.matchTemplate(key, template, deviceEntities, entitiesByDomain, isOptional);
+        results.push(result);
+        if (result.matchedEntityId) {
+          (suggestedMappings as Record<string, unknown>)[key] = result.matchedEntityId;
+        }
+      }
+    }
+
+    // Process zone config entities
+    if (entityMap.zoneConfigEntities && typeof entityMap.zoneConfigEntities === 'object') {
+      suggestedMappings.zoneConfigEntities = {};
+      const zoneConfig = entityMap.zoneConfigEntities as Record<string, Record<string, string>>;
+      for (const [zoneKey, zoneEntities] of Object.entries(zoneConfig)) {
+        const zoneSet = this.matchZoneEntitySet(`zoneConfigEntities.${zoneKey}`, zoneEntities, deviceEntities, entitiesByDomain, results);
+        if (zoneSet) {
+          (suggestedMappings.zoneConfigEntities as Record<string, ZoneEntitySet>)[zoneKey] = zoneSet;
+        }
+      }
+    }
+
+    // Process exclusion zone entities
+    if (entityMap.exclusionZoneConfigEntities && typeof entityMap.exclusionZoneConfigEntities === 'object') {
+      suggestedMappings.exclusionZoneConfigEntities = {};
+      const exclusionConfig = entityMap.exclusionZoneConfigEntities as Record<string, Record<string, string>>;
+      for (const [zoneKey, zoneEntities] of Object.entries(exclusionConfig)) {
+        const zoneSet = this.matchZoneEntitySet(`exclusionZoneConfigEntities.${zoneKey}`, zoneEntities, deviceEntities, entitiesByDomain, results);
+        if (zoneSet) {
+          (suggestedMappings.exclusionZoneConfigEntities as Record<string, ZoneEntitySet>)[zoneKey] = zoneSet;
+        }
+      }
+    }
+
+    // Process entry zone entities
+    if (entityMap.entryZoneConfigEntities && typeof entityMap.entryZoneConfigEntities === 'object') {
+      suggestedMappings.entryZoneConfigEntities = {};
+      const entryConfig = entityMap.entryZoneConfigEntities as Record<string, Record<string, string>>;
+      for (const [zoneKey, zoneEntities] of Object.entries(entryConfig)) {
+        const zoneSet = this.matchZoneEntitySet(`entryZoneConfigEntities.${zoneKey}`, zoneEntities, deviceEntities, entitiesByDomain, results);
+        if (zoneSet) {
+          (suggestedMappings.entryZoneConfigEntities as Record<string, ZoneEntitySet>)[zoneKey] = zoneSet;
+        }
+      }
+    }
+
+    // Process polygon zone entities
+    if (entityMap.polygonZoneEntities && typeof entityMap.polygonZoneEntities === 'object') {
+      suggestedMappings.polygonZoneEntities = {};
+      const polygonConfig = entityMap.polygonZoneEntities as Record<string, string>;
+      for (const [zoneKey, template] of Object.entries(polygonConfig)) {
+        const result = this.matchTemplate(`polygonZoneEntities.${zoneKey}`, template, deviceEntities, entitiesByDomain, true);
+        results.push(result);
+        if (result.matchedEntityId) {
+          (suggestedMappings.polygonZoneEntities as Record<string, string>)[zoneKey] = result.matchedEntityId;
+        }
+      }
+    }
+
+    // Process polygon exclusion entities
+    if (entityMap.polygonExclusionEntities && typeof entityMap.polygonExclusionEntities === 'object') {
+      suggestedMappings.polygonExclusionEntities = {};
+      const polygonConfig = entityMap.polygonExclusionEntities as Record<string, string>;
+      for (const [zoneKey, template] of Object.entries(polygonConfig)) {
+        const result = this.matchTemplate(`polygonExclusionEntities.${zoneKey}`, template, deviceEntities, entitiesByDomain, true);
+        results.push(result);
+        if (result.matchedEntityId) {
+          (suggestedMappings.polygonExclusionEntities as Record<string, string>)[zoneKey] = result.matchedEntityId;
+        }
+      }
+    }
+
+    // Process polygon entry entities
+    if (entityMap.polygonEntryEntities && typeof entityMap.polygonEntryEntities === 'object') {
+      suggestedMappings.polygonEntryEntities = {};
+      const polygonConfig = entityMap.polygonEntryEntities as Record<string, string>;
+      for (const [zoneKey, template] of Object.entries(polygonConfig)) {
+        const result = this.matchTemplate(`polygonEntryEntities.${zoneKey}`, template, deviceEntities, entitiesByDomain, true);
+        results.push(result);
+        if (result.matchedEntityId) {
+          (suggestedMappings.polygonEntryEntities as Record<string, string>)[zoneKey] = result.matchedEntityId;
+        }
+      }
+    }
+
+    // Add tracking target entities if tracking is supported
+    if (capabilities?.tracking) {
+      suggestedMappings.trackingTargets = {};
+      for (let i = 1; i <= 3; i++) {
+        const targetSet = this.matchTrackingTargetEntities(`target${i}`, i, deviceEntities, entitiesByDomain, results);
+        if (targetSet) {
+          (suggestedMappings.trackingTargets as Record<string, TargetEntitySet>)[`target${i}`] = targetSet;
+        }
+      }
+    }
+
+    // Process settings entities
+    if (entityMap.settingsEntities && typeof entityMap.settingsEntities === 'object') {
+      suggestedMappings.settingsEntities = {};
+      const settingsConfig = entityMap.settingsEntities as Record<string, string>;
+      for (const [settingKey, template] of Object.entries(settingsConfig)) {
+        if (typeof template === 'string') {
+          const result = this.matchTemplate(`settingsEntities.${settingKey}`, template, deviceEntities, entitiesByDomain, true);
+          results.push(result);
+          if (result.matchedEntityId) {
+            (suggestedMappings.settingsEntities as Record<string, string>)[settingKey] = result.matchedEntityId;
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Validate that a set of entity mappings are accessible in Home Assistant.
    */
   async validateMappings(
@@ -508,5 +702,182 @@ export class EntityDiscoveryService {
       valid: errors.length === 0,
       errors,
     };
+  }
+
+  /**
+   * Discover entities and save to device mapping storage.
+   * This is the primary method for wiring discovery to the device mapping store.
+   */
+  async discoverAndSave(
+    deviceId: string,
+    profileId: string,
+    deviceName: string
+  ): Promise<{ mapping: DeviceMapping; discovery: DiscoveryResult }> {
+    logger.info({ deviceId, profileId, deviceName }, 'Running discoverAndSave');
+
+    // Run discovery
+    const discovery = await this.discoverEntities(deviceId, profileId);
+
+    // Convert suggestedMappings (nested EntityMappings) to flat format
+    const flatMappings = this.convertToFlatMappings(discovery.suggestedMappings);
+
+    // Build DeviceMapping object
+    const mapping: DeviceMapping = {
+      deviceId,
+      profileId,
+      deviceName,
+      discoveredAt: new Date().toISOString(),
+      lastUpdated: new Date().toISOString(),
+      confirmedByUser: false, // Not yet confirmed by user
+      autoMatchedCount: discovery.matchedCount,
+      manuallyMappedCount: 0,
+      mappings: flatMappings,
+      unmappedEntities: discovery.results
+        .filter(r => r.matchedEntityId === null && !r.isOptional)
+        .map(r => r.templateKey),
+    };
+
+    // Save to device storage
+    await deviceMappingStorage.saveMapping(mapping);
+
+    logger.info(
+      { deviceId, mappingCount: Object.keys(flatMappings).length, matchedCount: discovery.matchedCount },
+      'Discovery complete and saved to device storage'
+    );
+
+    return { mapping, discovery };
+  }
+
+  /**
+   * Convert nested EntityMappings to flat Record<string, string> format.
+   * This is the same logic used in migration but exposed for discovery.
+   */
+  private convertToFlatMappings(em: Partial<EntityMappings>): Record<string, string> {
+    const mappings: Record<string, string> = {};
+
+    if (!em) return mappings;
+
+    // Core entities - strip 'Entity' suffix for flat key
+    if (em.presenceEntity) mappings['presence'] = em.presenceEntity;
+    if (em.mmwaveEntity) mappings['mmwave'] = em.mmwaveEntity;
+    if (em.pirEntity) mappings['pir'] = em.pirEntity;
+    if (em.temperatureEntity) mappings['temperature'] = em.temperatureEntity;
+    if (em.humidityEntity) mappings['humidity'] = em.humidityEntity;
+    if (em.illuminanceEntity) mappings['illuminance'] = em.illuminanceEntity;
+    if (em.co2Entity) mappings['co2'] = em.co2Entity;
+
+    // EP1-specific entities
+    if (em.distanceEntity) mappings['distance'] = em.distanceEntity;
+    if (em.speedEntity) mappings['speed'] = em.speedEntity;
+    if (em.energyEntity) mappings['energy'] = em.energyEntity;
+    if (em.targetCountEntity) mappings['targetCount'] = em.targetCountEntity;
+    if (em.modeEntity) mappings['mode'] = em.modeEntity;
+
+    // Configuration entities
+    if (em.maxDistanceEntity) mappings['maxDistance'] = em.maxDistanceEntity;
+    if (em.installationAngleEntity) mappings['installationAngle'] = em.installationAngleEntity;
+    if (em.polygonZonesEnabledEntity) mappings['polygonZonesEnabled'] = em.polygonZonesEnabledEntity;
+    if (em.trackingTargetCountEntity) mappings['trackingTargetCount'] = em.trackingTargetCountEntity;
+
+    // Zone config entities (rectangular)
+    this.flattenZoneEntitiesToFlat(mappings, em.zoneConfigEntities, 'zone');
+    this.flattenZoneEntitiesToFlat(mappings, em.exclusionZoneConfigEntities, 'exclusion');
+    this.flattenZoneEntitiesToFlat(mappings, em.entryZoneConfigEntities, 'entry');
+
+    // Polygon zone entities
+    this.flattenPolygonEntitiesToFlat(mappings, em.polygonZoneEntities, 'polygonZone');
+    this.flattenPolygonEntitiesToFlat(mappings, em.polygonExclusionEntities, 'polygonExclusion');
+    this.flattenPolygonEntitiesToFlat(mappings, em.polygonEntryEntities, 'polygonEntry');
+
+    // Tracking targets
+    this.flattenTrackingTargetsToFlat(mappings, em.trackingTargets);
+
+    // Settings entities (already flat in EntityMappings)
+    if (em.settingsEntities) {
+      for (const [key, value] of Object.entries(em.settingsEntities)) {
+        if (typeof value === 'string') {
+          mappings[key] = value;
+        }
+      }
+    }
+
+    return mappings;
+  }
+
+  /**
+   * Flatten zone coordinate entities into flat mappings.
+   */
+  private flattenZoneEntitiesToFlat(
+    mappings: Record<string, string>,
+    zones: Record<string, ZoneEntitySet | undefined> | undefined,
+    prefix: 'zone' | 'exclusion' | 'entry'
+  ): void {
+    if (!zones) return;
+
+    const keyToIndex: Record<string, number> = {
+      zone1: 1, zone2: 2, zone3: 3, zone4: 4,
+      exclusion1: 1, exclusion2: 2,
+      entry1: 1, entry2: 2,
+    };
+
+    for (const [zoneKey, zoneSet] of Object.entries(zones)) {
+      if (!zoneSet) continue;
+
+      const index = keyToIndex[zoneKey] ?? (parseInt(zoneKey.replace(/\D/g, ''), 10) || 1);
+
+      if (zoneSet.beginX) mappings[`${prefix}${index}BeginX`] = zoneSet.beginX;
+      if (zoneSet.endX) mappings[`${prefix}${index}EndX`] = zoneSet.endX;
+      if (zoneSet.beginY) mappings[`${prefix}${index}BeginY`] = zoneSet.beginY;
+      if (zoneSet.endY) mappings[`${prefix}${index}EndY`] = zoneSet.endY;
+      if (zoneSet.offDelay) mappings[`${prefix}${index}OffDelay`] = zoneSet.offDelay;
+    }
+  }
+
+  /**
+   * Flatten polygon zone entities into flat mappings.
+   */
+  private flattenPolygonEntitiesToFlat(
+    mappings: Record<string, string>,
+    polygons: Record<string, string | undefined> | undefined,
+    prefix: 'polygonZone' | 'polygonExclusion' | 'polygonEntry'
+  ): void {
+    if (!polygons) return;
+
+    const keyToIndex: Record<string, number> = {
+      zone1: 1, zone2: 2, zone3: 3, zone4: 4,
+      exclusion1: 1, exclusion2: 2,
+      entry1: 1, entry2: 2,
+    };
+
+    for (const [key, entityId] of Object.entries(polygons)) {
+      if (!entityId) continue;
+
+      const index = keyToIndex[key] ?? (parseInt(key.replace(/\D/g, ''), 10) || 1);
+      mappings[`${prefix}${index}`] = entityId;
+    }
+  }
+
+  /**
+   * Flatten tracking target entities into flat mappings.
+   */
+  private flattenTrackingTargetsToFlat(
+    mappings: Record<string, string>,
+    targets: Record<string, TargetEntitySet | undefined> | undefined
+  ): void {
+    if (!targets) return;
+
+    for (const [targetKey, targetSet] of Object.entries(targets)) {
+      if (!targetSet) continue;
+
+      const index = parseInt(targetKey.replace(/\D/g, ''), 10) || 1;
+
+      if (targetSet.x) mappings[`target${index}X`] = targetSet.x;
+      if (targetSet.y) mappings[`target${index}Y`] = targetSet.y;
+      if (targetSet.speed) mappings[`target${index}Speed`] = targetSet.speed;
+      if (targetSet.distance) mappings[`target${index}Distance`] = targetSet.distance;
+      if (targetSet.angle) mappings[`target${index}Angle`] = targetSet.angle;
+      if (targetSet.resolution) mappings[`target${index}Resolution`] = targetSet.resolution;
+      if (targetSet.active) mappings[`target${index}Active`] = targetSet.active;
+    }
   }
 }

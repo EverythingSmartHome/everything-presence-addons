@@ -9,6 +9,8 @@ import {
   groupMatchResultsByCategory,
   getTemplateKeyLabel,
 } from '../api/entityDiscovery';
+import { saveDeviceMapping, DeviceMapping } from '../api/deviceMappings';
+import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
 interface EntityDiscoveryProps {
   deviceId: string;
@@ -29,7 +31,9 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
   onCancel,
   onBack,
 }) => {
+  const { refreshMapping } = useDeviceMappings();
   const [status, setStatus] = useState<DiscoveryStatus>('loading');
+  const [saving, setSaving] = useState(false);
   const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
@@ -136,9 +140,141 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     return mappings;
   };
 
-  const handleContinue = () => {
-    const mappings = buildFinalMappings();
-    onComplete(mappings);
+  const handleContinue = async () => {
+    setSaving(true);
+    try {
+      const mappings = buildFinalMappings();
+
+      // Convert EntityMappings to flat DeviceMapping format for storage
+      const flatMappings: Record<string, string> = {};
+
+      // Known metadata keys that are NOT entity IDs
+      const metadataKeys = new Set(['discoveredAt', 'autoMatchedCount', 'manuallyMappedCount']);
+
+      // Extract flat entity mappings from the nested structure
+      for (const [key, value] of Object.entries(mappings)) {
+        // Skip metadata keys
+        if (metadataKeys.has(key)) continue;
+
+        // Capture ALL string values that look like entity IDs (contain a dot like "sensor.device_name")
+        // This handles both legacy keys (presenceEntity) and new format keys (maxDistance, polygonZonesEnabled)
+        if (typeof value === 'string' && value.includes('.')) {
+          flatMappings[key] = value;
+        }
+      }
+
+      // Handle zone config entities
+      if (mappings.zoneConfigEntities) {
+        for (const [zoneKey, zoneData] of Object.entries(mappings.zoneConfigEntities)) {
+          if (zoneData && typeof zoneData === 'object') {
+            for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
+              if (entityId) {
+                flatMappings[`zoneConfigEntities.${zoneKey}.${prop}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Handle exclusion zone entities
+      if (mappings.exclusionZoneEntities) {
+        for (const [zoneKey, zoneData] of Object.entries(mappings.exclusionZoneEntities)) {
+          if (zoneData && typeof zoneData === 'object') {
+            for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
+              if (entityId) {
+                flatMappings[`exclusionZoneEntities.${zoneKey}.${prop}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Handle entry zone entities
+      if (mappings.entryZoneEntities) {
+        for (const [zoneKey, zoneData] of Object.entries(mappings.entryZoneEntities)) {
+          if (zoneData && typeof zoneData === 'object') {
+            for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
+              if (entityId) {
+                flatMappings[`entryZoneEntities.${zoneKey}.${prop}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Handle polygon zone entities
+      if (mappings.polygonZoneEntities) {
+        for (const [zoneKey, entityId] of Object.entries(mappings.polygonZoneEntities)) {
+          if (entityId) {
+            flatMappings[`polygonZoneEntities.${zoneKey}`] = entityId;
+          }
+        }
+      }
+
+      // Handle polygon exclusion entities
+      if (mappings.polygonExclusionEntities) {
+        for (const [zoneKey, entityId] of Object.entries(mappings.polygonExclusionEntities)) {
+          if (entityId) {
+            flatMappings[`polygonExclusionEntities.${zoneKey}`] = entityId;
+          }
+        }
+      }
+
+      // Handle polygon entry entities
+      if (mappings.polygonEntryEntities) {
+        for (const [zoneKey, entityId] of Object.entries(mappings.polygonEntryEntities)) {
+          if (entityId) {
+            flatMappings[`polygonEntryEntities.${zoneKey}`] = entityId;
+          }
+        }
+      }
+
+      // Handle tracking targets
+      if (mappings.trackingTargets) {
+        for (const [targetKey, targetData] of Object.entries(mappings.trackingTargets)) {
+          if (targetData && typeof targetData === 'object') {
+            for (const [prop, entityId] of Object.entries(targetData as unknown as Record<string, string>)) {
+              if (entityId) {
+                flatMappings[`trackingTargets.${targetKey}.${prop}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Build device mapping for storage
+      const deviceMapping: DeviceMapping = {
+        deviceId,
+        profileId,
+        deviceName,
+        discoveredAt: mappings.discoveredAt || new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        confirmedByUser: true, // User confirmed by clicking Continue
+        autoMatchedCount: mappings.autoMatchedCount || 0,
+        manuallyMappedCount: mappings.manuallyMappedCount || 0,
+        mappings: flatMappings,
+        unmappedEntities: discoveryResult?.results
+          .filter(r => !r.matchedEntityId && !manualOverrides[r.templateKey])
+          .map(r => r.templateKey) || [],
+      };
+
+      // Save to device storage
+      await saveDeviceMapping(deviceMapping);
+
+      // Refresh the context cache
+      await refreshMapping(deviceId);
+
+      // Continue with the legacy flow
+      onComplete(mappings);
+    } catch (err) {
+      console.error('Failed to save device mapping:', err);
+      // Still continue with the flow even if saving fails
+      // The legacy room.entityMappings will be used as fallback
+      const mappings = buildFinalMappings();
+      onComplete(mappings);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const toggleGroup = (groupName: string) => {
@@ -403,14 +539,14 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         </button>
         <button
           onClick={handleContinue}
-          disabled={!canContinue}
+          disabled={!canContinue || saving}
           className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-            canContinue
+            canContinue && !saving
               ? 'bg-aqua-500 hover:bg-aqua-400 text-slate-900'
               : 'bg-slate-700 text-slate-500 cursor-not-allowed'
           }`}
         >
-          Continue
+          {saving ? 'Saving...' : 'Continue'}
         </button>
       </div>
     </div>
