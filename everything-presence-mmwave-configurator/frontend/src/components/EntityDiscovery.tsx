@@ -163,79 +163,99 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         }
       }
 
-      // Handle zone config entities
+      // Handle zone config entities - convert 'zone1.beginX' -> 'zone1BeginX' to match profile entities keys
       if (mappings.zoneConfigEntities) {
         for (const [zoneKey, zoneData] of Object.entries(mappings.zoneConfigEntities)) {
           if (zoneData && typeof zoneData === 'object') {
+            // Extract zone number from 'zone1', 'zone2', etc.
+            const zoneNum = zoneKey.replace('zone', '');
             for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
               if (entityId) {
-                flatMappings[`zoneConfigEntities.${zoneKey}.${prop}`] = entityId;
+                // Convert 'beginX' to 'BeginX', combine: zone1BeginX
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`zone${zoneNum}${capitalizedProp}`] = entityId;
               }
             }
           }
         }
       }
 
-      // Handle exclusion zone entities
+      // Handle exclusion zone entities - convert 'exclusion1.beginX' -> 'exclusion1BeginX'
       if (mappings.exclusionZoneEntities) {
         for (const [zoneKey, zoneData] of Object.entries(mappings.exclusionZoneEntities)) {
           if (zoneData && typeof zoneData === 'object') {
+            // Extract exclusion number from 'exclusion1', 'exclusion2', etc.
+            const exclusionNum = zoneKey.replace('exclusion', '');
             for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
               if (entityId) {
-                flatMappings[`exclusionZoneEntities.${zoneKey}.${prop}`] = entityId;
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`exclusion${exclusionNum}${capitalizedProp}`] = entityId;
               }
             }
           }
         }
       }
 
-      // Handle entry zone entities
+      // Handle entry zone entities - convert 'entry1.beginX' -> 'entry1BeginX'
       if (mappings.entryZoneEntities) {
         for (const [zoneKey, zoneData] of Object.entries(mappings.entryZoneEntities)) {
           if (zoneData && typeof zoneData === 'object') {
+            // Extract entry number from 'entry1', 'entry2', etc.
+            const entryNum = zoneKey.replace('entry', '');
             for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
               if (entityId) {
-                flatMappings[`entryZoneEntities.${zoneKey}.${prop}`] = entityId;
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`entry${entryNum}${capitalizedProp}`] = entityId;
               }
             }
           }
         }
       }
 
-      // Handle polygon zone entities
+      // Handle polygon zone entities - convert 'zone1' -> 'polygonZone1' to match profile entities keys
       if (mappings.polygonZoneEntities) {
         for (const [zoneKey, entityId] of Object.entries(mappings.polygonZoneEntities)) {
           if (entityId) {
-            flatMappings[`polygonZoneEntities.${zoneKey}`] = entityId;
+            // Convert 'zone1' to 'polygonZone1', 'zone2' to 'polygonZone2', etc.
+            const index = zoneKey.replace('zone', '');
+            flatMappings[`polygonZone${index}`] = entityId;
           }
         }
       }
 
-      // Handle polygon exclusion entities
+      // Handle polygon exclusion entities - convert 'exclusion1' -> 'polygonExclusion1'
       if (mappings.polygonExclusionEntities) {
         for (const [zoneKey, entityId] of Object.entries(mappings.polygonExclusionEntities)) {
           if (entityId) {
-            flatMappings[`polygonExclusionEntities.${zoneKey}`] = entityId;
+            // Convert 'exclusion1' to 'polygonExclusion1', etc.
+            const index = zoneKey.replace('exclusion', '');
+            flatMappings[`polygonExclusion${index}`] = entityId;
           }
         }
       }
 
-      // Handle polygon entry entities
+      // Handle polygon entry entities - convert 'entry1' -> 'polygonEntry1'
       if (mappings.polygonEntryEntities) {
         for (const [zoneKey, entityId] of Object.entries(mappings.polygonEntryEntities)) {
           if (entityId) {
-            flatMappings[`polygonEntryEntities.${zoneKey}`] = entityId;
+            // Convert 'entry1' to 'polygonEntry1', etc.
+            const index = zoneKey.replace('entry', '');
+            flatMappings[`polygonEntry${index}`] = entityId;
           }
         }
       }
 
-      // Handle tracking targets
+      // Handle tracking targets - convert 'target1.x' -> 'target1X' to match profile entities keys
       if (mappings.trackingTargets) {
         for (const [targetKey, targetData] of Object.entries(mappings.trackingTargets)) {
           if (targetData && typeof targetData === 'object') {
+            // Extract target number from 'target1', 'target2', etc.
+            const targetNum = targetKey.replace('target', '');
             for (const [prop, entityId] of Object.entries(targetData as unknown as Record<string, string>)) {
               if (entityId) {
-                flatMappings[`trackingTargets.${targetKey}.${prop}`] = entityId;
+                // Convert 'x' to 'X', 'speed' to 'Speed', etc. and combine: target1X, target1Speed
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`target${targetNum}${capitalizedProp}`] = entityId;
               }
             }
           }
