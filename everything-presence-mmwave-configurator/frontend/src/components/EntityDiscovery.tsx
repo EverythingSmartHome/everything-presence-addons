@@ -242,6 +242,16 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         }
       }
 
+      // Handle settings entities - these are stored with their key directly (e.g., 'maxDistance')
+      // so deviceEntityService.getSettingsGrouped() can find them by key
+      if (mappings.settingsEntities) {
+        for (const [settingKey, entityId] of Object.entries(mappings.settingsEntities)) {
+          if (entityId) {
+            flatMappings[settingKey] = entityId;
+          }
+        }
+      }
+
       // Build device mapping for storage
       const deviceMapping: DeviceMapping = {
         deviceId,
