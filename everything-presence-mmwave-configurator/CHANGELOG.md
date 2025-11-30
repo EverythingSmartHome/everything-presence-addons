@@ -1,3 +1,6 @@
+## 2.0.3
+- Refactor to separate device entity mappings from room configs, making device mappings the single source of truth stored at the device level by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
 ## 2.0.2
 
 - Fix issue where entities were not correctly discovered during setup. by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
