@@ -157,6 +157,29 @@ export function createLiveRouter(
       if (capabilities?.tracking) {
         const targets: any[] = [];
 
+        // Helper to convert imperial units to mm
+        const convertToMm = (value: number, unit: string | undefined): number => {
+          if (!unit) return value;
+          const unitLower = unit.toLowerCase();
+          // Convert inches to mm (1 inch = 25.4 mm)
+          if (unitLower === 'in' || unitLower === 'inch' || unitLower === 'inches' || unitLower === '"') {
+            return value * 25.4;
+          }
+          // Convert feet to mm (1 foot = 304.8 mm)
+          if (unitLower === 'ft' || unitLower === 'foot' || unitLower === 'feet' || unitLower === "'") {
+            return value * 304.8;
+          }
+          // Convert cm to mm
+          if (unitLower === 'cm') {
+            return value * 10;
+          }
+          // Convert m to mm
+          if (unitLower === 'm') {
+            return value * 1000;
+          }
+          return value;
+        };
+
         // Helper to get target entity state - tries device mapping first, then legacy
         const getTargetState = async (targetNum: number, property: 'x' | 'y' | 'speed' | 'resolution' | 'angle' | 'distance' | 'active') => {
           let entityId: string | null = null;
@@ -190,24 +213,35 @@ export function createLiveRouter(
             target.active = activeState.state === 'on';
           }
 
-          // Fetch coordinates
+          // Fetch coordinates with unit conversion
           const xState = await getTargetState(i, 'x');
           if (xState && xState.state !== 'unavailable' && xState.state !== 'unknown') {
-            target.x = parseFloat(xState.state);
-            if (isNaN(target.x)) target.x = null;
+            let x = parseFloat(xState.state);
+            if (!isNaN(x)) {
+              // Convert to mm if unit is imperial
+              x = convertToMm(x, xState.attributes?.unit_of_measurement as string | undefined);
+              target.x = x;
+            }
           }
 
           const yState = await getTargetState(i, 'y');
           if (yState && yState.state !== 'unavailable' && yState.state !== 'unknown') {
-            target.y = parseFloat(yState.state);
-            if (isNaN(target.y)) target.y = null;
+            let y = parseFloat(yState.state);
+            if (!isNaN(y)) {
+              // Convert to mm if unit is imperial
+              y = convertToMm(y, yState.attributes?.unit_of_measurement as string | undefined);
+              target.y = y;
+            }
           }
 
-          // Fetch additional target data
+          // Fetch additional target data with unit conversion for distance
           const distanceState = await getTargetState(i, 'distance');
           if (distanceState && distanceState.state !== 'unavailable' && distanceState.state !== 'unknown') {
-            target.distance = parseFloat(distanceState.state);
-            if (isNaN(target.distance)) target.distance = null;
+            let distance = parseFloat(distanceState.state);
+            if (!isNaN(distance)) {
+              distance = convertToMm(distance, distanceState.attributes?.unit_of_measurement as string | undefined);
+              target.distance = distance;
+            }
           }
 
           const speedState = await getTargetState(i, 'speed');

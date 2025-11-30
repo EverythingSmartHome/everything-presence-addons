@@ -196,9 +196,9 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         }
       }
 
-      // Handle entry zone entities - convert 'entry1.beginX' -> 'entry1BeginX'
-      if (mappings.entryZoneEntities) {
-        for (const [zoneKey, zoneData] of Object.entries(mappings.entryZoneEntities)) {
+      // Handle entry zone config entities - convert 'entry1.beginX' -> 'entry1BeginX'
+      if (mappings.entryZoneConfigEntities) {
+        for (const [zoneKey, zoneData] of Object.entries(mappings.entryZoneConfigEntities)) {
           if (zoneData && typeof zoneData === 'object') {
             // Extract entry number from 'entry1', 'entry2', etc.
             const entryNum = zoneKey.replace('entry', '');

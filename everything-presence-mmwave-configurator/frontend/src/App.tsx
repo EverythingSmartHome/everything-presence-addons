@@ -249,9 +249,30 @@ function App() {
                       updated.targets.push(target);
                     }
 
-                    // Update field
-                    const value = parseFloat(message.state);
+                    // Update field with unit conversion for coordinates/distances
+                    let value = parseFloat(message.state);
                     if (!isNaN(value)) {
+                      // Convert imperial units to mm if needed (for x, y, distance fields)
+                      if ((field === 'x' || field === 'y' || field === 'distance') && message.attributes?.unit_of_measurement) {
+                        const unit = message.attributes.unit_of_measurement as string;
+                        const unitLower = unit.toLowerCase();
+                        // Convert inches to mm (1 inch = 25.4 mm)
+                        if (unitLower === 'in' || unitLower === 'inch' || unitLower === 'inches' || unitLower === '"') {
+                          value = value * 25.4;
+                        }
+                        // Convert feet to mm (1 foot = 304.8 mm)
+                        else if (unitLower === 'ft' || unitLower === 'foot' || unitLower === 'feet' || unitLower === "'") {
+                          value = value * 304.8;
+                        }
+                        // Convert cm to mm
+                        else if (unitLower === 'cm') {
+                          value = value * 10;
+                        }
+                        // Convert m to mm
+                        else if (unitLower === 'm') {
+                          value = value * 1000;
+                        }
+                      }
                       target[field] = value;
                     } else {
                       target[field] = null;
