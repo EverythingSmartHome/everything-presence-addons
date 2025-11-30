@@ -322,9 +322,19 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   }, [propTargetPositions, smoothTracking]);
 
   // Fetch existing zones from device when room is loaded
+  // Using refs to prevent re-fetching when entityMappings changes (which happens after zone sync)
+  const lastZonesFetchedRoomId = React.useRef<string | null>(null);
+  const lastZonesFetchedMappingsReady = React.useRef<boolean>(false);
   useEffect(() => {
     const loadZonesFromDevice = async () => {
       if (!selectedRoom || !selectedRoom.deviceId || !selectedRoom.profileId) {
+        return;
+      }
+
+      // Only fetch once per room, or when mappings become ready for the first time
+      const mappingsReady = !mappingLoading;
+      if (selectedRoom.id === lastZonesFetchedRoomId.current &&
+          lastZonesFetchedMappingsReady.current === mappingsReady) {
         return;
       }
 
@@ -338,6 +348,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       if (!entityNamePrefix) {
         return;
       }
+
+      // Mark as fetched before the async call to prevent duplicate requests
+      lastZonesFetchedRoomId.current = selectedRoom.id;
+      lastZonesFetchedMappingsReady.current = mappingsReady;
 
       try {
         // Skip entityMappings if device has valid mappings stored
@@ -365,13 +379,23 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, mappingLoading, deviceHasValidMappings, selectedRoom]);
 
   // Fetch polygon mode status when room changes
+  // Using refs to prevent re-fetching when entityMappings changes
+  const lastPolygonModeRoomId = React.useRef<string | null>(null);
+  const lastPolygonModeMappingsReady = React.useRef<boolean>(false);
   useEffect(() => {
     const loadPolygonModeStatus = async () => {
       if (!selectedRoom?.deviceId || !selectedRoom?.profileId) {
         setPolygonModeStatus({ supported: false, enabled: false });
+        return;
+      }
+
+      // Only fetch once per room, or when mappings become ready for the first time
+      const mappingsReady = !mappingLoading;
+      if (selectedRoom.id === lastPolygonModeRoomId.current &&
+          lastPolygonModeMappingsReady.current === mappingsReady) {
         return;
       }
 
@@ -385,6 +409,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         setPolygonModeStatus({ supported: false, enabled: false });
         return;
       }
+
+      // Mark as fetched before the async call
+      lastPolygonModeRoomId.current = selectedRoom.id;
+      lastPolygonModeMappingsReady.current = mappingsReady;
 
       try {
         // Skip entityMappings if device has valid mappings stored
@@ -402,13 +430,23 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, mappingLoading, deviceHasValidMappings, selectedRoom]);
 
   // Fetch polygon zones when polygon mode is enabled
+  // Using refs to prevent re-fetching when entityMappings changes
+  const lastPolygonZonesRoomId = React.useRef<string | null>(null);
+  const lastPolygonZonesEnabled = React.useRef<boolean>(false);
   useEffect(() => {
     const loadPolygonZones = async () => {
       if (!polygonModeStatus.enabled || !selectedRoom?.deviceId || !selectedRoom?.profileId) {
         setPolygonZones([]);
+        lastPolygonZonesEnabled.current = false;
+        return;
+      }
+
+      // Only fetch once per room when polygon mode becomes enabled
+      if (selectedRoom.id === lastPolygonZonesRoomId.current &&
+          lastPolygonZonesEnabled.current === polygonModeStatus.enabled) {
         return;
       }
 
@@ -422,6 +460,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         setPolygonZones([]);
         return;
       }
+
+      // Mark as fetched before the async call
+      lastPolygonZonesRoomId.current = selectedRoom.id;
+      lastPolygonZonesEnabled.current = polygonModeStatus.enabled;
 
       try {
         // Skip entityMappings if device has valid mappings stored
@@ -439,7 +481,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonZones();
-  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
+  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, deviceHasValidMappings, selectedRoom]);
 
   const handleAutoZoom = useCallback(() => {
     if (!selectedRoom || !selectedRoom.roomShell || !selectedRoom.roomShell.points.length) {
@@ -463,12 +505,15 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     setPanOffsetMm({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
   }, [selectedRoom, rangeMm]);
 
-  // Auto-zoom when room loads
+  // Auto-zoom when room changes (only on room ID change, not on every handleAutoZoom recreation)
+  // Using a ref to track if we've already auto-zoomed for this room
+  const lastAutoZoomedRoomId = React.useRef<string | null>(null);
   useEffect(() => {
-    if (selectedRoom?.roomShell?.points?.length) {
+    if (selectedRoom?.roomShell?.points?.length && selectedRoom.id !== lastAutoZoomedRoomId.current) {
+      lastAutoZoomedRoomId.current = selectedRoom.id;
       handleAutoZoom();
     }
-  }, [selectedRoom?.id, handleAutoZoom]);
+  }, [selectedRoom?.id, selectedRoom?.roomShell?.points?.length, handleAutoZoom]);
 
   // Calculate distance indicator position (for EP One)
   const distanceIndicatorPos = useMemo(() => {
