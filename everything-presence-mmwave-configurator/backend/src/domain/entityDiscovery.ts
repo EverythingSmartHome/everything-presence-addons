@@ -721,6 +721,9 @@ export class EntityDiscoveryService {
     // Convert suggestedMappings (nested EntityMappings) to flat format
     const flatMappings = this.convertToFlatMappings(discovery.suggestedMappings);
 
+    // Fetch unit_of_measurement for tracking entities (x/y coordinates)
+    const entityUnits = await this.fetchEntityUnits(flatMappings);
+
     // Build DeviceMapping object
     const mapping: DeviceMapping = {
       deviceId,
@@ -735,17 +738,64 @@ export class EntityDiscoveryService {
       unmappedEntities: discovery.results
         .filter(r => r.matchedEntityId === null && !r.isOptional)
         .map(r => r.templateKey),
+      entityUnits,
     };
 
     // Save to device storage
     await deviceMappingStorage.saveMapping(mapping);
 
     logger.info(
-      { deviceId, mappingCount: Object.keys(flatMappings).length, matchedCount: discovery.matchedCount },
+      { deviceId, mappingCount: Object.keys(flatMappings).length, matchedCount: discovery.matchedCount, entityUnits },
       'Discovery complete and saved to device storage'
     );
 
     return { mapping, discovery };
+  }
+
+  /**
+   * Fetch unit_of_measurement from Home Assistant for tracking coordinate entities.
+   * This is needed to handle imperial unit conversion (inches -> mm).
+   */
+  private async fetchEntityUnits(flatMappings: Record<string, string>): Promise<Record<string, string>> {
+    const entityUnits: Record<string, string> = {};
+
+    // Keys that represent coordinate/distance measurements needing unit conversion
+    const coordinateKeys = [
+      'target1X', 'target1Y', 'target2X', 'target2Y', 'target3X', 'target3Y',
+      'target1Distance', 'target2Distance', 'target3Distance',
+      'distance', 'maxDistance',
+    ];
+
+    const entityIdsToFetch: Array<{ key: string; entityId: string }> = [];
+
+    for (const key of coordinateKeys) {
+      const entityId = flatMappings[key];
+      if (entityId) {
+        entityIdsToFetch.push({ key, entityId });
+      }
+    }
+
+    if (entityIdsToFetch.length === 0) {
+      return entityUnits;
+    }
+
+    try {
+      // Batch fetch all entity states
+      const states = await this.readTransport.getStates(entityIdsToFetch.map(e => e.entityId));
+
+      for (const { key, entityId } of entityIdsToFetch) {
+        const state = states.get(entityId);
+        if (state?.attributes?.unit_of_measurement) {
+          const unit = state.attributes.unit_of_measurement as string;
+          entityUnits[key] = unit;
+          logger.debug({ key, entityId, unit }, 'Captured entity unit of measurement');
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to fetch entity units - proceeding without unit metadata');
+    }
+
+    return entityUnits;
   }
 
   /**

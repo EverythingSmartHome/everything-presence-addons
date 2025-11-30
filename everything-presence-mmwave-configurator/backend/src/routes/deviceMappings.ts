@@ -3,13 +3,19 @@ import { deviceMappingStorage, DeviceMapping } from '../config/deviceMappingStor
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { migrationService } from '../domain/migrationService';
 import { logger } from '../logger';
+import type { IHaReadTransport } from '../ha/readTransport';
+
+export interface DeviceMappingsRouterDependencies {
+  readTransport?: IHaReadTransport;
+}
 
 /**
  * Router for device entity mapping endpoints.
  * These endpoints manage the device-level entity mappings (the new preferred approach).
  */
-export const createDeviceMappingsRouter = (): Router => {
+export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependencies): Router => {
   const router = Router();
+  const readTransport = deps?.readTransport;
 
   /**
    * GET /api/device-mappings
@@ -64,6 +70,14 @@ export const createDeviceMappingsRouter = (): Router => {
       // Get existing mapping if it exists
       const existing = deviceMappingStorage.getMapping(deviceId);
 
+      // Fetch entity units if readTransport is available and mappings are provided
+      let entityUnits: Record<string, string> = mappingData.entityUnits ?? existing?.entityUnits ?? {};
+
+      // If we have new mappings and readTransport is available, fetch units for coordinate entities
+      if (mappingData.mappings && readTransport && Object.keys(entityUnits).length === 0) {
+        entityUnits = await fetchEntityUnits(mappingData.mappings, readTransport);
+      }
+
       // Build the mapping object
       const mapping: DeviceMapping = {
         deviceId,
@@ -76,11 +90,12 @@ export const createDeviceMappingsRouter = (): Router => {
         manuallyMappedCount: mappingData.manuallyMappedCount ?? existing?.manuallyMappedCount ?? 0,
         mappings: mappingData.mappings ?? existing?.mappings ?? {},
         unmappedEntities: mappingData.unmappedEntities ?? existing?.unmappedEntities ?? [],
+        entityUnits,
       };
 
       await deviceMappingStorage.saveMapping(mapping);
 
-      logger.info({ deviceId, mappingCount: Object.keys(mapping.mappings).length }, 'Device mapping updated');
+      logger.info({ deviceId, mappingCount: Object.keys(mapping.mappings).length, entityUnits }, 'Device mapping updated');
 
       return res.json({ mapping });
     } catch (error) {
@@ -246,3 +261,52 @@ export const createDeviceMappingsRouter = (): Router => {
 
   return router;
 };
+
+/**
+ * Fetch unit_of_measurement from Home Assistant for tracking coordinate entities.
+ * This is needed to handle imperial unit conversion (inches -> mm).
+ */
+async function fetchEntityUnits(
+  flatMappings: Record<string, string>,
+  readTransport: IHaReadTransport
+): Promise<Record<string, string>> {
+  const entityUnits: Record<string, string> = {};
+
+  // Keys that represent coordinate/distance measurements needing unit conversion
+  const coordinateKeys = [
+    'target1X', 'target1Y', 'target2X', 'target2Y', 'target3X', 'target3Y',
+    'target1Distance', 'target2Distance', 'target3Distance',
+    'distance', 'maxDistance',
+  ];
+
+  const entityIdsToFetch: Array<{ key: string; entityId: string }> = [];
+
+  for (const key of coordinateKeys) {
+    const entityId = flatMappings[key];
+    if (entityId) {
+      entityIdsToFetch.push({ key, entityId });
+    }
+  }
+
+  if (entityIdsToFetch.length === 0) {
+    return entityUnits;
+  }
+
+  try {
+    // Batch fetch all entity states
+    const states = await readTransport.getStates(entityIdsToFetch.map(e => e.entityId));
+
+    for (const { key, entityId } of entityIdsToFetch) {
+      const state = states.get(entityId);
+      if (state?.attributes?.unit_of_measurement) {
+        const unit = state.attributes.unit_of_measurement as string;
+        entityUnits[key] = unit;
+        logger.debug({ key, entityId, unit }, 'Captured entity unit of measurement');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to fetch entity units - proceeding without unit metadata');
+  }
+
+  return entityUnits;
+}

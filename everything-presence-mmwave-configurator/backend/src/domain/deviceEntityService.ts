@@ -435,6 +435,23 @@ class DeviceEntityServiceImpl {
   }
 
   /**
+   * Get the unit of measurement for a specific entity key.
+   * Returns null if no unit is stored.
+   */
+  getEntityUnit(deviceId: string, entityKey: string): string | null {
+    const mapping = deviceMappingStorage.getMapping(deviceId);
+    return mapping?.entityUnits?.[entityKey] || null;
+  }
+
+  /**
+   * Get all stored entity units for a device.
+   */
+  getEntityUnits(deviceId: string): Record<string, string> {
+    const mapping = deviceMappingStorage.getMapping(deviceId);
+    return mapping?.entityUnits || {};
+  }
+
+  /**
    * Get list of entity keys that are missing mappings.
    */
   getMissingEntities(deviceId: string): string[] {

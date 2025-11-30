@@ -53,6 +53,8 @@ export interface DeviceMapping {
   manuallyMappedCount: number;
   mappings: Record<string, string>;
   unmappedEntities: string[];
+  /** Unit of measurement for specific entities (e.g., "target1X" -> "in" or "mm") */
+  entityUnits?: Record<string, string>;
 }
 
 /**

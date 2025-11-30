@@ -27,6 +27,8 @@ export interface DeviceMapping {
   mappings: Record<string, string>;
   /** Entity IDs that exist on device but weren't matched to profile */
   unmappedEntities: string[];
+  /** Unit of measurement for specific entities (e.g., "target1X" -> "in" or "mm") */
+  entityUnits?: Record<string, string>;
 }
 
 // Use same base path as other storage
