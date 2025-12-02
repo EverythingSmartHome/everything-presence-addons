@@ -451,10 +451,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-white">{room.name}</div>
                       <div className="text-sm text-slate-400">
-                        {room.zones?.length || 0} zones configured
-                        {room.deviceId && <span className="ml-2">· Device linked</span>}
+                        {room.deviceId ? 'Device linked' : 'No device linked'}
+                        {room.roomShell?.points && room.roomShell.points.length > 0 && (
+                          <span className="ml-2">· Room outline set</span>
+                        )}
                         {room.furniture && room.furniture.length > 0 && (
-                          <span className="ml-2">· {room.furniture.length} furniture items</span>
+                          <span className="ml-2">· {room.furniture.length} furniture</span>
                         )}
                       </div>
                       {room.entityMappings ? (
