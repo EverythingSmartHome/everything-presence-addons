@@ -1443,14 +1443,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   </div>
                 )}
 
-          {/* Furniture Library Panel */}
-          {showFurnitureLibrary && (
-            <FurnitureLibrary
-              onSelect={handleAddFurniture}
-              onClose={() => setShowFurnitureLibrary(false)}
-            />
-          )}
-
           {/* Furniture Editor Panel */}
           {selectedFurniture && (
             <FurnitureEditor
@@ -1473,6 +1465,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             />
           )}
         </div>
+      )}
+
+      {/* Furniture Library Modal - outside canvas wrapper to prevent scroll interference */}
+      {showFurnitureLibrary && (
+        <FurnitureLibrary
+          onSelect={handleAddFurniture}
+          onClose={() => setShowFurnitureLibrary(false)}
+        />
       )}
     </div>
   );
