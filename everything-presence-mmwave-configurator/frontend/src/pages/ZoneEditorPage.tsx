@@ -155,17 +155,16 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     if (!selectedRoom) return allPossibleZones;
 
     const deviceZones = selectedRoom.zones ?? [];
-    const merged = [...allPossibleZones];
 
-    // Match device zones to slots by type and index
-    deviceZones.forEach((deviceZone) => {
-      const slot = merged.find(z => z.id === deviceZone.id && z.type === deviceZone.type);
-      if (slot) {
-        Object.assign(slot, { ...deviceZone, enabled: true });
+    // Create new objects to avoid mutating allPossibleZones
+    return allPossibleZones.map(slot => {
+      const deviceZone = deviceZones.find(z => z.id === slot.id && z.type === slot.type);
+      if (deviceZone) {
+        return { ...slot, ...deviceZone, enabled: true };
       }
+      // Return a fresh copy with enabled: false to ensure clean state
+      return { ...slot, enabled: false };
     });
-
-    return merged;
   }, [selectedRoom, allPossibleZones]);
 
   // Only enabled zones should show on canvas
@@ -502,11 +501,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   };
 
   const disableZoneSlot = (slotId: string) => {
-    const newZones = displayZones.filter(z => z.id !== slotId || !z.enabled);
-    handleZonesChange(newZones.filter(z => z.enabled));
+    const remainingZones = displayZones.filter(z => z.enabled && z.id !== slotId);
+    handleZonesChange(remainingZones);
     if (selectedZoneId === slotId) {
-      const remaining = newZones.filter(z => z.enabled);
-      setSelectedZoneId(remaining[0]?.id ?? null);
+      setSelectedZoneId(remainingZones[0]?.id ?? null);
     }
   };
 
@@ -1216,7 +1214,6 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     </button>
                     <button
                       onClick={() => {
-                        if (entryZonesAvailable === false) return;
                         const entryCount = polygonZones.filter(z => z.type === 'entry').length;
                         if (entryCount >= (selectedProfile?.limits.maxEntryZones ?? 2)) return;
                         const newZone: ZonePolygon = {
@@ -1228,15 +1225,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         setPolygonZones([...polygonZones, newZone]);
                         setSelectedZoneId(newZone.id);
                       }}
-                      disabled={
-                        entryZonesAvailable === false ||
-                        polygonZones.filter(z => z.type === 'entry').length >= (selectedProfile?.limits.maxEntryZones ?? 2)
-                      }
+                      disabled={polygonZones.filter(z => z.type === 'entry').length >= (selectedProfile?.limits.maxEntryZones ?? 2)}
                       className="flex-1 rounded-lg border border-emerald-500/50 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
-                      title={entryZonesAvailable === false ? 'Entry Zones require a firmware update. Please update your device firmware to use this feature.' : undefined}
                     >
                       + Entry ({polygonZones.filter(z => z.type === 'entry').length}/{selectedProfile?.limits.maxEntryZones ?? 2})
-                      {entryZonesAvailable === false && ' ⚠️'}
                     </button>
                   </div>
 
@@ -1391,11 +1383,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                               handleZonesChange(newDisplayZones.filter(z => z.enabled));
                             }}
                             onDelete={(id) => {
-                              const newZones = displayZones.filter(z => z.id !== id || !z.enabled);
-                              handleZonesChange(newZones.filter(z => z.enabled));
+                              const remainingZones = displayZones.filter(z => z.enabled && z.id !== id);
+                              handleZonesChange(remainingZones);
                               if (selectedZoneId === id) {
-                                const remaining = newZones.filter(z => z.enabled);
-                                setSelectedZoneId(remaining[0]?.id ?? null);
+                                setSelectedZoneId(remainingZones[0]?.id ?? null);
                               }
                             }}
                           />
