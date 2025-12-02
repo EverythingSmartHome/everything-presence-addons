@@ -228,6 +228,20 @@ export class ZoneWriter {
           tasks.push(this.writeClient.setNumberEntity(entity, value));
         });
       });
+
+      // Clear unused zone slots (set to 0)
+      const maxZones = Math.max(Object.keys(regularMap).length, 4);
+      for (let i = regularZones.length; i < maxZones; i++) {
+        const key = `zone${i + 1}`;
+        const mapping = regularMap[key];
+        const zoneEntitySet = resolveZone('regular', i + 1, 'zoneConfigEntities', key, mapping);
+        if (!zoneEntitySet) continue;
+
+        if (zoneEntitySet.beginX) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.beginX, 0));
+        if (zoneEntitySet.endX) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.endX, 0));
+        if (zoneEntitySet.beginY) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.beginY, 0));
+        if (zoneEntitySet.endY) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.endY, 0));
+      }
     }
 
     // Exclusion zones
@@ -251,6 +265,20 @@ export class ZoneWriter {
           tasks.push(this.writeClient.setNumberEntity(entity, value));
         });
       });
+
+      // Clear unused exclusion zone slots (set to 0)
+      const maxExclusions = Math.max(Object.keys(exclusionMap).length, 2);
+      for (let i = exclusionZones.length; i < maxExclusions; i++) {
+        const key = `exclusion${i + 1}`;
+        const mapping = exclusionMap[key];
+        const zoneEntitySet = resolveZone('exclusion', i + 1, 'exclusionZoneConfigEntities', key, mapping);
+        if (!zoneEntitySet) continue;
+
+        if (zoneEntitySet.beginX) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.beginX, 0));
+        if (zoneEntitySet.endX) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.endX, 0));
+        if (zoneEntitySet.beginY) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.beginY, 0));
+        if (zoneEntitySet.endY) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.endY, 0));
+      }
     }
 
     // Entry zones
@@ -274,6 +302,20 @@ export class ZoneWriter {
           tasks.push(this.writeClient.setNumberEntity(entity, value));
         });
       });
+
+      // Clear unused entry zone slots (set to 0)
+      const maxEntries = Math.max(Object.keys(entryMap).length, 2);
+      for (let i = entryZones.length; i < maxEntries; i++) {
+        const key = `entry${i + 1}`;
+        const mapping = entryMap[key];
+        const zoneEntitySet = resolveZone('entry', i + 1, 'entryZoneConfigEntities', key, mapping);
+        if (!zoneEntitySet) continue;
+
+        if (zoneEntitySet.beginX) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.beginX, 0));
+        if (zoneEntitySet.endX) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.endX, 0));
+        if (zoneEntitySet.beginY) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.beginY, 0));
+        if (zoneEntitySet.endY) tasks.push(this.writeClient.setNumberEntity(zoneEntitySet.endY, 0));
+      }
     }
 
     logger.info({ taskCount: tasks.length }, 'Executing zone updates');
