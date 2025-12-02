@@ -1,3 +1,11 @@
+## 2.0.5
+
+- Fix zone deletion not working in Zone Editor by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix false "firmware update needed" warning for entry zones when in polygon mode by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix scrolling in furniture catalog causing canvas to zoom by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Improve furniture catalog UI - convert to modal popup with fixed height by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix room management always showing "0 zones configured" by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
 ## 2.0.4
 - Fix issue where zooming would get constantly reset by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
 - Improve saving of zones by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
