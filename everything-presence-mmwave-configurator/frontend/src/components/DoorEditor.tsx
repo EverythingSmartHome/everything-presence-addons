@@ -53,7 +53,10 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+      <div
+        className="flex-1 overflow-y-auto px-6 py-4 space-y-6"
+        onWheelCapture={(e) => e.stopPropagation()}
+      >
         {/* Validation Warnings */}
         {hasWarnings && (
           <div className="space-y-2">

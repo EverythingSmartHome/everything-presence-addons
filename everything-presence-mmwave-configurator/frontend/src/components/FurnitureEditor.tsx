@@ -49,7 +49,10 @@ export const FurnitureEditor: React.FC<FurnitureEditorProps> = ({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+      <div
+        className="flex-1 overflow-y-auto px-6 py-4 space-y-6"
+        onWheelCapture={(e) => e.stopPropagation()}
+      >
         {/* Position */}
         <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Position</label>
