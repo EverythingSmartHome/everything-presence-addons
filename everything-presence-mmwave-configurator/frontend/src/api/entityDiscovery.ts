@@ -16,8 +16,9 @@ export interface EntityRegistryEntry {
 
 /**
  * Confidence level for entity matching.
+ * 'conflict' means multiple candidates scored equally and needs review.
  */
-export type MatchConfidence = 'exact' | 'suffix' | 'name' | 'none';
+export type MatchConfidence = 'exact' | 'suffix' | 'name' | 'conflict' | 'none';
 
 /**
  * Result of matching a single entity template.

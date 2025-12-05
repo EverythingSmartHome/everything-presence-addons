@@ -4,6 +4,7 @@ import { deviceEntityService } from '../domain/deviceEntityService';
 import { migrationService } from '../domain/migrationService';
 import { logger } from '../logger';
 import type { IHaReadTransport } from '../ha/readTransport';
+import { normalizeMappingKeys } from '../domain/mappingUtils';
 
 export interface DeviceMappingsRouterDependencies {
   readTransport?: IHaReadTransport;
@@ -70,12 +71,23 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
       // Get existing mapping if it exists
       const existing = deviceMappingStorage.getMapping(deviceId);
 
+      // Normalize mappings to ensure key compatibility across callers
+      const normalizedMappings = normalizeMappingKeys(mappingData.mappings ?? existing?.mappings ?? {});
+      if (existing?.mappings) {
+        for (const [key, value] of Object.entries(normalizedMappings)) {
+          const previous = existing.mappings[key];
+          if (previous && previous !== value) {
+            logger.info({ deviceId, key, from: previous, to: value }, 'Mapping overwrite attempt');
+          }
+        }
+      }
+
       // Fetch entity units if readTransport is available and mappings are provided
       let entityUnits: Record<string, string> = mappingData.entityUnits ?? existing?.entityUnits ?? {};
 
       // If we have new mappings and readTransport is available, fetch units for coordinate entities
       if (mappingData.mappings && readTransport && Object.keys(entityUnits).length === 0) {
-        entityUnits = await fetchEntityUnits(mappingData.mappings, readTransport);
+        entityUnits = await fetchEntityUnits(normalizedMappings, readTransport);
       }
 
       // Fetch firmware version if not provided and not already stored
@@ -110,7 +122,7 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         confirmedByUser: mappingData.confirmedByUser ?? existing?.confirmedByUser ?? true,
         autoMatchedCount: mappingData.autoMatchedCount ?? existing?.autoMatchedCount ?? 0,
         manuallyMappedCount: mappingData.manuallyMappedCount ?? existing?.manuallyMappedCount ?? 0,
-        mappings: mappingData.mappings ?? existing?.mappings ?? {},
+        mappings: normalizedMappings,
         unmappedEntities: mappingData.unmappedEntities ?? existing?.unmappedEntities ?? [],
         entityUnits,
         firmwareVersion,
