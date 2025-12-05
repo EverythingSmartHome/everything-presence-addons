@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { deviceMappingStorage, DeviceMapping } from '../config/deviceMappingStorage';
+import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../config/deviceMappingStorage';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { migrationService } from '../domain/migrationService';
 import { logger } from '../logger';
@@ -78,6 +78,28 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         entityUnits = await fetchEntityUnits(mappingData.mappings, readTransport);
       }
 
+      // Fetch firmware version if not provided and not already stored
+      let firmwareVersion = mappingData.firmwareVersion ?? existing?.firmwareVersion;
+      let esphomeVersion = mappingData.esphomeVersion ?? existing?.esphomeVersion;
+      let rawSwVersion = mappingData.rawSwVersion ?? existing?.rawSwVersion;
+
+      // If we don't have firmware info yet and readTransport is available, fetch it
+      if (!firmwareVersion && !rawSwVersion && readTransport) {
+        try {
+          const devices = await readTransport.listDevices();
+          const device = devices.find(d => d.id === deviceId);
+          if (device?.sw_version) {
+            rawSwVersion = device.sw_version;
+            const parsed = parseFirmwareVersion(device.sw_version);
+            firmwareVersion = parsed.firmwareVersion;
+            esphomeVersion = parsed.esphomeVersion;
+            logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Fetched firmware version during PUT');
+          }
+        } catch (err) {
+          logger.warn({ err, deviceId }, 'Failed to fetch device firmware version during PUT, continuing without it');
+        }
+      }
+
       // Build the mapping object
       const mapping: DeviceMapping = {
         deviceId,
@@ -91,6 +113,9 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         mappings: mappingData.mappings ?? existing?.mappings ?? {},
         unmappedEntities: mappingData.unmappedEntities ?? existing?.unmappedEntities ?? [],
         entityUnits,
+        firmwareVersion,
+        esphomeVersion,
+        rawSwVersion,
       };
 
       await deviceMappingStorage.saveMapping(mapping);

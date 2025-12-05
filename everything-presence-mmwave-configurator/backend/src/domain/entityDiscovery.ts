@@ -2,7 +2,7 @@ import type { IHaReadTransport } from '../ha/readTransport';
 import type { EntityRegistryEntry } from '../ha/types';
 import type { DeviceProfileLoader } from './deviceProfiles';
 import type { EntityMappings, ZoneEntitySet, TargetEntitySet } from './types';
-import { deviceMappingStorage, DeviceMapping } from '../config/deviceMappingStorage';
+import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../config/deviceMappingStorage';
 import { logger } from '../logger';
 
 /**
@@ -730,6 +730,24 @@ export class EntityDiscoveryService {
     // Fetch unit_of_measurement for tracking entities (x/y coordinates)
     const entityUnits = await this.fetchEntityUnits(flatMappings);
 
+    // Fetch device info to get firmware version
+    let rawSwVersion: string | undefined;
+    let firmwareVersion: string | undefined;
+    let esphomeVersion: string | undefined;
+    try {
+      const devices = await this.readTransport.listDevices();
+      const device = devices.find(d => d.id === deviceId);
+      if (device?.sw_version) {
+        rawSwVersion = device.sw_version;
+        const parsed = parseFirmwareVersion(device.sw_version);
+        firmwareVersion = parsed.firmwareVersion;
+        esphomeVersion = parsed.esphomeVersion;
+        logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Parsed firmware version');
+      }
+    } catch (err) {
+      logger.warn({ err, deviceId }, 'Failed to fetch device firmware version, continuing without it');
+    }
+
     // Build DeviceMapping object
     const mapping: DeviceMapping = {
       deviceId,
@@ -745,6 +763,9 @@ export class EntityDiscoveryService {
         .filter(r => r.matchedEntityId === null && !r.isOptional)
         .map(r => r.templateKey),
       entityUnits,
+      firmwareVersion,
+      esphomeVersion,
+      rawSwVersion,
     };
 
     // Save to device storage
