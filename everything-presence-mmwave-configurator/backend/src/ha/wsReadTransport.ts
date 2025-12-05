@@ -7,6 +7,7 @@ import {
   ReadTransportConfig,
   EntityState,
   DeviceRegistryEntry,
+  AreaRegistryEntry,
   StateChangeCallback,
 } from './readTransport';
 
@@ -209,6 +210,19 @@ export class WsReadTransport implements IHaReadTransport {
     }
 
     logger.warn({ response }, 'WsReadTransport: Unexpected response when listing entities');
+    return [];
+  }
+
+  async listAreaRegistry(): Promise<AreaRegistryEntry[]> {
+    const response = (await this.call({
+      type: 'config/area_registry/list',
+    })) as HaWsMessage & { result?: AreaRegistryEntry[] };
+
+    if (response.type === 'result' && (response as any).success) {
+      return (response as any).result ?? [];
+    }
+
+    logger.warn({ response }, 'WsReadTransport: Unexpected response when listing areas');
     return [];
   }
 
