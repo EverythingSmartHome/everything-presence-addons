@@ -26,7 +26,7 @@ export class ZoneWriter {
 
   /**
    * Execute tasks sequentially with retry logic and delays.
-   * This prevents overwhelming ESPHome devices, especially when targets are being tracked.
+   * This helps with opening too many requests to HA all at once
    */
   private async executeTasksSequentially(
     tasks: Array<{ execute: () => Promise<unknown>; description: string }>,

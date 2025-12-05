@@ -241,9 +241,7 @@ export class EntityDiscoveryService {
     const { domain, suffix } = parsed;
     const domainEntities = entitiesByDomain.get(domain) || [];
 
-    // Strategy 1: Exact suffix match - find ALL matches and prefer the shortest one
-    // This prevents "_entry_zone_1_begin_x" from matching "_zone_1_begin_x" when
-    // "_zone_1_begin_x" also exists (the shorter match is the exact one)
+    // Strategy 1: Exact suffix match
     const suffixMatches: EntityRegistryEntry[] = [];
     for (const entity of domainEntities) {
       if (entity.entity_id.endsWith(suffix)) {
