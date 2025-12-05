@@ -94,7 +94,7 @@ export const createEntityDiscoveryRouter = (deps: EntityDiscoveryRouterDependenc
     }
 
     try {
-      const result = await discoveryService.validateMappings(mappings as Partial<EntityMappings>);
+      const result = await discoveryService.validateMappings(mappings as Partial<EntityMappings>, deviceId);
       return res.json(result);
     } catch (error) {
       logger.error({ error, deviceId }, 'Mapping validation failed');

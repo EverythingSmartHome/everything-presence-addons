@@ -4,6 +4,8 @@ import type { DeviceProfileLoader } from './deviceProfiles';
 import type { EntityMappings, ZoneEntitySet, TargetEntitySet } from './types';
 import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../config/deviceMappingStorage';
 import { logger } from '../logger';
+import { telemetry } from '../logger/telemetry';
+import { normalizeMappingKeys } from './mappingUtils';
 
 /**
  * Entity definition from profile.entities with template for discovery.
@@ -31,8 +33,9 @@ interface EntityDefinitionWithTemplate {
 
 /**
  * Confidence level for entity matching.
+ * 'conflict' means multiple candidates scored equally and requires user review.
  */
-export type MatchConfidence = 'exact' | 'suffix' | 'name' | 'none';
+export type MatchConfidence = 'exact' | 'suffix' | 'name' | 'conflict' | 'none';
 
 /**
  * Result of matching a single entity template.
@@ -171,6 +174,21 @@ export class EntityDiscoveryService {
       deviceEntities,
     };
 
+    if (unmatchedRequired > 0) {
+      logger.info(
+        {
+          deviceId,
+          profileId,
+          unmatchedRequired,
+          unmatchedKeys: results
+            .filter((r) => r.matchedEntityId === null && !r.isOptional)
+            .map((r) => r.templateKey)
+            .slice(0, 10),
+        },
+        'Entity discovery finished with unmatched required entities'
+      );
+    }
+
     logger.info(
       {
         deviceId,
@@ -214,14 +232,33 @@ export class EntityDiscoveryService {
   }
 
   /**
-   * Match a single template against available entities.
+   * Determine if an entity_id looks like a zone/entry/exclusion/mask entity.
+   */
+  private isZoneLikeEntity(entityId: string): boolean {
+    return /_(zone|entry_zone|occupancy_mask|exclusion|entry)_/i.test(entityId);
+  }
+
+  /**
+   * Determine if a template represents a base presence/mmwave/pir style entity (i.e., not a zone/entry/polygon variant).
+   */
+  private isBasePresenceTemplate(templateKey: string, template: string): boolean {
+    const keyLower = templateKey.toLowerCase();
+    const tplLower = template.toLowerCase();
+    const looksLikePresence = keyLower.includes('presence') || keyLower.includes('mmwave') || keyLower.includes('pir') || tplLower.includes('_occupancy');
+    const looksLikeZone = tplLower.includes('_zone_') || tplLower.includes('_entry_zone_') || tplLower.includes('_polygon_') || tplLower.includes('_occupancy_mask_');
+    return looksLikePresence && !looksLikeZone;
+  }
+
+  /**
+   * Match a single template against available entities with conflict detection and ranking.
    */
   private matchTemplate(
     templateKey: string,
     template: string,
     allEntities: EntityRegistryEntry[],
     entitiesByDomain: Map<string, EntityRegistryEntry[]>,
-    isOptional = false
+    isOptional = false,
+    options?: { zoneType?: 'regular' | 'entry' | 'exclusion' }
   ): EntityMatchResult {
     const result: EntityMatchResult = {
       templateKey,
@@ -241,58 +278,136 @@ export class EntityDiscoveryService {
     const { domain, suffix } = parsed;
     const domainEntities = entitiesByDomain.get(domain) || [];
 
-    // Strategy 1: Exact suffix match
-    const suffixMatches: EntityRegistryEntry[] = [];
-    for (const entity of domainEntities) {
+    const basePresenceTemplate = this.isBasePresenceTemplate(templateKey, template);
+    const expectedName = suffix.replace(/^_/, '').replace(/_/g, ' ');
+    const suffixParts = suffix.split('_').filter(Boolean);
+    const lastPart = suffixParts[suffixParts.length - 1] || '';
+
+    const isDisabled = (e: EntityRegistryEntry) => !!(e as any)?.disabled_by || !!(e as any)?.hidden_by;
+
+    const isRegularZoneTemplate = options?.zoneType === 'regular';
+    const isEntryZoneTemplate = options?.zoneType === 'entry';
+    const isExclusionZoneTemplate = options?.zoneType === 'exclusion';
+
+    const computeScore = (entity: EntityRegistryEntry): { score: number; confidence: MatchConfidence } => {
+      const entityIdLower = entity.entity_id.toLowerCase();
+
+      // Filter by zone type to avoid cross-matching entry/regular/exclusion
+      if (isRegularZoneTemplate && (entityIdLower.includes('entry_zone_') || entityIdLower.includes('occupancy_mask_'))) {
+        return { score: -1, confidence: 'none' };
+      }
+      if (isEntryZoneTemplate && !entityIdLower.includes('entry_zone_')) {
+        return { score: -1, confidence: 'none' };
+      }
+      if (isExclusionZoneTemplate && !entityIdLower.includes('occupancy_mask_')) {
+        return { score: -1, confidence: 'none' };
+      }
+
+      // Exclude zone-like entities for base presence-style templates
+      if (basePresenceTemplate && this.isZoneLikeEntity(entity.entity_id)) {
+        return { score: -1, confidence: 'none' };
+      }
+
       if (entity.entity_id.endsWith(suffix)) {
-        suffixMatches.push(entity);
+        return { score: 3, confidence: 'exact' };
+      }
+      if (entity.name && expectedName && entity.name.toLowerCase() === expectedName.toLowerCase()) {
+        return { score: 2, confidence: 'name' };
+      }
+      if (lastPart && lastPart.length > 2 && entity.entity_id.endsWith(`_${lastPart}`)) {
+        return { score: 1, confidence: 'suffix' };
+      }
+      return { score: 0, confidence: 'none' };
+    };
+
+    // Auto-match prefers enabled entities; falls back to disabled ones only if nothing else scores
+    const activeEntities = domainEntities.filter((e) => !isDisabled(e));
+    const entitiesForAuto = activeEntities.length > 0 ? activeEntities : domainEntities;
+
+    let bestScore = 0;
+    let bestMatches: Array<{ entity: EntityRegistryEntry; confidence: MatchConfidence }> = [];
+
+    for (const entity of entitiesForAuto) {
+      const { score, confidence } = computeScore(entity);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatches = [{ entity, confidence }];
+      } else if (score > 0 && score === bestScore) {
+        bestMatches.push({ entity, confidence });
       }
     }
 
-    if (suffixMatches.length > 0) {
-      // Sort by entity ID length - shorter IDs are more likely to be exact matches
-      suffixMatches.sort((a, b) => a.entity_id.length - b.entity_id.length);
-      result.matchedEntityId = suffixMatches[0].entity_id;
-      result.matchConfidence = 'exact';
-      logger.debug({ templateKey, matched: suffixMatches[0].entity_id, confidence: 'exact', candidateCount: suffixMatches.length }, 'Entity matched');
+    if (bestScore > 0 && bestMatches.length === 1) {
+      const best = bestMatches[0];
+      result.matchedEntityId = best.entity.entity_id;
+      result.matchConfidence = best.confidence;
+      logger.debug(
+        { templateKey, matched: best.entity.entity_id, confidence: best.confidence },
+        'Entity matched'
+      );
+    } else if (bestScore > 0 && bestMatches.length > 1) {
+      // Conflict: multiple equally good candidates, require user review
+      result.matchConfidence = 'conflict';
+      const conflictCandidates = bestMatches.map((m) => m.entity.entity_id);
+      logger.debug(
+        { templateKey, candidates: conflictCandidates },
+        'Multiple candidates matched equally; marking for review'
+      );
+      telemetry.conflict(templateKey, conflictCandidates);
     }
 
-    // Strategy 2: Match by entity name (display name from ESPHome)
-    if (!result.matchedEntityId) {
-      // Extract expected name from suffix (e.g., "_occupancy" -> "occupancy" or "Occupancy")
-      const expectedName = suffix.replace(/^_/, '').replace(/_/g, ' ');
-      for (const entity of domainEntities) {
-        if (entity.name && entity.name.toLowerCase() === expectedName.toLowerCase()) {
-          result.matchedEntityId = entity.entity_id;
-          result.matchConfidence = 'name';
-          logger.debug({ templateKey, matched: entity.entity_id, confidence: 'name' }, 'Entity matched by name');
-          break;
-        }
-      }
-    }
+    // Collect ranked candidates for manual mapping (all domain entities, even if disabled)
+    const scoredCandidates = domainEntities.map((entity) => {
+      const { score } = computeScore(entity);
+      const disabled = isDisabled(entity);
+      const zonePenalty = this.isZoneLikeEntity(entity.entity_id);
+      return { id: entity.entity_id, score, disabled, zonePenalty };
+    });
 
-    // Strategy 3: Partial suffix match (entity ends with part of the suffix)
-    if (!result.matchedEntityId && suffix.length > 3) {
-      // Try matching just the last part of the suffix
-      const suffixParts = suffix.split('_').filter(Boolean);
-      const lastPart = suffixParts[suffixParts.length - 1];
-      if (lastPart && lastPart.length > 2) {
-        for (const entity of domainEntities) {
-          if (entity.entity_id.endsWith(`_${lastPart}`)) {
-            result.matchedEntityId = entity.entity_id;
-            result.matchConfidence = 'suffix';
-            logger.debug({ templateKey, matched: entity.entity_id, confidence: 'suffix' }, 'Entity matched by partial suffix');
-            break;
-          }
-        }
-      }
-    }
+    scoredCandidates.sort((a, b) => {
+      // Higher score first
+      if (b.score !== a.score) return b.score - a.score;
+      // Prefer non-zone over zone-like
+      if (a.zonePenalty !== b.zonePenalty) return Number(a.zonePenalty) - Number(b.zonePenalty);
+      // Prefer enabled over disabled
+      if (a.disabled !== b.disabled) return Number(a.disabled) - Number(b.disabled);
+      // Stable lexical fallback
+      return a.id.localeCompare(b.id);
+    });
 
-    // Collect candidates for manual mapping (all entities in the same domain)
-    result.candidates = domainEntities
-      .map((e) => e.entity_id)
-      .filter((id) => id !== result.matchedEntityId)
-      .slice(0, 20); // Limit to 20 candidates
+    const candidateSummary = scoredCandidates.slice(0, 5).map((c) => ({
+      id: c.id,
+      score: c.score,
+      disabled: c.disabled,
+      zoneLike: c.zonePenalty,
+    }));
+    logger.info({ templateKey, domain, candidates: candidateSummary }, 'Entity match candidate ranking');
+
+    result.candidates = scoredCandidates
+      .map((c) => c.id)
+      .filter((id) => id !== result.matchedEntityId);
+
+    if (result.matchConfidence === 'conflict') {
+      logger.info(
+        {
+          templateKey,
+          domain,
+          topScore: bestScore,
+          conflictCandidates: scoredCandidates.slice(0, 5).map((c) => c.id),
+        },
+        'Entity match conflict detected'
+      );
+    }
+    if (!result.matchedEntityId && scoredCandidates.length > 0) {
+      logger.info(
+        {
+          templateKey,
+          domain,
+          topCandidates: scoredCandidates.slice(0, 3),
+        },
+        'No match selected; showing top candidates for review'
+      );
+    }
 
     return result;
   }
@@ -310,9 +425,22 @@ export class EntityDiscoveryService {
     const zoneSet: Partial<ZoneEntitySet> = {};
     let hasAny = false;
 
+    const zoneTypeHint =
+      keyPrefix.includes('zoneConfigEntities') ? 'regular'
+        : keyPrefix.includes('entryZoneConfigEntities') ? 'entry'
+          : keyPrefix.includes('exclusionZoneConfigEntities') ? 'exclusion'
+            : undefined;
+
     for (const [coordKey, template] of Object.entries(templates)) {
       if (typeof template !== 'string') continue;
-      const result = this.matchTemplate(`${keyPrefix}.${coordKey}`, template, allEntities, entitiesByDomain);
+      const result = this.matchTemplate(
+        `${keyPrefix}.${coordKey}`,
+        template,
+        allEntities,
+        entitiesByDomain,
+        false,
+        { zoneType: zoneTypeHint as 'regular' | 'entry' | 'exclusion' | undefined }
+      );
       results.push(result);
       if (result.matchedEntityId) {
         (zoneSet as Record<string, string>)[coordKey] = result.matchedEntityId;
@@ -392,7 +520,14 @@ export class EntityDiscoveryService {
       if (!def.template) continue;
 
       const isOptional = !def.required;
-      const result = this.matchTemplate(entityKey, def.template, deviceEntities, entitiesByDomain, isOptional);
+      const result = this.matchTemplate(
+        entityKey,
+        def.template,
+        deviceEntities,
+        entitiesByDomain,
+        isOptional,
+        { zoneType: (def.zoneType as 'regular' | 'entry' | 'exclusion' | undefined) }
+      );
       results.push(result);
 
       if (result.matchedEntityId) {
@@ -639,11 +774,42 @@ export class EntityDiscoveryService {
    * Validate that a set of entity mappings are accessible in Home Assistant.
    */
   async validateMappings(
-    mappings: Partial<EntityMappings>
+    mappings: Partial<EntityMappings>,
+    deviceId?: string
   ): Promise<{ valid: boolean; errors: Array<{ key: string; entityId: string; error: string }> }> {
     const errors: Array<{ key: string; entityId: string; error: string }> = [];
 
+    let registryById: Map<string, EntityRegistryEntry> = new Map();
+    try {
+      const registry = await this.readTransport.listEntityRegistry();
+      registryById = new Map(registry.map((e) => [e.entity_id, e]));
+    } catch (err) {
+      logger.warn({ err }, 'Failed to fetch entity registry for validation');
+    }
+
     const checkEntity = async (key: string, entityId: string) => {
+      const registryEntry = registryById.get(entityId);
+
+      if (!registryEntry) {
+        errors.push({ key, entityId, error: 'Entity not found in registry' });
+        return;
+      }
+
+      if (deviceId && registryEntry.device_id && registryEntry.device_id !== deviceId) {
+        errors.push({ key, entityId, error: 'Entity belongs to a different device' });
+        return;
+      }
+
+      if ((registryEntry as any).disabled_by) {
+        errors.push({ key, entityId, error: 'Entity is disabled' });
+        return;
+      }
+
+      if ((registryEntry as any).hidden_by) {
+        errors.push({ key, entityId, error: 'Entity is hidden' });
+        return;
+      }
+
       try {
         const state = await this.readTransport.getState(entityId);
         if (!state) {
@@ -704,6 +870,12 @@ export class EntityDiscoveryService {
 
     await Promise.all(tasks);
 
+    if (errors.length > 0) {
+      telemetry.validationFail(deviceId, errors);
+    } else {
+      telemetry.validationSuccess(deviceId);
+    }
+
     return {
       valid: errors.length === 0,
       errors,
@@ -725,7 +897,7 @@ export class EntityDiscoveryService {
     const discovery = await this.discoverEntities(deviceId, profileId);
 
     // Convert suggestedMappings (nested EntityMappings) to flat format
-    const flatMappings = this.convertToFlatMappings(discovery.suggestedMappings);
+    const flatMappings = normalizeMappingKeys(this.convertToFlatMappings(discovery.suggestedMappings));
 
     // Fetch unit_of_measurement for tracking entities (x/y coordinates)
     const entityUnits = await this.fetchEntityUnits(flatMappings);
@@ -742,7 +914,7 @@ export class EntityDiscoveryService {
         const parsed = parseFirmwareVersion(device.sw_version);
         firmwareVersion = parsed.firmwareVersion;
         esphomeVersion = parsed.esphomeVersion;
-        logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Parsed firmware version');
+      logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Parsed firmware version');
       }
     } catch (err) {
       logger.warn({ err, deviceId }, 'Failed to fetch device firmware version, continuing without it');
@@ -770,6 +942,16 @@ export class EntityDiscoveryService {
 
     // Save to device storage
     await deviceMappingStorage.saveMapping(mapping);
+    logger.info(
+      {
+        deviceId,
+        profileId,
+        autoMatchedCount: mapping.autoMatchedCount,
+        manualCount: mapping.manuallyMappedCount,
+        unmatched: mapping.unmappedEntities.slice(0, 5),
+      },
+      'Device mapping saved after discovery'
+    );
 
     logger.info(
       { deviceId, mappingCount: Object.keys(flatMappings).length, matchedCount: discovery.matchedCount, entityUnits },
