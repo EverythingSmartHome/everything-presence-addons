@@ -355,7 +355,7 @@ export class ZoneReader {
       }
     }
 
-    logger.debug({ count: zones.length }, 'Read rectangular zones from device');
+    logger.info({ count: zones.length, zones: zones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y })) }, 'Read rectangular zones from device');
     return zones;
   }
 }
