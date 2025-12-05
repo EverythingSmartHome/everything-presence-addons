@@ -241,14 +241,22 @@ export class EntityDiscoveryService {
     const { domain, suffix } = parsed;
     const domainEntities = entitiesByDomain.get(domain) || [];
 
-    // Strategy 1: Exact suffix match
+    // Strategy 1: Exact suffix match - find ALL matches and prefer the shortest one
+    // This prevents "_entry_zone_1_begin_x" from matching "_zone_1_begin_x" when
+    // "_zone_1_begin_x" also exists (the shorter match is the exact one)
+    const suffixMatches: EntityRegistryEntry[] = [];
     for (const entity of domainEntities) {
       if (entity.entity_id.endsWith(suffix)) {
-        result.matchedEntityId = entity.entity_id;
-        result.matchConfidence = 'exact';
-        logger.debug({ templateKey, matched: entity.entity_id, confidence: 'exact' }, 'Entity matched');
-        break;
+        suffixMatches.push(entity);
       }
+    }
+
+    if (suffixMatches.length > 0) {
+      // Sort by entity ID length - shorter IDs are more likely to be exact matches
+      suffixMatches.sort((a, b) => a.entity_id.length - b.entity_id.length);
+      result.matchedEntityId = suffixMatches[0].entity_id;
+      result.matchConfidence = 'exact';
+      logger.debug({ templateKey, matched: suffixMatches[0].entity_id, confidence: 'exact', candidateCount: suffixMatches.length }, 'Entity matched');
     }
 
     // Strategy 2: Match by entity name (display name from ESPHome)

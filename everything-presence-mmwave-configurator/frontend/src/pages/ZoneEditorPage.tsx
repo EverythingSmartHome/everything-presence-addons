@@ -282,6 +282,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           entityMappingsToUse
         );
 
+        // Debug: Log zones loaded from device
+        console.log('[ZoneEditor] Loaded zones from device:', {
+          deviceZones: deviceZones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
+        });
+
         // Preserve labels from existing zones (labels are UI-only, not stored on device)
         const existingZones = selectedRoom.zones ?? [];
         const mergedZones = deviceZones.map(deviceZone => {
@@ -554,8 +559,77 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
   };
 
+  /**
+   * Check if any zones are outside the device's max detection range.
+   * Returns an array of zone labels that are out of range.
+   */
+  const getOutOfRangeZones = useCallback((
+    rectZones: ZoneRect[],
+    polyZones: ZonePolygon[],
+    maxRangeMm: number,
+    isPolygonMode: boolean
+  ): string[] => {
+    const outOfRange: string[] = [];
+
+    if (isPolygonMode) {
+      // Check polygon zones
+      polyZones.forEach((zone, idx) => {
+        const isOutOfRange = zone.vertices.some(v => {
+          const distance = Math.sqrt(v.x * v.x + v.y * v.y);
+          return distance > maxRangeMm;
+        });
+        if (isOutOfRange) {
+          const typeLabel = zone.type === 'regular' ? 'Zone' : zone.type === 'exclusion' ? 'Exclusion' : 'Entry';
+          outOfRange.push(`${typeLabel} ${idx + 1}`);
+        }
+      });
+    } else {
+      // Check rectangle zones
+      rectZones.forEach((zone, idx) => {
+        // Check all four corners of the rectangle
+        const corners = [
+          { x: zone.x, y: zone.y },
+          { x: zone.x + zone.width, y: zone.y },
+          { x: zone.x, y: zone.y + zone.height },
+          { x: zone.x + zone.width, y: zone.y + zone.height },
+        ];
+        const isOutOfRange = corners.some(c => {
+          const distance = Math.sqrt(c.x * c.x + c.y * c.y);
+          return distance > maxRangeMm;
+        });
+        if (isOutOfRange) {
+          const typeLabel = zone.type === 'regular' ? 'Zone' : zone.type === 'exclusion' ? 'Exclusion' : 'Entry';
+          const zoneNum = rectZones.filter(z => z.type === zone.type).indexOf(zone) + 1;
+          outOfRange.push(`${typeLabel} ${zoneNum}`);
+        }
+      });
+    }
+
+    return outOfRange;
+  }, []);
+
   const handleSaveZones = async () => {
     if (!selectedRoom) return;
+
+    // Check if zones are outside max range
+    const maxRangeMeters = selectedProfile?.limits?.maxRangeMeters ?? 6;
+    const maxRangeMm = maxRangeMeters * 1000;
+
+    const rectZones = (selectedRoom.zones ?? []).filter(zone => isZoneAvailable(zone));
+    const outOfRangeZones = getOutOfRangeZones(
+      rectZones,
+      polygonZones,
+      maxRangeMm,
+      polygonModeStatus.enabled
+    );
+
+    if (outOfRangeZones.length > 0) {
+      setError(
+        `The following zones extend beyond the device's max detection range (${maxRangeMeters}m): ${outOfRangeZones.join(', ')}. ` +
+        `Please move or resize these zones to be within the detection area shown by the overlay.`
+      );
+      return;
+    }
 
     setSaving(true);
     try {
@@ -584,6 +658,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           // Save rectangle zones
           // Filter out zones whose entities are disabled in Home Assistant
           const availableZones = (selectedRoom.zones ?? []).filter(zone => isZoneAvailable(zone));
+
+          // Debug: Log zones being saved
+          console.log('[ZoneEditor] Saving zones to device:', {
+            allZones: selectedRoom.zones?.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
+            availableZones: availableZones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
+          });
 
           // Validate zones
           await validateZones(availableZones);
@@ -812,9 +892,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         <button
           onClick={handleSaveZones}
           disabled={saving}
-          className="rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95"
+          className="rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95 flex items-center gap-2"
         >
-          {saving ? 'Saving...' : 'Save Zones'}
+          {saving && (
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          )}
+          {saving ? 'Saving Zones...' : 'Save Zones'}
         </button>
       </div>
 
