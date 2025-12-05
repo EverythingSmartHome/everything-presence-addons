@@ -265,13 +265,6 @@ export class ZoneWriter {
     const exclusionZones = zones.filter(z => z.type === 'exclusion');
     const entryZones = zones.filter(z => z.type === 'entry');
 
-    // Debug: Log all zones being written with their types and coordinates
-    logger.info({
-      regularZones: regularZones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
-      exclusionZones: exclusionZones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
-      entryZones: entryZones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
-    }, 'Zone write: zones grouped by type');
-
     // Helper to resolve zone entity set
     const resolveZone = (type: 'regular' | 'exclusion' | 'entry', index: number, groupKey: 'zoneConfigEntities' | 'exclusionZoneConfigEntities' | 'entryZoneConfigEntities', key: string, mapping?: any) => {
       if (deviceId) {
@@ -299,15 +292,6 @@ export class ZoneWriter {
         const updates: Array<{ entity: string; value: number }> = [];
 
         if (zone) {
-          // Write zone coordinates
-          logger.info({
-            zoneType: 'regular',
-            slot: i,
-            zoneId: zone.id,
-            zoneTypeField: zone.type,
-            coords: { x: zone.x, y: zone.y, width: zone.width, height: zone.height },
-            entities: { beginX: zoneEntitySet.beginX, endX: zoneEntitySet.endX, beginY: zoneEntitySet.beginY, endY: zoneEntitySet.endY },
-          }, 'Zone write: writing regular zone to slot');
           if (zoneEntitySet.beginX) updates.push({ entity: zoneEntitySet.beginX, value: zone.x });
           if (zoneEntitySet.endX) updates.push({ entity: zoneEntitySet.endX, value: zone.x + zone.width });
           if (zoneEntitySet.beginY) updates.push({ entity: zoneEntitySet.beginY, value: zone.y });
@@ -381,14 +365,6 @@ export class ZoneWriter {
         const updates: Array<{ entity: string; value: number }> = [];
 
         if (zone) {
-          logger.info({
-            zoneType: 'entry',
-            slot: i,
-            zoneId: zone.id,
-            zoneTypeField: zone.type,
-            coords: { x: zone.x, y: zone.y, width: zone.width, height: zone.height },
-            entities: { beginX: zoneEntitySet.beginX, endX: zoneEntitySet.endX, beginY: zoneEntitySet.beginY, endY: zoneEntitySet.endY },
-          }, 'Zone write: writing entry zone to slot');
           if (zoneEntitySet.beginX) updates.push({ entity: zoneEntitySet.beginX, value: zone.x });
           if (zoneEntitySet.endX) updates.push({ entity: zoneEntitySet.endX, value: zone.x + zone.width });
           if (zoneEntitySet.beginY) updates.push({ entity: zoneEntitySet.beginY, value: zone.y });

@@ -219,15 +219,6 @@ export class ZoneReader {
         // Skip zones with no area
         if (width === 0 || height === 0) continue;
 
-        logger.info({
-          zoneType: 'regular',
-          slot: i,
-          zoneId: `Zone ${i}`,
-          coords: { x, y, width, height },
-          rawValues: { beginX, endX, beginY, endY },
-          entities: { beginXEntity, endXEntity, beginYEntity, endYEntity },
-        }, 'Zone read: read regular zone from slot');
-
         zones.push({
           id: `Zone ${i}`,
           type: 'regular',
@@ -349,15 +340,6 @@ export class ZoneReader {
           const height = Math.abs(endY - beginY);
 
           if (width === 0 || height === 0) continue;
-
-          logger.info({
-            zoneType: 'entry',
-            slot: i,
-            zoneId: `Entry ${i}`,
-            coords: { x, y, width, height },
-            rawValues: { beginX, endX, beginY, endY },
-            entities: { beginXEntity, endXEntity, beginYEntity, endYEntity },
-          }, 'Zone read: read entry zone from slot');
 
           zones.push({
             id: `Entry ${i}`,

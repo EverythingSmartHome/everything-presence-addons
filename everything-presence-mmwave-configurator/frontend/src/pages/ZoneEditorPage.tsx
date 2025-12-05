@@ -282,11 +282,6 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           entityMappingsToUse
         );
 
-        // Debug: Log zones loaded from device
-        console.log('[ZoneEditor] Loaded zones from device:', {
-          deviceZones: deviceZones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
-        });
-
         // Preserve labels from existing zones (labels are UI-only, not stored on device)
         const existingZones = selectedRoom.zones ?? [];
         const mergedZones = deviceZones.map(deviceZone => {
@@ -658,12 +653,6 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           // Save rectangle zones
           // Filter out zones whose entities are disabled in Home Assistant
           const availableZones = (selectedRoom.zones ?? []).filter(zone => isZoneAvailable(zone));
-
-          // Debug: Log zones being saved
-          console.log('[ZoneEditor] Saving zones to device:', {
-            allZones: selectedRoom.zones?.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
-            availableZones: availableZones.map(z => ({ id: z.id, type: z.type, x: z.x, y: z.y, width: z.width, height: z.height })),
-          });
 
           // Validate zones
           await validateZones(availableZones);
