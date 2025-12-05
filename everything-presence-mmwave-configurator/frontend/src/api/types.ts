@@ -5,6 +5,7 @@ export interface DiscoveredDevice {
   model?: string;
   entityNamePrefix?: string; // e.g., "bedroom_ep_lite"
   firmwareVersion?: string; // Software/firmware version (e.g., "1.3.2")
+  areaName?: string; // Home Assistant area name (e.g., "Living Room")
 }
 
 export interface DeviceProfileLimits {

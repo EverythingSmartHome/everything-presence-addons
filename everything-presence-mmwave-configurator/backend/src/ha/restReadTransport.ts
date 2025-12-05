@@ -6,6 +6,7 @@ import {
   ReadTransportConfig,
   EntityState,
   DeviceRegistryEntry,
+  AreaRegistryEntry,
   StateChangeCallback,
 } from './readTransport';
 
@@ -240,6 +241,67 @@ export class RestReadTransport implements IHaReadTransport {
       return entities;
     } catch (err) {
       logger.error({ err }, 'RestReadTransport: Template-based entity registry failed');
+      return [];
+    }
+  }
+
+  async listAreaRegistry(): Promise<AreaRegistryEntry[]> {
+    try {
+      const url = this.buildUrl('/config/area_registry');
+      const res = await fetch(url, { headers: this.headers });
+
+      if (res.ok) {
+        return (await res.json()) as AreaRegistryEntry[];
+      }
+
+      // Fallback: Use template API to query area registry
+      logger.info('RestReadTransport: Using template fallback for area registry');
+      return await this.listAreaRegistryViaTemplate();
+    } catch (err) {
+      logger.error({ err }, 'RestReadTransport: Failed to list area registry');
+      return [];
+    }
+  }
+
+  /**
+   * Fallback: Query area registry via HA template API.
+   */
+  private async listAreaRegistryViaTemplate(): Promise<AreaRegistryEntry[]> {
+    const template = `
+{% set areas = namespace(list=[]) %}
+{% for area in areas() %}
+  {% set areas.list = areas.list + [{
+    'area_id': area,
+    'name': area_name(area),
+    'picture': none,
+    'aliases': [],
+    'floor_id': none,
+    'icon': none,
+    'labels': []
+  }] %}
+{% endfor %}
+{{ areas.list | tojson }}`.trim();
+
+    try {
+      const url = this.buildUrl('/template');
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify({ template }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        logger.warn({ status: res.status, text }, 'RestReadTransport: Template API failed for area registry');
+        return [];
+      }
+
+      const resultText = await res.text();
+      const areas = JSON.parse(resultText) as AreaRegistryEntry[];
+      logger.info({ count: areas.length }, 'RestReadTransport: Got area registry via template');
+      return areas;
+    } catch (err) {
+      logger.error({ err }, 'RestReadTransport: Template-based area registry failed');
       return [];
     }
   }

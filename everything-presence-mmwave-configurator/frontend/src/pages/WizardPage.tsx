@@ -1932,7 +1932,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               <h3 className="text-lg font-bold text-white">Select your device</h3>
             </div>
             <p className="text-sm text-slate-400">
-              Choose the EverythingSmartTechnology device you want to configure.
+              Which Everything Presence device do you want to setup?
             </p>
           </div>
           {devices.length === 0 && (
@@ -1979,8 +1979,18 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       </div>
                       <div className="text-xs text-slate-400 mt-1">
                         {d.model ?? 'Unknown model'}
-                        {isAssigned && <span className="text-xs text-slate-500 ml-2">• Assigned to {assignedRoom?.name}</span>}
+                        {d.firmwareVersion && <span className="text-slate-500"> • v{d.firmwareVersion}</span>}
                       </div>
+                      {d.areaName && (
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          HA Area: {d.areaName}
+                        </div>
+                      )}
+                      {isAssigned && (
+                        <div className="text-xs text-amber-500/80 mt-0.5">
+                          Already configured in "{assignedRoom?.name}"
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
