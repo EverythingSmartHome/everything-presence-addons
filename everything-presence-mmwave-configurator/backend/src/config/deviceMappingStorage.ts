@@ -29,6 +29,49 @@ export interface DeviceMapping {
   unmappedEntities: string[];
   /** Unit of measurement for specific entities (e.g., "target1X" -> "in" or "mm") */
   entityUnits?: Record<string, string>;
+  /** Device firmware version (e.g., "1.4.1") - parsed from sw_version */
+  firmwareVersion?: string;
+  /** ESPHome version the device is running (e.g., "2025.11.2") - parsed from sw_version */
+  esphomeVersion?: string;
+  /** Raw sw_version string from Home Assistant (e.g., "1.4.1 (ESPHome 2025.11.2)") */
+  rawSwVersion?: string;
+}
+
+/**
+ * Parse a firmware version string like "1.4.1 (ESPHome 2025.11.2)" into components.
+ * Returns null values if parsing fails - this should not break anything.
+ */
+export function parseFirmwareVersion(rawVersion: string | null | undefined): {
+  firmwareVersion: string | undefined;
+  esphomeVersion: string | undefined;
+} {
+  if (!rawVersion) {
+    return { firmwareVersion: undefined, esphomeVersion: undefined };
+  }
+
+  // Try to match pattern like "1.4.1 (ESPHome 2025.11.2)"
+  const match = rawVersion.match(/^([\d.]+)\s*\(ESPHome\s+([\d.]+)\)$/i);
+  if (match) {
+    return {
+      firmwareVersion: match[1],
+      esphomeVersion: match[2],
+    };
+  }
+
+  // Fallback: If no ESPHome part, try to extract just version number
+  const versionMatch = rawVersion.match(/^([\d.]+)/);
+  if (versionMatch) {
+    return {
+      firmwareVersion: versionMatch[1],
+      esphomeVersion: undefined,
+    };
+  }
+
+  // Can't parse - return the raw value as firmware version
+  return {
+    firmwareVersion: rawVersion,
+    esphomeVersion: undefined,
+  };
 }
 
 // Use same base path as other storage
