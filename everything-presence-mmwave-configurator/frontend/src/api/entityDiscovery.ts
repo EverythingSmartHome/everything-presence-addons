@@ -185,18 +185,18 @@ export const groupMatchResultsByCategory = (
       groups['Environmental Sensors'].push(result);
     } else if (key.includes('distance') || key.includes('speed') || key.includes('energy') || key.includes('targetCount')) {
       groups['Distance/Tracking'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone1')) {
-      groups['Zone 1'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone2')) {
-      groups['Zone 2'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone3')) {
-      groups['Zone 3'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone4')) {
-      groups['Zone 4'].push(result);
     } else if (key.includes('exclusion')) {
       groups['Exclusion Zones'].push(result);
     } else if (key.includes('entry')) {
       groups['Entry Zones'].push(result);
+    } else if (key.startsWith('zone1') || key.includes('zoneConfigEntities.zone1')) {
+      groups['Zone 1'].push(result);
+    } else if (key.startsWith('zone2') || key.includes('zoneConfigEntities.zone2')) {
+      groups['Zone 2'].push(result);
+    } else if (key.startsWith('zone3') || key.includes('zoneConfigEntities.zone3')) {
+      groups['Zone 3'].push(result);
+    } else if (key.startsWith('zone4') || key.includes('zoneConfigEntities.zone4')) {
+      groups['Zone 4'].push(result);
     } else if (key.includes('polygon')) {
       groups['Polygon Zones'].push(result);
     } else if (key.includes('trackingTargets')) {
