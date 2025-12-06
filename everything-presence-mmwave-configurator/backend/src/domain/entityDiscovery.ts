@@ -962,25 +962,21 @@ export class EntityDiscoveryService {
   }
 
   /**
-   * Fetch unit_of_measurement from Home Assistant for tracking coordinate entities.
-   * This is needed to handle imperial unit conversion (inches -> mm).
+   * Fetch unit_of_measurement from Home Assistant for all mapped entities.
+   * This captures units for any entity that has one (sensors, number inputs, etc.)
+   * to support imperial/metric display throughout the UI.
    */
   private async fetchEntityUnits(flatMappings: Record<string, string>): Promise<Record<string, string>> {
     const entityUnits: Record<string, string> = {};
 
-    // Keys that represent coordinate/distance measurements needing unit conversion
-    const coordinateKeys = [
-      'target1X', 'target1Y', 'target2X', 'target2Y', 'target3X', 'target3Y',
-      'target1Distance', 'target2Distance', 'target3Distance',
-      'distance', 'maxDistance',
-    ];
-
+    // Build list of all unique entity IDs to fetch
     const entityIdsToFetch: Array<{ key: string; entityId: string }> = [];
+    const seenEntityIds = new Set<string>();
 
-    for (const key of coordinateKeys) {
-      const entityId = flatMappings[key];
-      if (entityId) {
+    for (const [key, entityId] of Object.entries(flatMappings)) {
+      if (entityId && !seenEntityIds.has(entityId)) {
         entityIdsToFetch.push({ key, entityId });
+        seenEntityIds.add(entityId);
       }
     }
 
@@ -1000,6 +996,8 @@ export class EntityDiscoveryService {
           logger.debug({ key, entityId, unit }, 'Captured entity unit of measurement');
         }
       }
+
+      logger.info({ count: Object.keys(entityUnits).length, total: entityIdsToFetch.length }, 'Fetched entity units');
     } catch (err) {
       logger.warn({ err }, 'Failed to fetch entity units - proceeding without unit metadata');
     }

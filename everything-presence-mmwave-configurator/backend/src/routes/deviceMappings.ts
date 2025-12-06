@@ -85,9 +85,12 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
       // Fetch entity units if readTransport is available and mappings are provided
       let entityUnits: Record<string, string> = mappingData.entityUnits ?? existing?.entityUnits ?? {};
 
-      // If we have new mappings and readTransport is available, fetch units for coordinate entities
-      if (mappingData.mappings && readTransport && Object.keys(entityUnits).length === 0) {
-        entityUnits = await fetchEntityUnits(normalizedMappings, readTransport);
+      // If we have new mappings and readTransport is available, fetch/refresh units
+      // Always refetch during resync to capture any newly added keys
+      if (mappingData.mappings && readTransport) {
+        const freshUnits = await fetchEntityUnits(normalizedMappings, readTransport);
+        // Merge fresh units with existing, preferring fresh values
+        entityUnits = { ...entityUnits, ...freshUnits };
       }
 
       // Fetch firmware version if not provided and not already stored
@@ -300,8 +303,9 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
 };
 
 /**
- * Fetch unit_of_measurement from Home Assistant for tracking coordinate entities.
- * This is needed to handle imperial unit conversion (inches -> mm).
+ * Fetch unit_of_measurement from Home Assistant for all mapped entities.
+ * This captures units for any entity that has one (sensors, number inputs, etc.)
+ * to support imperial/metric display throughout the UI.
  */
 async function fetchEntityUnits(
   flatMappings: Record<string, string>,
@@ -309,19 +313,14 @@ async function fetchEntityUnits(
 ): Promise<Record<string, string>> {
   const entityUnits: Record<string, string> = {};
 
-  // Keys that represent coordinate/distance measurements needing unit conversion
-  const coordinateKeys = [
-    'target1X', 'target1Y', 'target2X', 'target2Y', 'target3X', 'target3Y',
-    'target1Distance', 'target2Distance', 'target3Distance',
-    'distance', 'maxDistance',
-  ];
-
+  // Build list of all unique entity IDs to fetch
   const entityIdsToFetch: Array<{ key: string; entityId: string }> = [];
+  const seenEntityIds = new Set<string>();
 
-  for (const key of coordinateKeys) {
-    const entityId = flatMappings[key];
-    if (entityId) {
+  for (const [key, entityId] of Object.entries(flatMappings)) {
+    if (entityId && !seenEntityIds.has(entityId)) {
       entityIdsToFetch.push({ key, entityId });
+      seenEntityIds.add(entityId);
     }
   }
 
@@ -341,6 +340,8 @@ async function fetchEntityUnits(
         logger.debug({ key, entityId, unit }, 'Captured entity unit of measurement');
       }
     }
+
+    logger.info({ count: Object.keys(entityUnits).length, total: entityIdsToFetch.length }, 'Fetched entity units');
   } catch (err) {
     logger.warn({ err }, 'Failed to fetch entity units - proceeding without unit metadata');
   }

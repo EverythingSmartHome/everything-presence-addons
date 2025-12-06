@@ -10,6 +10,7 @@ interface EP1MiniChartsProps {
   presence: boolean;
   distance: number | null;
   maxPoints?: number;
+  entityUnits?: Record<string, string>;
 }
 
 // Simple sparkline SVG component
@@ -96,8 +97,10 @@ export const EP1MiniCharts: React.FC<EP1MiniChartsProps> = ({
   presence,
   distance,
   maxPoints = 60,
+  entityUnits,
 }) => {
   const [collapsed, setCollapsed] = React.useState(false);
+  const tempUnit = entityUnits?.temperature || '°C';
 
   // Store history in refs to persist across renders
   const tempHistory = useRef<DataPoint[]>([]);
@@ -174,7 +177,7 @@ export const EP1MiniCharts: React.FC<EP1MiniChartsProps> = ({
               <span className="text-xs text-slate-400">Temperature</span>
             </div>
             <div className="text-[10px] text-slate-500">
-              {tempMin}° - {tempMax}°C
+              {tempMin}° - {tempMax}{tempUnit}
             </div>
           </div>
           <div className="bg-slate-800/50 rounded-lg p-2">

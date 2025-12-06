@@ -16,9 +16,10 @@ interface EP1DashboardProps {
   roomId: string;
   room: RoomConfig;
   liveState: LiveState | null;
+  entityUnits?: Record<string, string>;
 }
 
-export const EP1Dashboard: React.FC<EP1DashboardProps> = ({ roomId, room, liveState }) => {
+export const EP1Dashboard: React.FC<EP1DashboardProps> = ({ roomId, room, liveState, entityUnits }) => {
   if (!liveState) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -58,7 +59,7 @@ export const EP1Dashboard: React.FC<EP1DashboardProps> = ({ roomId, room, liveSt
           {/* Main Content - Left Column (spans 2) */}
           <div className="lg:col-span-2 space-y-6">
             {/* Environmental Sensors (with CO2 and Light Context) */}
-            <EP1EnvironmentalPanel environmental={environmental} co2={liveState.co2} />
+            <EP1EnvironmentalPanel environmental={environmental} co2={liveState.co2} entityUnits={entityUnits} />
 
             {/* Canvas with Distance Arc */}
             <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
@@ -168,6 +169,7 @@ export const EP1Dashboard: React.FC<EP1DashboardProps> = ({ roomId, room, liveSt
             <EP1ComfortPanel
               temperature={liveState.temperature ?? null}
               humidity={liveState.humidity ?? null}
+              entityUnits={entityUnits}
             />
 
             {/* Sensor Comparison */}
