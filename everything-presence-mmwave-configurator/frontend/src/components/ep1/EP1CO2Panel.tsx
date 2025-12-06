@@ -3,14 +3,16 @@ import { getCO2Level } from './ep1Utils';
 
 interface EP1CO2PanelProps {
   co2: number | null;
+  entityUnits?: Record<string, string>;
 }
 
-export const EP1CO2Panel: React.FC<EP1CO2PanelProps> = ({ co2 }) => {
+export const EP1CO2Panel: React.FC<EP1CO2PanelProps> = ({ co2, entityUnits }) => {
   if (co2 === null) {
     return null; // Don't render if CO2 sensor not available
   }
 
   const level = getCO2Level(co2);
+  const co2Unit = entityUnits?.co2 || 'ppm';
 
   // Calculate gauge percentage (0-3000 ppm range)
   const gaugePercent = Math.min(100, (co2 / 3000) * 100);
@@ -25,7 +27,7 @@ export const EP1CO2Panel: React.FC<EP1CO2PanelProps> = ({ co2 }) => {
       {/* Value and Label */}
       <div className="flex items-baseline gap-2 mb-3">
         <span className="text-3xl font-bold text-slate-100">{Math.round(co2)}</span>
-        <span className="text-sm text-slate-400">ppm</span>
+        <span className="text-sm text-slate-400">{co2Unit}</span>
       </div>
 
       {/* Gauge Bar */}
@@ -43,9 +45,9 @@ export const EP1CO2Panel: React.FC<EP1CO2PanelProps> = ({ co2 }) => {
           style={{ width: `${gaugePercent}%` }}
         />
         {/* Threshold markers */}
-        <div className="absolute top-0 h-full w-px bg-slate-600" style={{ left: '26.7%' }} title="800 ppm" />
-        <div className="absolute top-0 h-full w-px bg-slate-600" style={{ left: '33.3%' }} title="1000 ppm" />
-        <div className="absolute top-0 h-full w-px bg-slate-600" style={{ left: '66.7%' }} title="2000 ppm" />
+        <div className="absolute top-0 h-full w-px bg-slate-600" style={{ left: '26.7%' }} title={`800 ${co2Unit}`} />
+        <div className="absolute top-0 h-full w-px bg-slate-600" style={{ left: '33.3%' }} title={`1000 ${co2Unit}`} />
+        <div className="absolute top-0 h-full w-px bg-slate-600" style={{ left: '66.7%' }} title={`2000 ${co2Unit}`} />
       </div>
 
       {/* Status Label */}

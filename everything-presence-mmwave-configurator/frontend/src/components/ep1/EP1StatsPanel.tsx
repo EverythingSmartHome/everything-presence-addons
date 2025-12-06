@@ -5,14 +5,17 @@ interface EP1StatsPanelProps {
   deviceId: string;
   presence: boolean;
   temperature: number | null;
+  entityUnits?: Record<string, string>;
 }
 
 export const EP1StatsPanel: React.FC<EP1StatsPanelProps> = ({
   deviceId,
   presence,
   temperature,
+  entityUnits,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
+  const tempUnit = entityUnits?.temperature || '°C';
   const [stats, setStats] = useState<DailyStats | null>(null);
   const lastUpdateTime = useRef<number>(Date.now());
   const wasPresent = useRef<boolean>(presence);
@@ -190,11 +193,11 @@ export const EP1StatsPanel: React.FC<EP1StatsPanelProps> = ({
           <div className="text-[10px] text-slate-500 mb-1">Avg Temperature</div>
           <div className="flex items-baseline gap-1">
             <span className="text-2xl font-bold text-orange-400">{avgTemp}</span>
-            <span className="text-sm text-slate-500">°C</span>
+            <span className="text-sm text-slate-500">{tempUnit}</span>
           </div>
           <div className="text-[10px] text-slate-500 mt-2">
             {stats.tempMin !== null && stats.tempMax !== null
-              ? `${stats.tempMin.toFixed(1)}° - ${stats.tempMax.toFixed(1)}°`
+              ? `${stats.tempMin.toFixed(1)}° - ${stats.tempMax.toFixed(1)}${tempUnit}`
               : 'Min - Max'}
           </div>
         </div>
