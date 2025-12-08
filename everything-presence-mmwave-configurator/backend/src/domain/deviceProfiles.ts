@@ -79,6 +79,8 @@ export interface EntityDefinition {
 
 export interface DeviceProfile {
   id: string;
+  /** Schema version - bump when entities/features change to trigger resync prompts */
+  schemaVersion?: string;
   label: string;
   manufacturer: string;
   capabilities: unknown;

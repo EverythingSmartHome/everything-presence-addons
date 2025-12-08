@@ -51,7 +51,7 @@ export const createServer = (config: AppConfig, deps?: ServerDependencies): expr
   app.use('/api/zones', createZonesRouter());
   app.use('/api/settings', createSettingsRouter());
   app.use('/api/custom-assets', createCustomAssetsRouter());
-  app.use('/api/device-mappings', createDeviceMappingsRouter({ readTransport: deps?.readTransport }));
+  app.use('/api/device-mappings', createDeviceMappingsRouter({ readTransport: deps?.readTransport, profileLoader: deps?.profileLoader }));
 
   // Routes that require HA dependencies
   if (deps) {

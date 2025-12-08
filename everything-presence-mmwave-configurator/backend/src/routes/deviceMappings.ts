@@ -5,9 +5,11 @@ import { migrationService } from '../domain/migrationService';
 import { logger } from '../logger';
 import type { IHaReadTransport } from '../ha/readTransport';
 import { normalizeMappingKeys } from '../domain/mappingUtils';
+import type { DeviceProfileLoader } from '../domain/deviceProfiles';
 
 export interface DeviceMappingsRouterDependencies {
   readTransport?: IHaReadTransport;
+  profileLoader?: DeviceProfileLoader;
 }
 
 /**
@@ -17,6 +19,7 @@ export interface DeviceMappingsRouterDependencies {
 export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependencies): Router => {
   const router = Router();
   const readTransport = deps?.readTransport;
+  const profileLoader = deps?.profileLoader;
 
   /**
    * GET /api/device-mappings
@@ -115,6 +118,16 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         }
       }
 
+      // Get current profile schema version for resync detection
+      const profileId = mappingData.profileId ?? existing?.profileId;
+      let profileSchemaVersion = mappingData.profileSchemaVersion ?? existing?.profileSchemaVersion;
+      if (profileId && profileLoader) {
+        const profile = profileLoader.getProfileById(profileId);
+        if (profile?.schemaVersion) {
+          profileSchemaVersion = profile.schemaVersion;
+        }
+      }
+
       // Build the mapping object
       const mapping: DeviceMapping = {
         deviceId,
@@ -131,6 +144,7 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         firmwareVersion,
         esphomeVersion,
         rawSwVersion,
+        profileSchemaVersion,
       };
 
       await deviceMappingStorage.saveMapping(mapping);

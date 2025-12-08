@@ -896,6 +896,10 @@ export class EntityDiscoveryService {
     // Run discovery
     const discovery = await this.discoverEntities(deviceId, profileId);
 
+    // Get profile schema version for resync detection
+    const profile = this.profileLoader.getProfileById(profileId);
+    const profileSchemaVersion = profile?.schemaVersion;
+
     // Convert suggestedMappings (nested EntityMappings) to flat format
     const flatMappings = normalizeMappingKeys(this.convertToFlatMappings(discovery.suggestedMappings));
 
@@ -938,6 +942,7 @@ export class EntityDiscoveryService {
       firmwareVersion,
       esphomeVersion,
       rawSwVersion,
+      profileSchemaVersion,
     };
 
     // Save to device storage

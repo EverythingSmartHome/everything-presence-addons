@@ -35,6 +35,8 @@ export interface DeviceMapping {
   esphomeVersion?: string;
   /** Raw sw_version string from Home Assistant (e.g., "1.4.1 (ESPHome 2025.11.2)") */
   rawSwVersion?: string;
+  /** Schema version from device profile at time of last sync (e.g., "1.0") */
+  profileSchemaVersion?: string;
 }
 
 /**
