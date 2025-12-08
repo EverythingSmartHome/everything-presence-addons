@@ -56,12 +56,15 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
     }
 
     try {
+      // Get deviceId from route params
+      const { deviceId } = req.params;
+
       // Get current zones for zone stats calculation
       const entityMap = profile.entityMap as Record<string, unknown>;
       let zones;
       try {
-        const polygonZones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string, entityMappings);
-        const rectZones = await zoneReader.readZones(entityMap, entityNamePrefix as string, entityMappings);
+        const polygonZones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string, entityMappings, deviceId);
+        const rectZones = await zoneReader.readZones(entityMap, entityNamePrefix as string, entityMappings, deviceId);
         // Deduplicate zones by ID (prefer polygon zones if both exist)
         const zoneMap = new Map<string, typeof polygonZones[0] | typeof rectZones[0]>();
         for (const zone of rectZones) {
@@ -81,7 +84,8 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
         hoursNum,
         resolutionNum,
         zones,
-        entityMappings
+        entityMappings,
+        deviceId
       );
 
       return res.json(heatmap);

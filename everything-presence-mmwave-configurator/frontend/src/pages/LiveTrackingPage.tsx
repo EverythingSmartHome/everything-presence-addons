@@ -18,6 +18,7 @@ import { HourlyActivityChart } from '../components/HourlyActivityChart';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useHeatmap } from '../hooks/useHeatmap';
+import { useDeviceMappings, useDeviceMapping } from '../contexts/DeviceMappingsContext';
 
 // Recording mode trail point
 interface RecordedPoint {
@@ -114,6 +115,26 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const supportsHeatmap = selectedProfile?.capabilities &&
     (selectedProfile.capabilities as { tracking?: boolean }).tracking === true && !isEP1;
 
+  // Device mappings context - used to check if device has valid entity mappings
+  // useDeviceMapping triggers loading the mapping into cache, useDeviceMappings provides the check
+  const { hasValidMappings } = useDeviceMappings();
+  const { mapping: deviceMapping, loading: mappingLoading } = useDeviceMapping(selectedRoom?.deviceId);
+  // Check validity: mapping must be loaded AND schema versions must match
+  // If profile has a schemaVersion, the mapping must have a matching profileSchemaVersion
+  // This ensures users are prompted to resync when profile schema changes
+  const deviceHasValidMappings = useMemo(() => {
+    if (mappingLoading || deviceMapping === null) return false;
+    // If the profile has a schema version, check if mapping version matches
+    const profileSchemaVersion = selectedProfile?.schemaVersion;
+    const mappingSchemaVersion = deviceMapping.profileSchemaVersion;
+    // If profile has a version but mapping doesn't, needs resync (backward compat)
+    if (profileSchemaVersion && !mappingSchemaVersion) return false;
+    // If both have versions, they must match
+    if (profileSchemaVersion && mappingSchemaVersion && profileSchemaVersion !== mappingSchemaVersion) return false;
+    // Mapping is valid
+    return true;
+  }, [mappingLoading, deviceMapping, selectedProfile?.schemaVersion]);
+
   // Derive entityNamePrefix for heatmap
   const entityNamePrefix = useMemo(() => {
     if (selectedRoom?.entityNamePrefix) return selectedRoom.entityNamePrefix;
@@ -121,12 +142,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     return device?.entityNamePrefix ?? null;
   }, [selectedRoom, devices]);
 
-  // Heatmap data
+  // Heatmap data - skip entityMappings if device has valid mappings stored
   const { data: heatmapData, loading: heatmapLoading, refresh: refreshHeatmap } = useHeatmap({
     deviceId: selectedRoom?.deviceId ?? null,
     profileId: selectedRoom?.profileId ?? null,
     entityNamePrefix,
-    entityMappings: selectedRoom?.entityMappings,
+    entityMappings: deviceHasValidMappings ? undefined : selectedRoom?.entityMappings,
     hours: heatmapHours,
     enabled: heatmapEnabled && !!supportsHeatmap,
   });
@@ -313,9 +334,19 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   }, [propTargetPositions, smoothTracking]);
 
   // Fetch existing zones from device when room is loaded
+  // Using refs to prevent re-fetching when entityMappings changes (which happens after zone sync)
+  const lastZonesFetchedRoomId = React.useRef<string | null>(null);
+  const lastZonesFetchedMappingsReady = React.useRef<boolean>(false);
   useEffect(() => {
     const loadZonesFromDevice = async () => {
       if (!selectedRoom || !selectedRoom.deviceId || !selectedRoom.profileId) {
+        return;
+      }
+
+      // Only fetch once per room, or when mappings become ready for the first time
+      const mappingsReady = !mappingLoading;
+      if (selectedRoom.id === lastZonesFetchedRoomId.current &&
+          lastZonesFetchedMappingsReady.current === mappingsReady) {
         return;
       }
 
@@ -330,12 +361,18 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
+      // Mark as fetched before the async call to prevent duplicate requests
+      lastZonesFetchedRoomId.current = selectedRoom.id;
+      lastZonesFetchedMappingsReady.current = mappingsReady;
+
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const deviceZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
 
         // Always sync device zones to local storage (device is source of truth)
@@ -354,13 +391,23 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, mappingLoading, deviceHasValidMappings, selectedRoom]);
 
   // Fetch polygon mode status when room changes
+  // Using refs to prevent re-fetching when entityMappings changes
+  const lastPolygonModeRoomId = React.useRef<string | null>(null);
+  const lastPolygonModeMappingsReady = React.useRef<boolean>(false);
   useEffect(() => {
     const loadPolygonModeStatus = async () => {
       if (!selectedRoom?.deviceId || !selectedRoom?.profileId) {
         setPolygonModeStatus({ supported: false, enabled: false });
+        return;
+      }
+
+      // Only fetch once per room, or when mappings become ready for the first time
+      const mappingsReady = !mappingLoading;
+      if (selectedRoom.id === lastPolygonModeRoomId.current &&
+          lastPolygonModeMappingsReady.current === mappingsReady) {
         return;
       }
 
@@ -375,12 +422,18 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
+      // Mark as fetched before the async call
+      lastPolygonModeRoomId.current = selectedRoom.id;
+      lastPolygonModeMappingsReady.current = mappingsReady;
+
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonModeStatus(status);
       } catch (err) {
@@ -389,13 +442,23 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, mappingLoading, deviceHasValidMappings, selectedRoom]);
 
   // Fetch polygon zones when polygon mode is enabled
+  // Using refs to prevent re-fetching when entityMappings changes
+  const lastPolygonZonesRoomId = React.useRef<string | null>(null);
+  const lastPolygonZonesEnabled = React.useRef<boolean>(false);
   useEffect(() => {
     const loadPolygonZones = async () => {
       if (!polygonModeStatus.enabled || !selectedRoom?.deviceId || !selectedRoom?.profileId) {
         setPolygonZones([]);
+        lastPolygonZonesEnabled.current = false;
+        return;
+      }
+
+      // Only fetch once per room when polygon mode becomes enabled
+      if (selectedRoom.id === lastPolygonZonesRoomId.current &&
+          lastPolygonZonesEnabled.current === polygonModeStatus.enabled) {
         return;
       }
 
@@ -410,12 +473,18 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
+      // Mark as fetched before the async call
+      lastPolygonZonesRoomId.current = selectedRoom.id;
+      lastPolygonZonesEnabled.current = polygonModeStatus.enabled;
+
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const zones = await fetchPolygonZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonZones(zones);
       } catch (err) {
@@ -424,7 +493,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadPolygonZones();
-  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, deviceHasValidMappings, selectedRoom]);
 
   const handleAutoZoom = useCallback(() => {
     if (!selectedRoom || !selectedRoom.roomShell || !selectedRoom.roomShell.points.length) {
@@ -448,12 +517,15 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     setPanOffsetMm({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
   }, [selectedRoom, rangeMm]);
 
-  // Auto-zoom when room loads
+  // Auto-zoom when room changes (only on room ID change, not on every handleAutoZoom recreation)
+  // Using a ref to track if we've already auto-zoomed for this room
+  const lastAutoZoomedRoomId = React.useRef<string | null>(null);
   useEffect(() => {
-    if (selectedRoom?.roomShell?.points?.length) {
+    if (selectedRoom?.roomShell?.points?.length && selectedRoom.id !== lastAutoZoomedRoomId.current) {
+      lastAutoZoomedRoomId.current = selectedRoom.id;
       handleAutoZoom();
     }
-  }, [selectedRoom?.id, handleAutoZoom]);
+  }, [selectedRoom?.id, selectedRoom?.roomShell?.points?.length, handleAutoZoom]);
 
   // Calculate distance indicator position (for EP One)
   const distanceIndicatorPos = useMemo(() => {
@@ -496,9 +568,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         </div>
       )}
 
-      {/* Entity Sync Nudge Banner - shown for rooms with device but no entity mappings */}
+      {/* Entity Sync Nudge Banner - shown for rooms with device but no valid entity mappings */}
       {/* Positioned below the Room selector dropdown (top-20) */}
-      {selectedRoom && selectedRoom.deviceId && !selectedRoom.entityMappings && onNavigate && (
+      {/* Don't show while mapping is loading to avoid flash of warning */}
+      {selectedRoom && selectedRoom.deviceId && !mappingLoading && !deviceHasValidMappings && onNavigate && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 max-w-xl rounded-xl border border-yellow-500/50 bg-yellow-500/10 backdrop-blur px-5 py-2.5 shadow-xl animate-in slide-in-from-top-4 fade-in">
           <div className="flex items-center gap-3">
             <span className="text-yellow-400">⚠</span>
@@ -1105,14 +1178,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 {liveState.illuminance !== null && liveState.illuminance !== undefined && (
                   <div className="flex justify-between py-1 border-b border-slate-700/50">
                     <span className="text-slate-400">Light:</span>
-                    <span className="text-slate-200">{liveState.illuminance.toFixed(1)} lx</span>
+                    <span className="text-slate-200">{liveState.illuminance.toFixed(1)} {deviceMapping?.entityUnits?.illuminance || 'lx'}</span>
                   </div>
                 )}
 
                 {liveState.temperature !== null && liveState.temperature !== undefined && (
                   <div className="flex justify-between py-1 border-b border-slate-700/50">
                     <span className="text-slate-400">Temperature:</span>
-                    <span className="text-slate-200">{liveState.temperature.toFixed(1)}°C</span>
+                    <span className="text-slate-200">{liveState.temperature.toFixed(1)}{deviceMapping?.entityUnits?.temperature || '°C'}</span>
                   </div>
                 )}
 
@@ -1126,7 +1199,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                       liveState.co2 < 2000 ? 'text-orange-400' :
                       'text-rose-400'
                     }>
-                      {Math.round(liveState.co2)} ppm
+                      {Math.round(liveState.co2)} {deviceMapping?.entityUnits?.co2 || 'ppm'}
                     </span>
                   </div>
                 )}
@@ -1400,7 +1473,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                       'text-rose-400'
                     }`}>
                       {Math.round(liveState.co2)}
-                      <span className="text-base font-normal text-slate-400 ml-1">ppm</span>
+                      <span className="text-base font-normal text-slate-400 ml-1">{deviceMapping?.entityUnits?.co2 || 'ppm'}</span>
                     </div>
                     <div className={`text-xs font-medium mt-1 ${
                       liveState.co2 < 800 ? 'text-emerald-300' :
@@ -1465,6 +1538,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 temperature={liveState.temperature ?? null}
                 presence={liveState.presence ?? false}
                 distance={liveState.distance ?? null}
+                entityUnits={deviceMapping?.entityUnits}
               />
             )}
 
@@ -1483,6 +1557,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 deviceId={selectedRoom.deviceId || selectedRoomId || 'unknown'}
                 presence={liveState.presence ?? false}
                 temperature={liveState.temperature ?? null}
+                entityUnits={deviceMapping?.entityUnits}
               />
             )}
 

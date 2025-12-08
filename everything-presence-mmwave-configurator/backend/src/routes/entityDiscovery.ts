@@ -94,12 +94,48 @@ export const createEntityDiscoveryRouter = (deps: EntityDiscoveryRouterDependenc
     }
 
     try {
-      const result = await discoveryService.validateMappings(mappings as Partial<EntityMappings>);
+      const result = await discoveryService.validateMappings(mappings as Partial<EntityMappings>, deviceId);
       return res.json(result);
     } catch (error) {
       logger.error({ error, deviceId }, 'Mapping validation failed');
       return res.status(500).json({
         error: 'Mapping validation failed',
+        message: (error as Error).message,
+      });
+    }
+  });
+
+  /**
+   * POST /api/devices/:deviceId/discover-and-save
+   * Discover entities for a device and save the mapping to device storage.
+   * This wires entity discovery to the device mapping store.
+   *
+   * Body: { profileId: string, deviceName: string }
+   * Response: { mapping: DeviceMapping, discovery: DiscoveryResult }
+   */
+  router.post('/:deviceId/discover-and-save', async (req, res) => {
+    const { deviceId } = req.params;
+    const { profileId, deviceName } = req.body;
+
+    if (!deviceId) {
+      return res.status(400).json({ error: 'deviceId is required' });
+    }
+
+    if (!profileId || typeof profileId !== 'string') {
+      return res.status(400).json({ error: 'profileId is required in request body' });
+    }
+
+    if (!deviceName || typeof deviceName !== 'string') {
+      return res.status(400).json({ error: 'deviceName is required in request body' });
+    }
+
+    try {
+      const result = await discoveryService.discoverAndSave(deviceId, profileId, deviceName);
+      return res.json(result);
+    } catch (error) {
+      logger.error({ error, deviceId, profileId }, 'Discover and save failed');
+      return res.status(500).json({
+        error: 'Discover and save failed',
         message: (error as Error).message,
       });
     }

@@ -8,6 +8,7 @@ export interface DiscoveredDevice {
   model?: string;
   entityNamePrefix?: string; // e.g., "bedroom_ep_lite" from "binary_sensor.bedroom_ep_lite_occupancy"
   firmwareVersion?: string; // Software/firmware version from device registry (e.g., "1.3.2")
+  areaName?: string; // Home Assistant area name (e.g., "Living Room")
 }
 
 export class DeviceDiscoveryService {
@@ -56,8 +57,84 @@ export class DeviceDiscoveryService {
 
         // Remove common suffixes to get the base device name
         // This handles ESPHome entity naming patterns
+        // Note: Order matters - more specific patterns should come first
         const prefix = withoutDomain.replace(
-          /_occupancy$|_presence$|_zone_\d+_target_count$|_target_count$|_mmwave.*$|_pir.*$|_light.*$|_illuminance.*$|_temperature.*$|_humidity.*$|_firmware.*$|_esp32_status_led$|_esp32_led$|_status_led$|_led$|_wifi_signal$|_uptime$|_restart$|_safe_mode$|_ip_address$|_connected_ssid$|_mac_address$|_dns_address$|_bluetooth_proxy.*$|_target_\d+.*$/,
+          new RegExp([
+            // Zone-related suffixes (more specific first)
+            '_zone_\\d+_occupancy_off_delay$',
+            '_zone_\\d+_target_count$',
+            '_zone_\\d+_occupancy$',
+            '_zone_\\d+_begin_[xy]$',
+            '_zone_\\d+_end_[xy]$',
+            '_zone_\\d+_off_delay$',
+            '_entry_zone_\\d+_begin_[xy]$',
+            '_entry_zone_\\d+_end_[xy]$',
+            '_occupancy_mask_\\d+_begin_[xy]$',
+            '_occupancy_mask_\\d+_end_[xy]$',
+            '_polygon_zone_\\d+$',
+            '_polygon_exclusion_\\d+$',
+            '_polygon_entry_\\d+$',
+            // Target tracking suffixes
+            '_target_\\d+_[a-z]+$',
+            '_target_\\d+.*$',
+            '_target_count$',
+            // Settings entity suffixes (EPL)
+            '_max_distance$',
+            '_occupancy_off_delay$',
+            '_installation_angle$',
+            '_upside_down_mounting$',
+            '_update_speed$',
+            '_tracking_behaviour$',
+            '_entry_exit_enabled$',
+            '_exit_threshold_pct$',
+            '_assume_present_timeout$',
+            '_stale_target_reset_timeout$',
+            '_stale_target_reset$',
+            '_polygon_zones$',
+            // Settings entity suffixes (EP1)
+            '_mmwave_mode$',
+            '_mmwave_minimum_distance$',
+            '_mmwave_max_distance$',
+            '_mmwave_trigger_distance$',
+            '_mmwave_sustain_sensitivity$',
+            '_mmwave_trigger_sensitivity$',
+            '_mmwave_threshold_factor$',
+            '_mmwave_on_latency$',
+            '_mmwave_off_latency$',
+            '_occupancy_off_latency$',
+            '_pir_off_latency$',
+            '_pir_on_latency$',
+            '_temperature_offset$',
+            '_humidity_offset$',
+            '_illuminance_offset$',
+            '_micro_motion_detection$',
+            '_mmwave_led$',
+            '_distance_speed_update_rate$',
+            // General sensor/entity suffixes
+            '_occupancy$',
+            '_presence$',
+            '_mmwave.*$',
+            '_pir.*$',
+            '_light.*$',
+            '_illuminance.*$',
+            '_temperature.*$',
+            '_humidity.*$',
+            '_co2$',
+            '_firmware.*$',
+            '_esp32_status_led$',
+            '_esp32_led$',
+            '_status_led$',
+            '_led$',
+            '_wifi_signal$',
+            '_uptime$',
+            '_restart$',
+            '_safe_mode$',
+            '_ip_address$',
+            '_connected_ssid$',
+            '_mac_address$',
+            '_dns_address$',
+            '_bluetooth_proxy.*$',
+          ].join('|')),
           ''
         );
 
@@ -70,11 +147,26 @@ export class DeviceDiscoveryService {
   }
 
   async discover(): Promise<DiscoveredDevice[]> {
-    const devices = await this.readTransport.listDevices();
+    // Fetch devices and areas in parallel
+    const [devices, areas] = await Promise.all([
+      this.readTransport.listDevices(),
+      this.readTransport.listAreaRegistry().catch((err) => {
+        logger.warn({ err }, 'Failed to fetch area registry, continuing without area info');
+        return [];
+      }),
+    ]);
 
     if (!Array.isArray(devices)) {
       logger.warn('Unexpected devices payload from HA');
       return [];
+    }
+
+    // Build area_id -> name map for quick lookup
+    const areaMap = new Map<string, string>();
+    for (const area of areas) {
+      if (area.area_id && area.name) {
+        areaMap.set(area.area_id, area.name);
+      }
     }
 
     const filteredDevices = devices
@@ -84,18 +176,23 @@ export class DeviceDiscoveryService {
         manufacturer: (d.manufacturer as string | undefined)?.trim(),
         model: d.model as string | undefined,
         firmwareVersion: d.sw_version as string | undefined,
+        areaId: d.area_id as string | undefined,
       }))
       .filter((d) => {
         const manufacturer = (d.manufacturer ?? '').toLowerCase();
         return this.manufacturerFilters.some(filter => manufacturer === filter.toLowerCase());
       });
 
-    // Enrich with entity name prefix
+    // Enrich with entity name prefix and area name
     const enrichedDevices = await Promise.all(
-      filteredDevices.map(async (device) => ({
-        ...device,
-        entityNamePrefix: await this.getEntityNamePrefixForDevice(device.id),
-      }))
+      filteredDevices.map(async (device) => {
+        const { areaId, ...rest } = device;
+        return {
+          ...rest,
+          entityNamePrefix: await this.getEntityNamePrefixForDevice(device.id),
+          areaName: areaId ? areaMap.get(areaId) : undefined,
+        };
+      })
     );
 
     return enrichedDevices;

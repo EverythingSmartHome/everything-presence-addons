@@ -10,6 +10,7 @@ import {
 } from '../api/client';
 import { RoomConfig, CustomFloorMaterial, CustomFurnitureType, EntityMappings } from '../api/types';
 import { EntityDiscovery } from '../components/EntityDiscovery';
+import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -24,6 +25,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   const [syncingRoom, setSyncingRoom] = useState<RoomConfig | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Device mappings context - used to refresh cache after resync
+  const { refreshMapping } = useDeviceMappings();
 
   // Custom assets state
   const [customFloors, setCustomFloors] = useState<CustomFloorMaterial[]>([]);
@@ -104,6 +108,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
       setRooms((prev) =>
         prev.map((r) => (r.id === syncingRoom.id ? { ...r, entityMappings: mappings } : r))
       );
+
+      // Refresh device mapping cache so other pages see the new mappings
+      if (syncingRoom.deviceId) {
+        await refreshMapping(syncingRoom.deviceId);
+      }
+
       setSuccess(`Entity mappings updated for "${syncingRoom.name}"`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
@@ -405,8 +415,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-slate-400">Loading...</div>
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-200">
+            <div
+              className="h-10 w-10 animate-spin rounded-full border-4 border-slate-700 border-t-cyan-400"
+              aria-label="Loading"
+            />
+            <div className="text-sm text-slate-400">Loading rooms and custom assets…</div>
           </div>
         ) : (
           <div className="space-y-6">
@@ -447,10 +461,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-white">{room.name}</div>
                       <div className="text-sm text-slate-400">
-                        {room.zones?.length || 0} zones configured
-                        {room.deviceId && <span className="ml-2">· Device linked</span>}
+                        {room.deviceId ? 'Device linked' : 'No device linked'}
+                        {room.roomShell?.points && room.roomShell.points.length > 0 && (
+                          <span className="ml-2">· Room outline set</span>
+                        )}
                         {room.furniture && room.furniture.length > 0 && (
-                          <span className="ml-2">· {room.furniture.length} furniture items</span>
+                          <span className="ml-2">· {room.furniture.length} furniture</span>
                         )}
                       </div>
                       {room.entityMappings ? (

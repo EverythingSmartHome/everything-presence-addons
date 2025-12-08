@@ -9,6 +9,9 @@ import {
   groupMatchResultsByCategory,
   getTemplateKeyLabel,
 } from '../api/entityDiscovery';
+import { saveDeviceMapping, DeviceMapping } from '../api/deviceMappings';
+import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { validateMappings } from '../api/entityDiscovery';
 
 interface EntityDiscoveryProps {
   deviceId: string;
@@ -29,24 +32,45 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
   onCancel,
   onBack,
 }) => {
+  const { getMapping, refreshMapping } = useDeviceMappings();
+  const [existingMapping, setExistingMapping] = useState<DeviceMapping | null>(null);
   const [status, setStatus] = useState<DiscoveryStatus>('loading');
+  const [saving, setSaving] = useState(false);
   const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string | null>(null);
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [allEntities, setAllEntities] = useState<EntityRegistryEntry[]>([]);
 
+  // Load existing device mapping to preserve user overrides during re-sync
+  useEffect(() => {
+    const loadExistingMapping = async () => {
+      try {
+        const mapping = await getMapping(deviceId);
+        setExistingMapping(mapping);
+      } catch {
+        setExistingMapping(null);
+      }
+    };
+    loadExistingMapping();
+  }, [deviceId, getMapping]);
+
   const runDiscovery = useCallback(async () => {
     setStatus('loading');
     setError(null);
+    setValidationErrors(null);
+    setManualOverrides({});
 
     try {
       const result = await discoverEntities(deviceId, profileId);
       setDiscoveryResult(result);
       setAllEntities(result.deviceEntities);
 
+      const conflictCount = result.results.filter((r) => r.matchConfidence === 'conflict').length;
+
       if (result.allMatched) {
-        setStatus('success');
+        setStatus(conflictCount > 0 ? 'partial' : 'success');
       } else {
         setStatus('partial');
         // Auto-expand groups with unmatched entities
@@ -58,6 +82,23 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
           }
         }
         setExpandedGroups(groupsWithUnmatched);
+      }
+
+      // Seed manual overrides from existing mapping so user-set values persist on re-sync
+      if (existingMapping) {
+        const overrides: Record<string, string> = {};
+        for (const match of result.results) {
+          const key = match.templateKey;
+          const m = existingMapping.mappings;
+          const direct = m[key];
+          const withEntitySuffix = m[`${key}Entity`];
+          const withoutEntitySuffix = key.endsWith('Entity') ? m[key.replace(/Entity$/, '')] : undefined;
+          const chosen = direct || withEntitySuffix || withoutEntitySuffix;
+          if (chosen) {
+            overrides[key] = chosen;
+          }
+        }
+        setManualOverrides(overrides);
       }
     } catch (err) {
       setError((err as Error).message);
@@ -78,6 +119,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
   }, [runDiscovery]);
 
   const handleOverride = (templateKey: string, entityId: string) => {
+    setValidationErrors(null);
     setManualOverrides((prev) => ({
       ...prev,
       [templateKey]: entityId,
@@ -136,9 +178,186 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     return mappings;
   };
 
-  const handleContinue = () => {
-    const mappings = buildFinalMappings();
-    onComplete(mappings);
+  const handleContinue = async () => {
+    setSaving(true);
+    setValidationErrors(null);
+    try {
+      const mappings = buildFinalMappings();
+
+      // Validate mappings against HA before saving/continuing
+      try {
+        const validation = await validateMappings(deviceId, mappings);
+        if (!validation.valid) {
+          const summary = validation.errors.slice(0, 5).map((e) => `${e.key} (${e.entityId}): ${e.error}`).join('; ');
+          setValidationErrors(`Validation failed for ${validation.errors.length} entr${validation.errors.length === 1 ? 'y' : 'ies'}: ${summary}`);
+          setSaving(false);
+          return;
+        }
+      } catch (err) {
+        setValidationErrors(`Validation failed: ${(err as Error).message}`);
+        setSaving(false);
+        return;
+      }
+
+      // Convert EntityMappings to flat DeviceMapping format for storage
+      const flatMappings: Record<string, string> = {};
+
+      // Known metadata keys that are NOT entity IDs
+      const metadataKeys = new Set(['discoveredAt', 'autoMatchedCount', 'manuallyMappedCount']);
+
+      // Extract flat entity mappings from the nested structure
+      for (const [key, value] of Object.entries(mappings)) {
+        // Skip metadata keys
+        if (metadataKeys.has(key)) continue;
+
+        // Capture ALL string values that look like entity IDs (contain a dot like "sensor.device_name")
+        // This handles both legacy keys (presenceEntity) and new format keys (maxDistance, polygonZonesEnabled)
+        if (typeof value === 'string' && value.includes('.')) {
+          flatMappings[key] = value;
+        }
+      }
+
+      // Handle zone config entities - convert 'zone1.beginX' -> 'zone1BeginX' to match profile entities keys
+      if (mappings.zoneConfigEntities) {
+        for (const [zoneKey, zoneData] of Object.entries(mappings.zoneConfigEntities)) {
+          if (zoneData && typeof zoneData === 'object') {
+            // Extract zone number from 'zone1', 'zone2', etc.
+            const zoneNum = zoneKey.replace('zone', '');
+            for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
+              if (entityId) {
+                // Convert 'beginX' to 'BeginX', combine: zone1BeginX
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`zone${zoneNum}${capitalizedProp}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Handle exclusion zone entities - convert 'exclusion1.beginX' -> 'exclusion1BeginX'
+      if (mappings.exclusionZoneEntities) {
+        for (const [zoneKey, zoneData] of Object.entries(mappings.exclusionZoneEntities)) {
+          if (zoneData && typeof zoneData === 'object') {
+            // Extract exclusion number from 'exclusion1', 'exclusion2', etc.
+            const exclusionNum = zoneKey.replace('exclusion', '');
+            for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
+              if (entityId) {
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`exclusion${exclusionNum}${capitalizedProp}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Handle entry zone config entities - convert 'entry1.beginX' -> 'entry1BeginX'
+      if (mappings.entryZoneConfigEntities) {
+        for (const [zoneKey, zoneData] of Object.entries(mappings.entryZoneConfigEntities)) {
+          if (zoneData && typeof zoneData === 'object') {
+            // Extract entry number from 'entry1', 'entry2', etc.
+            const entryNum = zoneKey.replace('entry', '');
+            for (const [prop, entityId] of Object.entries(zoneData as unknown as Record<string, string>)) {
+              if (entityId) {
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`entry${entryNum}${capitalizedProp}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Handle polygon zone entities - convert 'zone1' -> 'polygonZone1' to match profile entities keys
+      if (mappings.polygonZoneEntities) {
+        for (const [zoneKey, entityId] of Object.entries(mappings.polygonZoneEntities)) {
+          if (entityId) {
+            // Convert 'zone1' to 'polygonZone1', 'zone2' to 'polygonZone2', etc.
+            const index = zoneKey.replace('zone', '');
+            flatMappings[`polygonZone${index}`] = entityId;
+          }
+        }
+      }
+
+      // Handle polygon exclusion entities - convert 'exclusion1' -> 'polygonExclusion1'
+      if (mappings.polygonExclusionEntities) {
+        for (const [zoneKey, entityId] of Object.entries(mappings.polygonExclusionEntities)) {
+          if (entityId) {
+            // Convert 'exclusion1' to 'polygonExclusion1', etc.
+            const index = zoneKey.replace('exclusion', '');
+            flatMappings[`polygonExclusion${index}`] = entityId;
+          }
+        }
+      }
+
+      // Handle polygon entry entities - convert 'entry1' -> 'polygonEntry1'
+      if (mappings.polygonEntryEntities) {
+        for (const [zoneKey, entityId] of Object.entries(mappings.polygonEntryEntities)) {
+          if (entityId) {
+            // Convert 'entry1' to 'polygonEntry1', etc.
+            const index = zoneKey.replace('entry', '');
+            flatMappings[`polygonEntry${index}`] = entityId;
+          }
+        }
+      }
+
+      // Handle tracking targets - convert 'target1.x' -> 'target1X' to match profile entities keys
+      if (mappings.trackingTargets) {
+        for (const [targetKey, targetData] of Object.entries(mappings.trackingTargets)) {
+          if (targetData && typeof targetData === 'object') {
+            // Extract target number from 'target1', 'target2', etc.
+            const targetNum = targetKey.replace('target', '');
+            for (const [prop, entityId] of Object.entries(targetData as unknown as Record<string, string>)) {
+              if (entityId) {
+                // Convert 'x' to 'X', 'speed' to 'Speed', etc. and combine: target1X, target1Speed
+                const capitalizedProp = prop.charAt(0).toUpperCase() + prop.slice(1);
+                flatMappings[`target${targetNum}${capitalizedProp}`] = entityId;
+              }
+            }
+          }
+        }
+      }
+
+      // Handle settings entities - these are stored with their key directly (e.g., 'maxDistance')
+      // so deviceEntityService.getSettingsGrouped() can find them by key
+      if (mappings.settingsEntities) {
+        for (const [settingKey, entityId] of Object.entries(mappings.settingsEntities)) {
+          if (entityId) {
+            flatMappings[settingKey] = entityId;
+          }
+        }
+      }
+
+      // Build device mapping for storage
+      const deviceMapping: DeviceMapping = {
+        deviceId,
+        profileId,
+        deviceName,
+        discoveredAt: mappings.discoveredAt || new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        confirmedByUser: true, // User confirmed by clicking Continue
+        autoMatchedCount: mappings.autoMatchedCount || 0,
+        manuallyMappedCount: mappings.manuallyMappedCount || 0,
+        mappings: flatMappings,
+        unmappedEntities: discoveryResult?.results
+          .filter(r => !r.matchedEntityId && !manualOverrides[r.templateKey])
+          .map(r => r.templateKey) || [],
+      };
+
+      // Save to device storage
+      await saveDeviceMapping(deviceMapping);
+
+      // Refresh the context cache
+      await refreshMapping(deviceId);
+
+      // Continue with the legacy flow
+      onComplete(mappings);
+    } catch (err) {
+      console.error('Failed to save device mapping:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save device mapping');
+      setSaving(false);
+      return;
+    } finally {
+      setSaving(false);
+    }
   };
 
   const toggleGroup = (groupName: string) => {
@@ -157,6 +376,8 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     switch (confidence) {
       case 'exact':
         return '✓';
+      case 'conflict':
+        return '!';
       case 'suffix':
       case 'name':
         return '~';
@@ -169,6 +390,8 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     switch (confidence) {
       case 'exact':
         return 'text-green-400';
+      case 'conflict':
+        return 'text-orange-400';
       case 'suffix':
       case 'name':
         return 'text-yellow-400';
@@ -181,12 +404,24 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     const effectiveEntityId = manualOverrides[result.templateKey] || result.matchedEntityId;
     const isOverridden = !!manualOverrides[result.templateKey];
     const isMatched = !!effectiveEntityId;
+    const needsReview = result.matchConfidence === 'conflict' || (!result.matchedEntityId && !result.isOptional);
+
+    const renderOptionLabel = (entityId: string) => {
+      const entity = allEntities.find((e) => e.entity_id === entityId);
+      const name = entity?.name ? ` (${entity.name})` : '';
+      const disabled = (entity as any)?.disabled_by ? ' [disabled]' : '';
+      return `${entityId}${name}${disabled}`;
+    };
 
     return (
       <div
         key={result.templateKey}
         className={`flex items-center justify-between py-2 px-3 rounded-lg ${
-          isMatched ? 'bg-slate-800/30' : 'bg-red-500/10 border border-red-500/30'
+          isMatched
+            ? needsReview
+              ? 'bg-orange-500/10 border border-orange-500/30'
+              : 'bg-slate-800/30'
+            : 'bg-red-500/10 border border-red-500/30'
         }`}
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -199,30 +434,36 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
           {result.isOptional && (
             <span className="text-xs text-slate-500">(optional)</span>
           )}
+          {needsReview && (
+            <span className="text-xs text-orange-300 ml-2">Review</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 ml-2">
           {isMatched && !isOverridden ? (
-            <span className="text-xs text-slate-400 font-mono truncate max-w-[200px]">
+            <span
+              className="text-xs text-slate-400 font-mono break-all max-w-[360px]"
+              title={effectiveEntityId || undefined}
+            >
               {effectiveEntityId}
             </span>
           ) : (
             <select
               value={effectiveEntityId || ''}
               onChange={(e) => handleOverride(result.templateKey, e.target.value)}
-              className="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-300 max-w-[200px]"
+              className="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-300 max-w-[320px]"
             >
               <option value="">Select entity...</option>
               {result.candidates.length > 0 ? (
                 result.candidates.map((candidate) => (
                   <option key={candidate} value={candidate}>
-                    {candidate}
+                    {renderOptionLabel(candidate)}
                   </option>
                 ))
               ) : (
                 allEntities.map((entity) => (
                   <option key={entity.entity_id} value={entity.entity_id}>
-                    {entity.entity_id}
+                    {renderOptionLabel(entity.entity_id)}
                   </option>
                 ))
               )}
@@ -231,7 +472,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
 
           {isMatched && !isOverridden && (
             <button
-              onClick={() => handleOverride(result.templateKey, '')}
+              onClick={() => handleOverride(result.templateKey, result.matchedEntityId || '')}
               className="text-xs text-slate-500 hover:text-slate-300"
               title="Change entity"
             >
@@ -372,7 +613,32 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
                   style={{ width: `${percentage}%` }}
                 />
               </div>
+
+              {validationErrors && (
+                <div className="mt-3 p-3 rounded-lg border border-red-500/40 bg-red-500/10 text-sm text-red-300">
+                  {validationErrors}
+                </div>
+              )}
+              {error && status !== 'error' && (
+                <div className="mt-3 p-3 rounded-lg border border-red-500/40 bg-red-500/10 text-sm text-red-300">
+                  {error}
+                </div>
+              )}
             </div>
+
+            {/* Conflict / review hint */}
+            {discoveryResult && (
+              <div className="text-sm text-slate-400">
+                {discoveryResult.results.filter((r) => r.matchConfidence === 'conflict').length > 0 && (
+                  <p className="text-orange-300">
+                    Review needed: {discoveryResult.results.filter((r) => r.matchConfidence === 'conflict').length} conflicted entries.
+                  </p>
+                )}
+                {discoveryResult.results.filter((r) => !r.matchedEntityId && !r.isOptional).length > 0 && (
+                  <p>Unmatched required: {discoveryResult.results.filter((r) => !r.matchedEntityId && !r.isOptional).length}</p>
+                )}
+              </div>
+            )}
 
             {/* Entity groups */}
             {renderGroupedResults()}
@@ -403,14 +669,14 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         </button>
         <button
           onClick={handleContinue}
-          disabled={!canContinue}
+          disabled={!canContinue || saving}
           className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-            canContinue
+            canContinue && !saving
               ? 'bg-aqua-500 hover:bg-aqua-400 text-slate-900'
               : 'bg-slate-700 text-slate-500 cursor-not-allowed'
           }`}
         >
-          Continue
+          {saving ? 'Saving...' : 'Continue'}
         </button>
       </div>
     </div>

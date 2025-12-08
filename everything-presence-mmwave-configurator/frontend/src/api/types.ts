@@ -5,22 +5,68 @@ export interface DiscoveredDevice {
   model?: string;
   entityNamePrefix?: string; // e.g., "bedroom_ep_lite"
   firmwareVersion?: string; // Software/firmware version (e.g., "1.3.2")
+  areaName?: string; // Home Assistant area name (e.g., "Living Room")
 }
 
 export interface DeviceProfileLimits {
   maxZones?: number;
   maxExclusionZones?: number;
   maxEntryZones?: number;
+  maxTargets?: number;
   maxRangeMeters?: number;
   fieldOfViewDegrees?: number;
 }
 
+/**
+ * Entity category for classification and dynamic loading.
+ */
+export type EntityCategory = 'sensor' | 'setting' | 'zone' | 'tracking';
+
+/**
+ * Zone type for zone entities.
+ */
+export type ZoneType = 'regular' | 'exclusion' | 'entry' | 'polygon' | 'polygonExclusion' | 'polygonEntry';
+
+/**
+ * Control type for settings entities.
+ */
+export type ControlType = 'number' | 'switch' | 'select' | 'light' | 'text';
+
+/**
+ * Entity definition in the device profile.
+ */
+export interface EntityDefinition {
+  template: string;
+  category: EntityCategory;
+  required: boolean;
+  subcategory?: string;
+  group?: string;
+  label?: string;
+  controlType?: ControlType;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  description?: string;
+  options?: string[];
+  zoneType?: ZoneType;
+  zoneIndex?: number;
+  coord?: string;
+  targetIndex?: number;
+  property?: string;
+}
+
 export interface DeviceProfile {
   id: string;
+  /** Schema version - bump when entities/features change to trigger resync prompts */
+  schemaVersion?: string;
   label: string;
   manufacturer: string;
   capabilities: unknown;
   limits: DeviceProfileLimits;
+  /** New categorized entity definitions */
+  entities?: Record<string, EntityDefinition>;
+  /** Legacy entity map (for backward compatibility) */
   entityMap: Record<string, unknown>;
   iconUrl?: string;
 }

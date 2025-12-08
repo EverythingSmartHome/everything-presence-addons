@@ -5,15 +5,21 @@ import { getLightLevel } from './ep1/ep1Utils';
 interface EP1EnvironmentalPanelProps {
   environmental: EP1EnvironmentalData;
   co2?: number | null;
+  entityUnits?: Record<string, string>;
 }
 
-export const EP1EnvironmentalPanel: React.FC<EP1EnvironmentalPanelProps> = ({ environmental, co2 }) => {
+export const EP1EnvironmentalPanel: React.FC<EP1EnvironmentalPanelProps> = ({ environmental, co2, entityUnits }) => {
   const { temperature, humidity, illuminance } = environmental;
 
-  // Format values with fallback for null
-  const tempDisplay = temperature !== null ? `${temperature.toFixed(1)}°C` : '--';
-  const humidityDisplay = humidity !== null ? `${humidity.toFixed(1)}%` : '--';
-  const illuminanceDisplay = illuminance !== null ? `${Math.round(illuminance)} lx` : '--';
+  // Format values with fallback for null, using entityUnits for correct unit display
+  const tempUnit = entityUnits?.temperature || '°C';
+  const humidityUnit = entityUnits?.humidity || '%';
+  const illuminanceUnit = entityUnits?.illuminance || 'lx';
+  const co2Unit = entityUnits?.co2 || 'ppm';
+
+  const tempDisplay = temperature !== null ? `${temperature.toFixed(1)}${tempUnit}` : '--';
+  const humidityDisplay = humidity !== null ? `${humidity.toFixed(1)}${humidityUnit}` : '--';
+  const illuminanceDisplay = illuminance !== null ? `${Math.round(illuminance)} ${illuminanceUnit}` : '--';
 
   // Get light level context
   const lightLevel = illuminance !== null ? getLightLevel(illuminance) : null;
@@ -64,7 +70,7 @@ export const EP1EnvironmentalPanel: React.FC<EP1EnvironmentalPanelProps> = ({ en
             <div className="text-2xl">🌬️</div>
             <div className="text-xs font-semibold text-emerald-200/70 uppercase tracking-wide">CO2</div>
           </div>
-          <div className="text-3xl font-bold text-emerald-100">{Math.round(co2!)} <span className="text-lg">ppm</span></div>
+          <div className="text-3xl font-bold text-emerald-100">{Math.round(co2!)} <span className="text-lg">{co2Unit}</span></div>
         </div>
       )}
     </div>

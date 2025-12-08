@@ -15,6 +15,7 @@ import {
 import { validateZones } from '../api/validate';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, LiveState, ZoneAvailability } from '../api/types';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
+import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
 interface ZoneEditorPageProps {
   onBack?: () => void;
@@ -97,6 +98,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     [devices, selectedRoom?.deviceId],
   );
 
+  // Device mappings context - used to check if device has valid entity mappings
+  const { hasValidMappings } = useDeviceMappings();
+  const deviceHasValidMappings = selectedRoom?.deviceId ? hasValidMappings(selectedRoom.deviceId) : false;
+
   // Generate all possible zone slots based on profile limits
   const allPossibleZones = useMemo(() => {
     if (!selectedProfile) return [];
@@ -150,17 +155,16 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     if (!selectedRoom) return allPossibleZones;
 
     const deviceZones = selectedRoom.zones ?? [];
-    const merged = [...allPossibleZones];
 
-    // Match device zones to slots by type and index
-    deviceZones.forEach((deviceZone) => {
-      const slot = merged.find(z => z.id === deviceZone.id && z.type === deviceZone.type);
-      if (slot) {
-        Object.assign(slot, { ...deviceZone, enabled: true });
+    // Create new objects to avoid mutating allPossibleZones
+    return allPossibleZones.map(slot => {
+      const deviceZone = deviceZones.find(z => z.id === slot.id && z.type === slot.type);
+      if (deviceZone) {
+        return { ...slot, ...deviceZone, enabled: true };
       }
+      // Return a fresh copy with enabled: false to ensure clean state
+      return { ...slot, enabled: false };
     });
-
-    return merged;
   }, [selectedRoom, allPossibleZones]);
 
   // Only enabled zones should show on canvas
@@ -269,11 +273,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored (device mapping is source of truth)
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const deviceZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
 
         // Preserve labels from existing zones (labels are UI-only, not stored on device)
@@ -304,7 +310,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
 
   // Fetch zone availability from entity registry
   useEffect(() => {
@@ -330,11 +336,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const response = await fetchZoneAvailability(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setZoneAvailability(response.availability);
         setPolygonZonesAvailable(response.polygonZonesAvailable);
@@ -348,7 +356,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadZoneAvailability();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
 
   // Fetch polygon mode status when room changes
   useEffect(() => {
@@ -370,11 +378,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonModeStatus(status);
       } catch (err) {
@@ -383,7 +393,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
 
   // Fetch polygon zones when polygon mode is enabled
   useEffect(() => {
@@ -405,11 +415,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const zones = await fetchPolygonZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonZones(zones);
       } catch (err) {
@@ -418,7 +430,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadPolygonZones();
-  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices]);
+  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
 
   // Transform device-relative coordinates to room coordinates (keeping for reference, but not used since we get props)
   const deviceToRoom = (deviceX: number, deviceY: number) => {
@@ -489,11 +501,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   };
 
   const disableZoneSlot = (slotId: string) => {
-    const newZones = displayZones.filter(z => z.id !== slotId || !z.enabled);
-    handleZonesChange(newZones.filter(z => z.enabled));
+    const remainingZones = displayZones.filter(z => z.enabled && z.id !== slotId);
+    handleZonesChange(remainingZones);
     if (selectedZoneId === slotId) {
-      const remaining = newZones.filter(z => z.enabled);
-      setSelectedZoneId(remaining[0]?.id ?? null);
+      setSelectedZoneId(remainingZones[0]?.id ?? null);
     }
   };
 
@@ -510,13 +521,15 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
     setTogglingPolygonMode(true);
     try {
+      // Skip entityMappings if device has valid mappings stored
+      const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
       const newEnabled = !polygonModeStatus.enabled;
       await setPolygonMode(
         selectedRoom.deviceId,
         selectedRoom.profileId,
         entityNamePrefix,
         newEnabled,
-        selectedRoom.entityMappings
+        entityMappingsToUse
       );
       setPolygonModeStatus({ ...polygonModeStatus, enabled: newEnabled });
 
@@ -527,7 +540,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonZones(zones);
       } else {
@@ -541,8 +554,77 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
   };
 
+  /**
+   * Check if any zones are outside the device's max detection range.
+   * Returns an array of zone labels that are out of range.
+   */
+  const getOutOfRangeZones = useCallback((
+    rectZones: ZoneRect[],
+    polyZones: ZonePolygon[],
+    maxRangeMm: number,
+    isPolygonMode: boolean
+  ): string[] => {
+    const outOfRange: string[] = [];
+
+    if (isPolygonMode) {
+      // Check polygon zones
+      polyZones.forEach((zone, idx) => {
+        const isOutOfRange = zone.vertices.some(v => {
+          const distance = Math.sqrt(v.x * v.x + v.y * v.y);
+          return distance > maxRangeMm;
+        });
+        if (isOutOfRange) {
+          const typeLabel = zone.type === 'regular' ? 'Zone' : zone.type === 'exclusion' ? 'Exclusion' : 'Entry';
+          outOfRange.push(`${typeLabel} ${idx + 1}`);
+        }
+      });
+    } else {
+      // Check rectangle zones
+      rectZones.forEach((zone, idx) => {
+        // Check all four corners of the rectangle
+        const corners = [
+          { x: zone.x, y: zone.y },
+          { x: zone.x + zone.width, y: zone.y },
+          { x: zone.x, y: zone.y + zone.height },
+          { x: zone.x + zone.width, y: zone.y + zone.height },
+        ];
+        const isOutOfRange = corners.some(c => {
+          const distance = Math.sqrt(c.x * c.x + c.y * c.y);
+          return distance > maxRangeMm;
+        });
+        if (isOutOfRange) {
+          const typeLabel = zone.type === 'regular' ? 'Zone' : zone.type === 'exclusion' ? 'Exclusion' : 'Entry';
+          const zoneNum = rectZones.filter(z => z.type === zone.type).indexOf(zone) + 1;
+          outOfRange.push(`${typeLabel} ${zoneNum}`);
+        }
+      });
+    }
+
+    return outOfRange;
+  }, []);
+
   const handleSaveZones = async () => {
     if (!selectedRoom) return;
+
+    // Check if zones are outside max range
+    const maxRangeMeters = selectedProfile?.limits?.maxRangeMeters ?? 6;
+    const maxRangeMm = maxRangeMeters * 1000;
+
+    const rectZones = (selectedRoom.zones ?? []).filter(zone => isZoneAvailable(zone));
+    const outOfRangeZones = getOutOfRangeZones(
+      rectZones,
+      polygonZones,
+      maxRangeMm,
+      polygonModeStatus.enabled
+    );
+
+    if (outOfRangeZones.length > 0) {
+      setError(
+        `The following zones extend beyond the device's max detection range (${maxRangeMeters}m): ${outOfRangeZones.join(', ')}. ` +
+        `Please move or resize these zones to be within the detection area shown by the overlay.`
+      );
+      return;
+    }
 
     setSaving(true);
     try {
@@ -556,6 +638,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
 
       if (selectedRoom.deviceId && effectiveProfile && entityNamePrefix) {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         if (polygonModeStatus.enabled) {
           // Save polygon zones
           await pushPolygonZonesToDevice(
@@ -563,7 +647,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             effectiveProfile,
             polygonZones,
             entityNamePrefix,
-            selectedRoom.entityMappings
+            entityMappingsToUse
           );
         } else {
           // Save rectangle zones
@@ -574,7 +658,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           await validateZones(availableZones);
 
           // Push zones to device (device is source of truth)
-          await pushZonesToDevice(selectedRoom.deviceId, effectiveProfile, availableZones, entityNamePrefix, selectedRoom.entityMappings);
+          await pushZonesToDevice(selectedRoom.deviceId, effectiveProfile, availableZones, entityNamePrefix, entityMappingsToUse);
         }
       }
 
@@ -797,9 +881,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         <button
           onClick={handleSaveZones}
           disabled={saving}
-          className="rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95"
+          className="rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95 flex items-center gap-2"
         >
-          {saving ? 'Saving...' : 'Save Zones'}
+          {saving && (
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          )}
+          {saving ? 'Saving Zones...' : 'Save Zones'}
         </button>
       </div>
 
@@ -1199,7 +1286,6 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     </button>
                     <button
                       onClick={() => {
-                        if (entryZonesAvailable === false) return;
                         const entryCount = polygonZones.filter(z => z.type === 'entry').length;
                         if (entryCount >= (selectedProfile?.limits.maxEntryZones ?? 2)) return;
                         const newZone: ZonePolygon = {
@@ -1211,15 +1297,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         setPolygonZones([...polygonZones, newZone]);
                         setSelectedZoneId(newZone.id);
                       }}
-                      disabled={
-                        entryZonesAvailable === false ||
-                        polygonZones.filter(z => z.type === 'entry').length >= (selectedProfile?.limits.maxEntryZones ?? 2)
-                      }
+                      disabled={polygonZones.filter(z => z.type === 'entry').length >= (selectedProfile?.limits.maxEntryZones ?? 2)}
                       className="flex-1 rounded-lg border border-emerald-500/50 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
-                      title={entryZonesAvailable === false ? 'Entry Zones require a firmware update. Please update your device firmware to use this feature.' : undefined}
                     >
                       + Entry ({polygonZones.filter(z => z.type === 'entry').length}/{selectedProfile?.limits.maxEntryZones ?? 2})
-                      {entryZonesAvailable === false && ' ⚠️'}
                     </button>
                   </div>
 
@@ -1374,11 +1455,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                               handleZonesChange(newDisplayZones.filter(z => z.enabled));
                             }}
                             onDelete={(id) => {
-                              const newZones = displayZones.filter(z => z.id !== id || !z.enabled);
-                              handleZonesChange(newZones.filter(z => z.enabled));
+                              const remainingZones = displayZones.filter(z => z.enabled && z.id !== id);
+                              handleZonesChange(remainingZones);
                               if (selectedZoneId === id) {
-                                const remaining = newZones.filter(z => z.enabled);
-                                setSelectedZoneId(remaining[0]?.id ?? null);
+                                setSelectedZoneId(remainingZones[0]?.id ?? null);
                               }
                             }}
                           />

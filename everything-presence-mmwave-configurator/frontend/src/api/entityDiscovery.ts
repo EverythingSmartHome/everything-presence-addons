@@ -1,5 +1,6 @@
 import { ingressAware } from './client';
 import { EntityMappings } from './types';
+import { DeviceMapping } from './deviceMappings';
 
 /**
  * Entity registry entry from Home Assistant.
@@ -15,8 +16,9 @@ export interface EntityRegistryEntry {
 
 /**
  * Confidence level for entity matching.
+ * 'conflict' means multiple candidates scored equally and needs review.
  */
-export type MatchConfidence = 'exact' | 'suffix' | 'name' | 'none';
+export type MatchConfidence = 'exact' | 'suffix' | 'name' | 'conflict' | 'none';
 
 /**
  * Result of matching a single entity template.
@@ -123,6 +125,37 @@ export const validateMappings = async (
 };
 
 /**
+ * Discover entities and save to device mapping storage.
+ * This is the primary method to wire frontend discovery to device mappings.
+ */
+export interface DiscoverAndSaveResult {
+  mapping: DeviceMapping;
+  discovery: DiscoveryResult;
+}
+
+export const discoverAndSaveEntities = async (
+  deviceId: string,
+  profileId: string,
+  deviceName: string
+): Promise<DiscoverAndSaveResult> => {
+  const res = await fetch(
+    ingressAware(`api/devices/${deviceId}/discover-and-save`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId, deviceName }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Discover and save failed: ${res.status} ${res.statusText} - ${text}`);
+  }
+
+  return res.json();
+};
+
+/**
  * Group entity match results by category for display.
  */
 export const groupMatchResultsByCategory = (
@@ -153,18 +186,18 @@ export const groupMatchResultsByCategory = (
       groups['Environmental Sensors'].push(result);
     } else if (key.includes('distance') || key.includes('speed') || key.includes('energy') || key.includes('targetCount')) {
       groups['Distance/Tracking'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone1')) {
-      groups['Zone 1'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone2')) {
-      groups['Zone 2'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone3')) {
-      groups['Zone 3'].push(result);
-    } else if (key.includes('zoneConfigEntities.zone4')) {
-      groups['Zone 4'].push(result);
     } else if (key.includes('exclusion')) {
       groups['Exclusion Zones'].push(result);
     } else if (key.includes('entry')) {
       groups['Entry Zones'].push(result);
+    } else if (key.startsWith('zone1') || key.includes('zoneConfigEntities.zone1')) {
+      groups['Zone 1'].push(result);
+    } else if (key.startsWith('zone2') || key.includes('zoneConfigEntities.zone2')) {
+      groups['Zone 2'].push(result);
+    } else if (key.startsWith('zone3') || key.includes('zoneConfigEntities.zone3')) {
+      groups['Zone 3'].push(result);
+    } else if (key.startsWith('zone4') || key.includes('zoneConfigEntities.zone4')) {
+      groups['Zone 4'].push(result);
     } else if (key.includes('polygon')) {
       groups['Polygon Zones'].push(result);
     } else if (key.includes('trackingTargets')) {

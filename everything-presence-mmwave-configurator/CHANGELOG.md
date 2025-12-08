@@ -1,3 +1,31 @@
+## 2.0.6
+This release adds quite a bit of work to discovering entities, which in turn resolves a lot of the UI issues like settings not showing up, missing sensors, tracking not updating real-time. Recommend re-syncing entities after by going to Settings > Re-Sync entities. Make sure that the auto discovered entities are matched correctly and change any that have not.
+
+- Fix deleted zones not saving to device by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/149
+- Fix regular zone saving as entry zones (Rectangular zone mode) by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/160
+- Show Home Assistant area and firmware version during setup by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/161
+- Store device version in device profile by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/162
+- Improve entity discovery and matching by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/163
+- Improve displaying of units of measurement by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/165
+- Fix issue with re-appearing re-sync entities message constantly by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/166
+
+## 2.0.5
+
+- Fix zone deletion not working in Zone Editor by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix false "firmware update needed" warning for entry zones when in polygon mode by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix scrolling in furniture catalog causing canvas to zoom by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Improve furniture catalog UI - convert to modal popup with fixed height by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix room management always showing "0 zones configured" by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
+## 2.0.4
+- Fix issue where zooming would get constantly reset by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Improve saving of zones by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Improve page load times by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+- Fix 502 errors on opening of live dashboard by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
+## 2.0.3
+- Refactor to separate device entity mappings from room configs, making device mappings the single source of truth stored at the device level by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
+
 ## 2.0.2
 
 - Fix issue where entities were not correctly discovered during setup. by [@EverythingSmartHome](https://github.com/EverythingSmartHome)

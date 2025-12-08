@@ -5,6 +5,8 @@ import type { IHaWriteClient } from '../ha/writeClient';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
 import type { EntityMappings } from '../domain/types';
 import { EntityResolver } from '../domain/entityResolver';
+import { deviceEntityService } from '../domain/deviceEntityService';
+import { deviceMappingStorage } from '../config/deviceMappingStorage';
 
 export function createLiveRouter(
   readTransport: IHaReadTransport,
@@ -50,15 +52,33 @@ export function createLiveRouter(
         }
       }
 
+      // Check if device has device-level mappings (preferred)
+      const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
+      const hasMappings = hasDeviceMapping || !!entityMappings;
+
+      // Log warning if no mappings found
+      if (!hasMappings) {
+        logger.warn({ deviceId, profileId }, 'No device mappings found - entity resolution may fail');
+      }
+
       const liveState: any = {
         deviceId,
         profileId: profile.id,
         timestamp: Date.now(),
+        hasMappings, // Signal to frontend whether mappings are available
       };
 
-      // Helper to get entity state by pattern using EntityResolver
+      // Helper to get entity state by pattern - tries device mapping first, then legacy
       const getEntityState = async (mappingKey: string, template: string | null) => {
-        const entityId = EntityResolver.resolve(entityMappings, deviceName, mappingKey, template);
+        // Try device-level mapping first (preferred)
+        let entityId: string | null = null;
+        if (hasDeviceMapping) {
+          entityId = deviceEntityService.getEntityId(deviceId, mappingKey);
+        }
+        // Fallback to legacy resolution
+        if (!entityId) {
+          entityId = EntityResolver.resolve(entityMappings, deviceName, mappingKey, template);
+        }
         if (!entityId) return null;
         try {
           const state = await readTransport.getState(entityId);
@@ -137,9 +157,43 @@ export function createLiveRouter(
       if (capabilities?.tracking) {
         const targets: any[] = [];
 
-        // Helper to get target entity state using EntityResolver
+        // Helper to convert imperial units to mm
+        const convertToMm = (value: number, unit: string | undefined): number => {
+          if (!unit) return value;
+          const unitLower = unit.toLowerCase();
+          // Convert inches to mm (1 inch = 25.4 mm)
+          if (unitLower === 'in' || unitLower === 'inch' || unitLower === 'inches' || unitLower === '"') {
+            return value * 25.4;
+          }
+          // Convert feet to mm (1 foot = 304.8 mm)
+          if (unitLower === 'ft' || unitLower === 'foot' || unitLower === 'feet' || unitLower === "'") {
+            return value * 304.8;
+          }
+          // Convert cm to mm
+          if (unitLower === 'cm') {
+            return value * 10;
+          }
+          // Convert m to mm
+          if (unitLower === 'm') {
+            return value * 1000;
+          }
+          return value;
+        };
+
+        // Helper to get target entity state - tries device mapping first, then legacy
         const getTargetState = async (targetNum: number, property: 'x' | 'y' | 'speed' | 'resolution' | 'angle' | 'distance' | 'active') => {
-          const entityId = EntityResolver.resolveTargetEntity(entityMappings, deviceName, targetNum, property);
+          let entityId: string | null = null;
+          // Try device-level mapping first
+          if (hasDeviceMapping) {
+            const targetSet = deviceEntityService.getTargetEntities(deviceId, targetNum);
+            if (targetSet && targetSet[property]) {
+              entityId = targetSet[property] as string;
+            }
+          }
+          // Fallback to legacy resolution
+          if (!entityId) {
+            entityId = EntityResolver.resolveTargetEntity(entityMappings, deviceName, targetNum, property);
+          }
           if (!entityId) return null;
           try {
             const state = await readTransport.getState(entityId);
@@ -159,24 +213,35 @@ export function createLiveRouter(
             target.active = activeState.state === 'on';
           }
 
-          // Fetch coordinates
+          // Fetch coordinates with unit conversion
           const xState = await getTargetState(i, 'x');
           if (xState && xState.state !== 'unavailable' && xState.state !== 'unknown') {
-            target.x = parseFloat(xState.state);
-            if (isNaN(target.x)) target.x = null;
+            let x = parseFloat(xState.state);
+            if (!isNaN(x)) {
+              // Convert to mm if unit is imperial
+              x = convertToMm(x, xState.attributes?.unit_of_measurement as string | undefined);
+              target.x = x;
+            }
           }
 
           const yState = await getTargetState(i, 'y');
           if (yState && yState.state !== 'unavailable' && yState.state !== 'unknown') {
-            target.y = parseFloat(yState.state);
-            if (isNaN(target.y)) target.y = null;
+            let y = parseFloat(yState.state);
+            if (!isNaN(y)) {
+              // Convert to mm if unit is imperial
+              y = convertToMm(y, yState.attributes?.unit_of_measurement as string | undefined);
+              target.y = y;
+            }
           }
 
-          // Fetch additional target data
+          // Fetch additional target data with unit conversion for distance
           const distanceState = await getTargetState(i, 'distance');
           if (distanceState && distanceState.state !== 'unavailable' && distanceState.state !== 'unknown') {
-            target.distance = parseFloat(distanceState.state);
-            if (isNaN(target.distance)) target.distance = null;
+            let distance = parseFloat(distanceState.state);
+            if (!isNaN(distance)) {
+              distance = convertToMm(distance, distanceState.attributes?.unit_of_measurement as string | undefined);
+              target.distance = distance;
+            }
           }
 
           const speedState = await getTargetState(i, 'speed');

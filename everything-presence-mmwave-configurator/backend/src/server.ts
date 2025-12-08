@@ -13,9 +13,12 @@ import { createSettingsRouter } from './routes/settings';
 import { createLiveRouter } from './routes/live';
 import { createCustomAssetsRouter } from './routes/customAssets';
 import { createHeatmapRouter } from './routes/heatmap';
+import { createDeviceMappingsRouter } from './routes/deviceMappings';
 import type { IHaReadTransport } from './ha/readTransport';
 import type { IHaWriteClient } from './ha/writeClient';
 import type { DeviceProfileLoader } from './domain/deviceProfiles';
+import { deviceEntityService } from './domain/deviceEntityService';
+import { migrationService } from './domain/migrationService';
 
 export interface TransportStatus {
   readTransport: 'websocket' | 'rest';
@@ -48,9 +51,17 @@ export const createServer = (config: AppConfig, deps?: ServerDependencies): expr
   app.use('/api/zones', createZonesRouter());
   app.use('/api/settings', createSettingsRouter());
   app.use('/api/custom-assets', createCustomAssetsRouter());
+  app.use('/api/device-mappings', createDeviceMappingsRouter({ readTransport: deps?.readTransport, profileLoader: deps?.profileLoader }));
 
   // Routes that require HA dependencies
   if (deps) {
+    // Initialize deviceEntityService with profileLoader
+    deviceEntityService.setProfileLoader(deps.profileLoader);
+
+    // Run migration on startup (async, non-blocking)
+    migrationService.migrateAllOnStartup().catch((error) => {
+      logger.error({ error }, 'Entity mapping migration failed on startup');
+    });
     const devicesDeps: DevicesRouterDependencies = {
       readTransport: deps.readTransport,
       writeClient: deps.writeClient,

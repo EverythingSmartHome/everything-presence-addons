@@ -4,9 +4,11 @@ import { calculateDewPoint, calculateHeatIndex, getComfortLevel } from './ep1Uti
 interface EP1ComfortPanelProps {
   temperature: number | null;
   humidity: number | null;
+  entityUnits?: Record<string, string>;
 }
 
-export const EP1ComfortPanel: React.FC<EP1ComfortPanelProps> = ({ temperature, humidity }) => {
+export const EP1ComfortPanel: React.FC<EP1ComfortPanelProps> = ({ temperature, humidity, entityUnits }) => {
+  const tempUnit = entityUnits?.temperature || '°C';
   if (temperature === null || humidity === null) {
     return (
       <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
@@ -35,14 +37,14 @@ export const EP1ComfortPanel: React.FC<EP1ComfortPanelProps> = ({ temperature, h
         {/* Dew Point */}
         <div className="bg-slate-800/40 rounded-lg p-2">
           <div className="text-xs text-slate-500 mb-0.5">Dew Point</div>
-          <div className="text-slate-200 font-medium">{dewPoint}°C</div>
+          <div className="text-slate-200 font-medium">{dewPoint}{tempUnit}</div>
         </div>
 
         {/* Feels Like (Heat Index) */}
         <div className="bg-slate-800/40 rounded-lg p-2">
           <div className="text-xs text-slate-500 mb-0.5">Feels Like</div>
           <div className="text-slate-200 font-medium">
-            {heatIndex !== null ? `${heatIndex}°C` : `${temperature}°C`}
+            {heatIndex !== null ? `${heatIndex}${tempUnit}` : `${temperature}${tempUnit}`}
           </div>
         </div>
       </div>
@@ -55,11 +57,11 @@ export const EP1ComfortPanel: React.FC<EP1ComfortPanelProps> = ({ temperature, h
         <div className="relative h-3 bg-slate-700/50 rounded-full overflow-hidden">
           {/* Gradient background showing zones */}
           <div className="absolute inset-0 flex">
-            <div className="flex-1 bg-cyan-500/40" title="Cold (<18°C)" />
-            <div className="flex-1 bg-blue-500/40" title="Cool (18-20°C)" />
-            <div className="flex-1 bg-emerald-500/40" title="Optimal (20-24°C)" />
-            <div className="flex-1 bg-amber-500/40" title="Warm (24-26°C)" />
-            <div className="flex-1 bg-red-500/40" title="Hot (>26°C)" />
+            <div className="flex-1 bg-cyan-500/40" title={tempUnit === '°F' ? 'Cold (<64°F)' : 'Cold (<18°C)'} />
+            <div className="flex-1 bg-blue-500/40" title={tempUnit === '°F' ? 'Cool (64-68°F)' : 'Cool (18-20°C)'} />
+            <div className="flex-1 bg-emerald-500/40" title={tempUnit === '°F' ? 'Optimal (68-75°F)' : 'Optimal (20-24°C)'} />
+            <div className="flex-1 bg-amber-500/40" title={tempUnit === '°F' ? 'Warm (75-79°F)' : 'Warm (24-26°C)'} />
+            <div className="flex-1 bg-red-500/40" title={tempUnit === '°F' ? 'Hot (>79°F)' : 'Hot (>26°C)'} />
           </div>
           {/* Current position marker */}
           <div
@@ -70,8 +72,8 @@ export const EP1ComfortPanel: React.FC<EP1ComfortPanelProps> = ({ temperature, h
           />
         </div>
         <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-          <span>14°C</span>
-          <span>30°C</span>
+          <span>{tempUnit === '°F' ? '57°F' : '14°C'}</span>
+          <span>{tempUnit === '°F' ? '86°F' : '30°C'}</span>
         </div>
       </div>
 

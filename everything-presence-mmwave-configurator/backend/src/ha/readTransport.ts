@@ -1,6 +1,19 @@
 import { EntityRegistryEntry } from './types';
 
 /**
+ * Area registry entry from Home Assistant
+ */
+export interface AreaRegistryEntry {
+  area_id: string;
+  name: string;
+  picture: string | null;
+  aliases: string[];
+  floor_id: string | null;
+  icon: string | null;
+  labels: string[];
+}
+
+/**
  * Entity state as returned by Home Assistant
  */
 export interface EntityState {
@@ -66,6 +79,11 @@ export interface IHaReadTransport {
    * List all entities from the entity registry
    */
   listEntityRegistry(): Promise<EntityRegistryEntry[]>;
+
+  /**
+   * List all areas from the area registry
+   */
+  listAreaRegistry(): Promise<AreaRegistryEntry[]>;
 
   // ─────────────────────────────────────────────────────────────────
   // State Queries

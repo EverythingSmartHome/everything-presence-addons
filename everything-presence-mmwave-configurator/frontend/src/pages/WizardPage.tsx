@@ -12,6 +12,7 @@ import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
 import { fetchZoneAvailability } from '../api/client';
+import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -161,6 +162,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     [profiles, profileId, selectedRoom?.profileId],
   );
 
+  // Device mappings context - used to check if device has valid entity mappings
+  const { hasValidMappings } = useDeviceMappings();
+  const deviceHasValidMappings = selectedRoom?.deviceId ? hasValidMappings(selectedRoom.deviceId) : false;
+
   // State for feature availability (based on entity existence, not firmware version)
   const [entryZonesAvailable, setEntryZonesAvailable] = useState<boolean | null>(null);
   const [polygonZonesAvailable, setPolygonZonesAvailable] = useState<boolean | null>(null);
@@ -207,7 +212,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       }
 
       try {
-        const response = await fetchZoneAvailability(currentDeviceId, currentProfileId, entityNamePrefix, selectedRoom?.entityMappings);
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom?.entityMappings;
+        const response = await fetchZoneAvailability(currentDeviceId, currentProfileId, entityNamePrefix, entityMappingsToUse);
         setEntryZonesAvailable(response.entryZonesAvailable);
         setPolygonZonesAvailable(response.polygonZonesAvailable);
       } catch {
@@ -217,7 +224,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadFeatureAvailability();
-  }, [selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, profileId, devices]);
+  }, [selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, profileId, devices, deviceHasValidMappings]);
 
   // Dynamic steps based on room path
   const steps: StepKey[] = useMemo(() => {
@@ -694,12 +701,14 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       zonesLoadedRef.current.add(roomKey);
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         // fetchZonesFromDevice returns ZoneRect[] directly, not { zones: ZoneRect[] }
         const fetchedZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         ) || [];
         const updatedRoom: RoomConfig = { ...selectedRoom, zones: fetchedZones };
         await updateRoom(selectedRoom.id, updatedRoom);
@@ -721,7 +730,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, devices, onRoomUpdate]);
+  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, devices, onRoomUpdate, deviceHasValidMappings]);
 
   // Fetch polygon mode status when entering zones step
   // This runs AFTER zones have been loaded to ensure room is fully initialized
@@ -750,11 +759,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       }
 
       try {
+        // Skip entityMappings if device has valid mappings stored
+        const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
         setPolygonModeStatus(status);
 
@@ -764,7 +775,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             selectedRoom.deviceId,
             selectedRoom.profileId,
             entityNamePrefix,
-            selectedRoom.entityMappings
+            entityMappingsToUse
           );
           setPolygonZones(zones);
         } else if (status.supported) {
@@ -786,7 +797,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadPolygonModeStatus();
-  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, zonesLoadingComplete]);
+  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, zonesLoadingComplete, deviceHasValidMappings]);
 
   // Track if we've auto-enabled Zone 1 for this room to avoid re-enabling if user manually disables
   const autoEnabledZoneRef = useRef<Set<string>>(new Set());
@@ -906,7 +917,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     setCreating(true);
     setError(null);
     try {
-      const room = await onCreateRoom(newRoomName.trim(), deviceId, profileId, discoveredMappings ?? undefined);
+      // Don't pass entityMappings - device mapping was already saved by EntityDiscovery
+      // The backend will use device mapping as source of truth
+      const room = await onCreateRoom(newRoomName.trim(), deviceId, profileId, undefined);
       setRoomId(room.id);
       onSelectRoom(room.id, room.profileId ?? profileId ?? null);
       setNewRoomName('');
@@ -1009,12 +1022,14 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     setError(null);
     setPushSuccess(false);
     try {
+      // Skip entityMappings if device has valid mappings stored
+      const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom?.entityMappings;
       if (polygonModeStatus.enabled) {
         // Push polygon zones to device
-        await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, selectedRoom?.entityMappings);
+        await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, entityMappingsToUse);
       } else {
         // Push rectangular zones to device (device is source of truth)
-        await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix, selectedRoom?.entityMappings);
+        await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix, entityMappingsToUse);
         // Also update add-on storage to mirror device state
         await updateRoom(selectedRoom!.id, { zones: selectedRoom!.zones });
       }
@@ -1054,13 +1069,15 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     setError(null);
 
     try {
+      // Skip entityMappings if device has valid mappings stored
+      const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
       // Enable polygon mode on the device
       await setPolygonMode(
         selectedRoom.deviceId,
         selectedRoom.profileId,
         entityNamePrefix,
         true,
-        selectedRoom.entityMappings
+        entityMappingsToUse
       );
 
       // Convert existing rectangular zones to polygon zones (4-vertex rectangles)
@@ -1084,7 +1101,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           selectedRoom.profileId,
           convertedZones,
           entityNamePrefix,
-          selectedRoom.entityMappings
+          entityMappingsToUse
         );
       }
 
@@ -1915,7 +1932,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               <h3 className="text-lg font-bold text-white">Select your device</h3>
             </div>
             <p className="text-sm text-slate-400">
-              Choose the EverythingSmartTechnology device you want to configure.
+              Which Everything Presence device do you want to setup?
             </p>
           </div>
           {devices.length === 0 && (
@@ -1962,8 +1979,18 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       </div>
                       <div className="text-xs text-slate-400 mt-1">
                         {d.model ?? 'Unknown model'}
-                        {isAssigned && <span className="text-xs text-slate-500 ml-2">• Assigned to {assignedRoom?.name}</span>}
+                        {d.firmwareVersion && <span className="text-slate-500"> • v{d.firmwareVersion}</span>}
                       </div>
+                      {d.areaName && (
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          HA Area: {d.areaName}
+                        </div>
+                      )}
+                      {isAssigned && (
+                        <div className="text-xs text-amber-500/80 mt-0.5">
+                          Already configured in "{assignedRoom?.name}"
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
