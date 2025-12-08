@@ -10,6 +10,7 @@ import {
 } from '../api/client';
 import { RoomConfig, CustomFloorMaterial, CustomFurnitureType, EntityMappings } from '../api/types';
 import { EntityDiscovery } from '../components/EntityDiscovery';
+import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -24,6 +25,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   const [syncingRoom, setSyncingRoom] = useState<RoomConfig | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // Device mappings context - used to refresh cache after resync
+  const { refreshMapping } = useDeviceMappings();
 
   // Custom assets state
   const [customFloors, setCustomFloors] = useState<CustomFloorMaterial[]>([]);
@@ -104,6 +108,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
       setRooms((prev) =>
         prev.map((r) => (r.id === syncingRoom.id ? { ...r, entityMappings: mappings } : r))
       );
+
+      // Refresh device mapping cache so other pages see the new mappings
+      if (syncingRoom.deviceId) {
+        await refreshMapping(syncingRoom.deviceId);
+      }
+
       setSuccess(`Entity mappings updated for "${syncingRoom.name}"`);
       setTimeout(() => setSuccess(null), 3000);
     } catch (err) {

@@ -198,12 +198,11 @@ export const DeviceMappingsProvider: React.FC<DeviceMappingsProviderProps> = ({
     []
   );
 
-  // Check if device has valid mappings
+  // Check if device has mappings loaded (callers should do version comparison)
   const hasValidMappings = useCallback(
     (deviceId: string): boolean => {
       const state = mappings.get(deviceId);
-      if (!state?.mapping) return false;
-      return !!(state.mapping.mappings.presence || state.mapping.mappings.presenceEntity);
+      return state?.mapping !== null && state?.mapping !== undefined;
     },
     [mappings]
   );
@@ -317,17 +316,31 @@ export const useDeviceMappings = (): DeviceMappingsContextValue => {
  */
 export const useDeviceMapping = (deviceId: string | undefined) => {
   const { getMapping, getCachedMapping, isLoading, getError, refreshMapping } = useDeviceMappings();
-  const [loaded, setLoaded] = useState(false);
+  // Track which deviceId we've loaded for to handle deviceId changes
+  const [loadedForDeviceId, setLoadedForDeviceId] = useState<string | null>(null);
 
   React.useEffect(() => {
-    if (deviceId && !loaded) {
-      getMapping(deviceId).then(() => setLoaded(true));
+    // Reset loaded state when deviceId changes
+    if (deviceId !== loadedForDeviceId) {
+      setLoadedForDeviceId(null);
     }
-  }, [deviceId, loaded, getMapping]);
+
+    if (deviceId && loadedForDeviceId !== deviceId) {
+      getMapping(deviceId).then(() => setLoadedForDeviceId(deviceId));
+    }
+  }, [deviceId, loadedForDeviceId, getMapping]);
+
+  // Consider loading if:
+  // 1. No deviceId yet
+  // 2. The mapping cache says it's loading
+  // 3. We haven't completed loading for this deviceId yet
+  const effectiveLoading = deviceId
+    ? isLoading(deviceId) || loadedForDeviceId !== deviceId
+    : false;
 
   return {
     mapping: deviceId ? getCachedMapping(deviceId) : null,
-    loading: deviceId ? isLoading(deviceId) : false,
+    loading: effectiveLoading,
     error: deviceId ? getError(deviceId) : null,
     refresh: deviceId ? () => refreshMapping(deviceId) : () => Promise.resolve(),
   };
