@@ -1,3 +1,14 @@
+## 2.0.6
+This release adds quite a bit of work to discovering entities, which in turn resolves a lot of the UI issues like settings not showing up, missing sensors, tracking not updating real-time. Recommend re-syncing entities after by going to Settings > Re-Sync entities. Make sure that the auto discovered entities are matched correctly and change any that have not.
+
+- Fix deleted zones not saving to device by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/149
+- Fix regular zone saving as entry zones (Rectangular zone mode) by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/160
+- Show Home Assistant area and firmware version during setup by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/161
+- Store device version in device profile by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/162
+- Improve entity discovery and matching by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/163
+- Improve displaying of units of measurement by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/165
+- Fix issue with re-appearing re-sync entities message constantly by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/166
+
 ## 2.0.5
 
 - Fix zone deletion not working in Zone Editor by [@EverythingSmartHome](https://github.com/EverythingSmartHome)
