@@ -24,12 +24,15 @@ A visual configuration tool for Everything Presence devices in Home Assistant.
 
 ### Installation
 
-1. Add this repository to your Home Assistant Add-on Store:
-   ```
-   https://github.com/EverythingSmartHome/everything-presence-addons
-   ```
-2. Install "Everything Presence Zone Configurator" from the add-on store
-3. Start the add-on and open the web UI
+1. [Click this link to add this repository to the Add-on Store](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https://github.com/EverythingSmartHome/everything-presence-addons) (note: not HACS) and click Add.
+   - If that link doesn't work, then
+        1. Go to http://homeassistant.local:8123/hassio/store (or whatever your Home Assistant URL is)
+        2. Click the 3 dots icon in the upper right, then click `Repository`
+        3. In the Add field, paste `https://github.com/EverythingSmartHome/everything-presence-addons` 
+        4. Click `+ Add` then `Close`
+3. Scroll to the section "Everything Presence Add-ons" 
+4. Click "Everything Presence Zone Configurator" and then Install
+5. Start the add-on and open the web UI
 
 ### Documentation
 
