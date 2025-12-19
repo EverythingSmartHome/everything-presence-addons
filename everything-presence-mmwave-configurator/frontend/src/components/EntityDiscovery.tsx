@@ -409,7 +409,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     const isMatched = !!effectiveEntityId;
     const needsReview = result.matchConfidence === 'conflict' || (!result.matchedEntityId && !result.isOptional);
     const matchedEntity = effectiveEntityId ? entityById.get(effectiveEntityId) : undefined;
-    const isDisabled = !!matchedEntity?.disabled_by || !!matchedEntity?.hidden_by;
+    const isDisabled = !!matchedEntity?.disabled_by;
 
     const renderOptionLabel = (entityId: string) => {
       const entity = entityById.get(entityId);
@@ -425,6 +425,10 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
       if (effectiveEntityId) {
         options.push(effectiveEntityId);
         seen.add(effectiveEntityId);
+      }
+      if (result.matchedEntityId && !seen.has(result.matchedEntityId)) {
+        options.push(result.matchedEntityId);
+        seen.add(result.matchedEntityId);
       }
 
       const source = result.candidates.length > 0 ? result.candidates : allEntities.map((e) => e.entity_id);
@@ -522,7 +526,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
             const entityId = manualOverrides[r.templateKey] || r.matchedEntityId;
             if (!entityId) return count;
             const entity = entityById.get(entityId);
-            if (entity?.disabled_by || entity?.hidden_by) {
+            if (entity?.disabled_by) {
               return count + 1;
             }
             return count;
@@ -580,7 +584,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
       const entityId = manualOverrides[result.templateKey] || result.matchedEntityId;
       if (!entityId) continue;
       const entity = entityById.get(entityId);
-      if (entity?.disabled_by || entity?.hidden_by) {
+      if (entity?.disabled_by) {
         count += 1;
       }
     }
@@ -671,7 +675,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
               {disabledMatchedCount > 0 && (
                 <div className="mt-3 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-sm text-amber-200">
                   {disabledMatchedCount} matched entr{disabledMatchedCount === 1 ? 'y is' : 'ies are'} disabled in Home Assistant.
-                  Enable {disabledMatchedCount === 1 ? 'it' : 'them'} in HA and everything will work without re-syncing.
+                  Enable {disabledMatchedCount === 1 ? 'it' : 'them'} in HA and everything should work without re-syncing.
                 </div>
               )}
               {error && status !== 'error' && (

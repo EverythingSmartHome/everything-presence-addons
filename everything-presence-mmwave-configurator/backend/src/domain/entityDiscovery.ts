@@ -283,7 +283,7 @@ export class EntityDiscoveryService {
     const suffixParts = suffix.split('_').filter(Boolean);
     const lastPart = suffixParts[suffixParts.length - 1] || '';
 
-    const isDisabled = (e: EntityRegistryEntry) => !!(e as any)?.disabled_by || !!(e as any)?.hidden_by;
+    const isDisabled = (e: EntityRegistryEntry) => !!(e as any)?.disabled_by;
 
     const isRegularZoneTemplate = options?.zoneType === 'regular';
     const isEntryZoneTemplate = options?.zoneType === 'entry';
@@ -804,8 +804,8 @@ export class EntityDiscoveryService {
         return;
       }
 
-      if ((registryEntry as any).disabled_by || (registryEntry as any).hidden_by) {
-        // Allow disabled/hidden entities so mappings can be saved before enabling in HA.
+      if ((registryEntry as any).disabled_by) {
+        // Allow disabled entities so mappings can be saved before enabling in HA.
         return;
       }
 
