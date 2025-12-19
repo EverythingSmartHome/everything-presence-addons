@@ -283,7 +283,7 @@ export class EntityDiscoveryService {
     const suffixParts = suffix.split('_').filter(Boolean);
     const lastPart = suffixParts[suffixParts.length - 1] || '';
 
-    const isDisabled = (e: EntityRegistryEntry) => !!(e as any)?.disabled_by || !!(e as any)?.hidden_by;
+    const isDisabled = (e: EntityRegistryEntry) => !!(e as any)?.disabled_by;
 
     const isRegularZoneTemplate = options?.zoneType === 'regular';
     const isEntryZoneTemplate = options?.zoneType === 'entry';
@@ -320,40 +320,44 @@ export class EntityDiscoveryService {
       return { score: 0, confidence: 'none' };
     };
 
-    // Auto-match prefers enabled entities; falls back to disabled ones only if nothing else scores
-    const activeEntities = domainEntities.filter((e) => !isDisabled(e));
-    const entitiesForAuto = activeEntities.length > 0 ? activeEntities : domainEntities;
-
-    let bestScore = 0;
-    let bestMatches: Array<{ entity: EntityRegistryEntry; confidence: MatchConfidence }> = [];
-
-    for (const entity of entitiesForAuto) {
+    // Auto-match prefers enabled entities, but allows disabled exact matches when they are the best fit.
+    const scoredForAuto = domainEntities.map((entity) => {
       const { score, confidence } = computeScore(entity);
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatches = [{ entity, confidence }];
-      } else if (score > 0 && score === bestScore) {
-        bestMatches.push({ entity, confidence });
-      }
-    }
+      return {
+        entity,
+        score,
+        confidence,
+        disabled: isDisabled(entity),
+      };
+    });
 
-    if (bestScore > 0 && bestMatches.length === 1) {
-      const best = bestMatches[0];
-      result.matchedEntityId = best.entity.entity_id;
-      result.matchConfidence = best.confidence;
-      logger.debug(
-        { templateKey, matched: best.entity.entity_id, confidence: best.confidence },
-        'Entity matched'
-      );
-    } else if (bestScore > 0 && bestMatches.length > 1) {
-      // Conflict: multiple equally good candidates, require user review
-      result.matchConfidence = 'conflict';
-      const conflictCandidates = bestMatches.map((m) => m.entity.entity_id);
-      logger.debug(
-        { templateKey, candidates: conflictCandidates },
-        'Multiple candidates matched equally; marking for review'
-      );
-      telemetry.conflict(templateKey, conflictCandidates);
+    const positiveScores = scoredForAuto.filter((s) => s.score > 0);
+    let topScoreForLog: number | null = null;
+    if (positiveScores.length > 0) {
+      const bestScore = Math.max(...positiveScores.map((s) => s.score));
+      topScoreForLog = bestScore;
+      const topMatches = positiveScores.filter((s) => s.score === bestScore);
+      const enabledTop = topMatches.filter((s) => !s.disabled);
+      const candidates = enabledTop.length > 0 ? enabledTop : topMatches;
+
+      if (candidates.length === 1) {
+        const best = candidates[0];
+        result.matchedEntityId = best.entity.entity_id;
+        result.matchConfidence = best.confidence;
+        logger.debug(
+          { templateKey, matched: best.entity.entity_id, confidence: best.confidence },
+          'Entity matched'
+        );
+      } else {
+        // Conflict: multiple equally good candidates, require user review
+        result.matchConfidence = 'conflict';
+        const conflictCandidates = candidates.map((m) => m.entity.entity_id);
+        logger.debug(
+          { templateKey, candidates: conflictCandidates },
+          'Multiple candidates matched equally; marking for review'
+        );
+        telemetry.conflict(templateKey, conflictCandidates);
+      }
     }
 
     // Collect ranked candidates for manual mapping (all domain entities, even if disabled)
@@ -392,7 +396,7 @@ export class EntityDiscoveryService {
         {
           templateKey,
           domain,
-          topScore: bestScore,
+          topScore: topScoreForLog ?? 0,
           conflictCandidates: scoredCandidates.slice(0, 5).map((c) => c.id),
         },
         'Entity match conflict detected'
@@ -801,12 +805,7 @@ export class EntityDiscoveryService {
       }
 
       if ((registryEntry as any).disabled_by) {
-        errors.push({ key, entityId, error: 'Entity is disabled' });
-        return;
-      }
-
-      if ((registryEntry as any).hidden_by) {
-        errors.push({ key, entityId, error: 'Entity is hidden' });
+        // Allow disabled entities so mappings can be saved before enabling in HA.
         return;
       }
 
