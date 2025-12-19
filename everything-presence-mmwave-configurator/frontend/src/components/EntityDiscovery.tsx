@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { EntityMappings } from '../api/types';
 import {
   discoverEntities,
@@ -42,6 +42,9 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [allEntities, setAllEntities] = useState<EntityRegistryEntry[]>([]);
+  const entityById = useMemo(() => {
+    return new Map(allEntities.map((entity) => [entity.entity_id, entity]));
+  }, [allEntities]);
 
   // Load existing device mapping to preserve user overrides during re-sync
   useEffect(() => {
@@ -405,12 +408,33 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     const isOverridden = !!manualOverrides[result.templateKey];
     const isMatched = !!effectiveEntityId;
     const needsReview = result.matchConfidence === 'conflict' || (!result.matchedEntityId && !result.isOptional);
+    const matchedEntity = effectiveEntityId ? entityById.get(effectiveEntityId) : undefined;
+    const isDisabled = !!matchedEntity?.disabled_by || !!matchedEntity?.hidden_by;
 
     const renderOptionLabel = (entityId: string) => {
-      const entity = allEntities.find((e) => e.entity_id === entityId);
+      const entity = entityById.get(entityId);
       const name = entity?.name ? ` (${entity.name})` : '';
-      const disabled = (entity as any)?.disabled_by ? ' [disabled]' : '';
+      const disabled = entity?.disabled_by ? ' [disabled]' : entity?.hidden_by ? ' [hidden]' : '';
       return `${entityId}${name}${disabled}`;
+    };
+
+    const buildOptions = (): string[] => {
+      const options: string[] = [];
+      const seen = new Set<string>();
+
+      if (effectiveEntityId) {
+        options.push(effectiveEntityId);
+        seen.add(effectiveEntityId);
+      }
+
+      const source = result.candidates.length > 0 ? result.candidates : allEntities.map((e) => e.entity_id);
+      for (const entityId of source) {
+        if (seen.has(entityId)) continue;
+        seen.add(entityId);
+        options.push(entityId);
+      }
+
+      return options;
     };
 
     return (
@@ -454,20 +478,18 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
               className="text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-slate-300 max-w-[320px]"
             >
               <option value="">Select entity...</option>
-              {result.candidates.length > 0 ? (
-                result.candidates.map((candidate) => (
-                  <option key={candidate} value={candidate}>
-                    {renderOptionLabel(candidate)}
-                  </option>
-                ))
-              ) : (
-                allEntities.map((entity) => (
-                  <option key={entity.entity_id} value={entity.entity_id}>
-                    {renderOptionLabel(entity.entity_id)}
-                  </option>
-                ))
-              )}
+              {buildOptions().map((candidate) => (
+                <option key={candidate} value={candidate}>
+                  {renderOptionLabel(candidate)}
+                </option>
+              ))}
             </select>
+          )}
+
+          {isMatched && isDisabled && (
+            <span className="text-xs text-amber-300 border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 rounded">
+              Disabled in HA
+            </span>
           )}
 
           {isMatched && !isOverridden && (
@@ -496,6 +518,15 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
           const totalRequired = results.filter((r) => !r.isOptional).length;
           const isExpanded = expandedGroups.has(groupName);
           const hasUnmatched = results.some((r) => !r.matchedEntityId && !r.isOptional && !manualOverrides[r.templateKey]);
+          const disabledCount = results.reduce((count, r) => {
+            const entityId = manualOverrides[r.templateKey] || r.matchedEntityId;
+            if (!entityId) return count;
+            const entity = entityById.get(entityId);
+            if (entity?.disabled_by || entity?.hidden_by) {
+              return count + 1;
+            }
+            return count;
+          }, 0);
 
           return (
             <div key={groupName} className="border border-slate-700 rounded-lg overflow-hidden">
@@ -515,6 +546,11 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
                   <span className="text-xs text-slate-400">
                     {matchedCount}/{results.length} matched
                   </span>
+                  {disabledCount > 0 && (
+                    <span className="text-xs text-amber-200 border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 rounded">
+                      Disabled: {disabledCount}
+                    </span>
+                  )}
                   <span className="text-slate-500">{isExpanded ? '▼' : '▶'}</span>
                 </div>
               </button>
@@ -537,6 +573,19 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     : 0;
   const totalEntities = discoveryResult?.results.length || 0;
   const percentage = totalEntities > 0 ? Math.round((totalMatched / totalEntities) * 100) : 0;
+  const disabledMatchedCount = useMemo(() => {
+    if (!discoveryResult) return 0;
+    let count = 0;
+    for (const result of discoveryResult.results) {
+      const entityId = manualOverrides[result.templateKey] || result.matchedEntityId;
+      if (!entityId) continue;
+      const entity = entityById.get(entityId);
+      if (entity?.disabled_by || entity?.hidden_by) {
+        count += 1;
+      }
+    }
+    return count;
+  }, [discoveryResult, manualOverrides, entityById]);
 
   return (
     <div className="h-full flex flex-col bg-slate-900">
@@ -617,6 +666,12 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
               {validationErrors && (
                 <div className="mt-3 p-3 rounded-lg border border-red-500/40 bg-red-500/10 text-sm text-red-300">
                   {validationErrors}
+                </div>
+              )}
+              {disabledMatchedCount > 0 && (
+                <div className="mt-3 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-sm text-amber-200">
+                  {disabledMatchedCount} matched entr{disabledMatchedCount === 1 ? 'y is' : 'ies are'} disabled in Home Assistant.
+                  Enable {disabledMatchedCount === 1 ? 'it' : 'them'} in HA and everything will work without re-syncing.
                 </div>
               )}
               {error && status !== 'error' && (
