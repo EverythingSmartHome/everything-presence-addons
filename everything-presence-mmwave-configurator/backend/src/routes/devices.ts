@@ -24,6 +24,11 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
   const discovery = new DeviceDiscoveryService(readTransport);
   const zoneWriter = new ZoneWriter(writeClient);
   const zoneReader = new ZoneReader(readTransport);
+  const normalizeStateValue = (state?: string | null) => (typeof state === 'string' ? state.toLowerCase() : '');
+  const isUnavailableState = (state?: string | null) => {
+    const normalized = normalizeStateValue(state);
+    return normalized === 'unavailable' || normalized === 'unknown';
+  };
 
   router.get('/', async (_req, res) => {
     const devices = await discovery.discover();
@@ -69,7 +74,11 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       const entityRegistry = await readTransport.listEntityRegistry();
       const prefix = entityNamePrefix as string;
 
-      const availability: Record<string, { enabled: boolean; disabledBy: string | null }> = {};
+      const availability: Record<string, { enabled: boolean; disabledBy: string | null; status: 'enabled' | 'disabled' | 'unavailable' | 'unknown' }> = {};
+      const polygonAvailability: Record<string, { enabled: boolean; disabledBy: string | null; status: 'enabled' | 'disabled' | 'unavailable' | 'unknown' }> = {};
+      const registryById = new Map(entityRegistry.map((entry) => [entry.entity_id, entry]));
+      const zoneEntitiesByKey = new Map<string, string[]>();
+      const polygonEntitiesByKey = new Map<string, string[]>();
 
       // Helper to resolve zone entity set - tries device mapping first, then legacy
       const resolveZoneSet = (type: 'regular' | 'exclusion' | 'entry', index: number, groupKey: 'zoneConfigEntities' | 'exclusionZoneConfigEntities' | 'entryZoneConfigEntities', key: string, mapping?: Record<string, string>) => {
@@ -92,12 +101,9 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         for (const zoneKey of zoneKeys) {
           const zoneEntities = (zoneMap.zoneConfigEntities?.[zoneKey] || {}) as Record<string, string>;
           const zoneSet = resolveZoneSet('regular', getZoneIndex(zoneKey), 'zoneConfigEntities', zoneKey, zoneEntities);
-          if (zoneSet?.beginX) {
-            const registryEntry = entityRegistry.find((e) => e.entity_id === zoneSet.beginX);
-            availability[zoneKey] = {
-              enabled: !registryEntry?.disabled_by,
-              disabledBy: registryEntry?.disabled_by ?? null,
-            };
+          if (zoneSet?.beginX && zoneSet.endX && zoneSet.beginY && zoneSet.endY) {
+            const entityIds = [zoneSet.beginX, zoneSet.endX, zoneSet.beginY, zoneSet.endY];
+            zoneEntitiesByKey.set(zoneKey, entityIds);
           }
         }
       }
@@ -108,12 +114,9 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         for (const zoneKey of zoneKeys) {
           const zoneEntities = (zoneMap.exclusionZoneConfigEntities?.[zoneKey] || {}) as Record<string, string>;
           const zoneSet = resolveZoneSet('exclusion', getZoneIndex(zoneKey), 'exclusionZoneConfigEntities', zoneKey, zoneEntities);
-          if (zoneSet?.beginX) {
-            const registryEntry = entityRegistry.find((e) => e.entity_id === zoneSet.beginX);
-            availability[zoneKey] = {
-              enabled: !registryEntry?.disabled_by,
-              disabledBy: registryEntry?.disabled_by ?? null,
-            };
+          if (zoneSet?.beginX && zoneSet.endX && zoneSet.beginY && zoneSet.endY) {
+            const entityIds = [zoneSet.beginX, zoneSet.endX, zoneSet.beginY, zoneSet.endY];
+            zoneEntitiesByKey.set(zoneKey, entityIds);
           }
         }
       }
@@ -124,14 +127,101 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         for (const zoneKey of zoneKeys) {
           const zoneEntities = (zoneMap.entryZoneConfigEntities?.[zoneKey] || {}) as Record<string, string>;
           const zoneSet = resolveZoneSet('entry', getZoneIndex(zoneKey), 'entryZoneConfigEntities', zoneKey, zoneEntities);
-          if (zoneSet?.beginX) {
-            const registryEntry = entityRegistry.find((e) => e.entity_id === zoneSet.beginX);
-            availability[zoneKey] = {
-              enabled: !registryEntry?.disabled_by,
-              disabledBy: registryEntry?.disabled_by ?? null,
-            };
+          if (zoneSet?.beginX && zoneSet.endX && zoneSet.beginY && zoneSet.endY) {
+            const entityIds = [zoneSet.beginX, zoneSet.endX, zoneSet.beginY, zoneSet.endY];
+            zoneEntitiesByKey.set(zoneKey, entityIds);
           }
         }
+      }
+
+      const resolvePolygonEntity = (
+        type: 'polygon' | 'polygonExclusion' | 'polygonEntry',
+        groupKey: 'polygonZoneEntities' | 'polygonExclusionEntities' | 'polygonEntryEntities',
+        key: string,
+        template?: string
+      ): string | null => {
+        const indexMatch = key.match(/(\d+)/);
+        const index = indexMatch ? parseInt(indexMatch[1], 10) : 1;
+        if (hasDeviceMapping) {
+          const entityId = deviceEntityService.getPolygonZoneEntity(deviceId, type, index);
+          if (entityId) return entityId;
+        }
+        return EntityResolver.resolvePolygonZoneEntity(entityMappings, prefix, groupKey, key, template);
+      };
+
+      const addPolygonAvailability = (
+        type: 'polygon' | 'polygonExclusion' | 'polygonEntry',
+        groupKey: 'polygonZoneEntities' | 'polygonExclusionEntities' | 'polygonEntryEntities',
+        labelPrefix: 'Zone' | 'Exclusion' | 'Entry',
+        maxCount: number
+      ) => {
+        const map = (zoneMap as Record<string, unknown>)[groupKey] as Record<string, string> | undefined;
+        const keys = map && Object.keys(map).length > 0
+          ? Object.keys(map)
+          : Array.from({ length: maxCount }, (_, i) => `${labelPrefix.toLowerCase()}${i + 1}`);
+
+        for (const key of keys) {
+          const entityId = resolvePolygonEntity(type, groupKey, key, map?.[key]);
+          if (!entityId) continue;
+          const indexMatch = key.match(/(\d+)/);
+          const index = indexMatch ? parseInt(indexMatch[1], 10) : 1;
+          const label = `${labelPrefix} ${index}`;
+          polygonEntitiesByKey.set(label, [entityId]);
+        }
+      };
+
+      addPolygonAvailability('polygon', 'polygonZoneEntities', 'Zone', profile.limits?.maxZones ?? 4);
+      addPolygonAvailability('polygonExclusion', 'polygonExclusionEntities', 'Exclusion', profile.limits?.maxExclusionZones ?? 2);
+      addPolygonAvailability('polygonEntry', 'polygonEntryEntities', 'Entry', profile.limits?.maxEntryZones ?? 2);
+
+      const zoneEntityIds = Array.from(
+        new Set([
+          ...Array.from(zoneEntitiesByKey.values()).flat(),
+          ...Array.from(polygonEntitiesByKey.values()).flat(),
+        ])
+      );
+      let stateMap = new Map<string, { state: string }>();
+      if (zoneEntityIds.length > 0) {
+        try {
+          const states = await readTransport.getStates(zoneEntityIds);
+          stateMap = states as Map<string, { state: string }>;
+        } catch (error) {
+          logger.warn({ error }, 'Failed to fetch zone entity states for availability checks');
+        }
+      }
+
+      const buildAvailability = (entityIds: string[]) => {
+        const registryEntries = entityIds.map((id) => registryById.get(id)).filter(Boolean);
+        const disabledEntry = registryEntries.find((entry) => entry?.disabled_by);
+        const disabledBy = disabledEntry?.disabled_by ?? null;
+
+        let status: 'enabled' | 'disabled' | 'unavailable' | 'unknown' = 'unknown';
+        if (disabledBy) {
+          status = 'disabled';
+        } else if (stateMap.size > 0) {
+          const states = entityIds.map((id) => stateMap.get(id)).filter(Boolean);
+          if (states.length !== entityIds.length) {
+            status = 'unknown';
+          } else if (states.some((state) => isUnavailableState(state?.state))) {
+            status = 'unavailable';
+          } else {
+            status = 'enabled';
+          }
+        }
+
+        return {
+          enabled: status === 'enabled',
+          disabledBy,
+          status,
+        };
+      };
+
+      for (const [zoneKey, entityIds] of zoneEntitiesByKey.entries()) {
+        availability[zoneKey] = buildAvailability(entityIds);
+      }
+
+      for (const [zoneKey, entityIds] of polygonEntitiesByKey.entries()) {
+        polygonAvailability[zoneKey] = buildAvailability(entityIds);
       }
 
       // Check if advanced features are available by checking if their entities exist
@@ -180,7 +270,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         entryZonesAvailable = !!entryEntry;
       }
 
-      return res.json({ availability, polygonZonesAvailable, entryZonesAvailable });
+      return res.json({ availability, polygonAvailability, polygonZonesAvailable, entryZonesAvailable });
     } catch (error) {
       logger.error({ error }, 'Failed to check zone availability');
       return res.status(500).json({ message: 'Failed to check zone availability' });
@@ -248,8 +338,8 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     }
 
     try {
-      await zoneWriter.applyZones(zoneMap, zones, entityNamePrefix, entityMappings, deviceId);
-      return res.json({ ok: true });
+      const result = await zoneWriter.applyZones(zoneMap, zones, entityNamePrefix, entityMappings, deviceId);
+      return res.json({ ok: result.ok, warnings: result.failures });
     } catch (error) {
       logger.error({ error }, 'Failed to apply zones');
       return res.status(500).json({ message: 'Failed to apply zones' });
@@ -437,8 +527,117 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const entityMap = profile.entityMap as any;
 
     try {
-      await zoneWriter.applyPolygonZones(entityMap, zones ?? [], entityNamePrefix, entityMappings, deviceId);
-      return res.json({ ok: true });
+      const warnings: Array<{ entityId?: string; description: string; error: string }> = [];
+
+      const resolvePolygonEntity = (
+        type: 'polygon' | 'polygonExclusion' | 'polygonEntry',
+        key: string,
+        template?: string
+      ): string | null => {
+        const indexMatch = key.match(/(\d+)/);
+        const index = indexMatch ? parseInt(indexMatch[1], 10) : 1;
+        const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
+        if (hasDeviceMapping) {
+          const entityId = deviceEntityService.getPolygonZoneEntity(deviceId, type, index);
+          if (entityId) return entityId;
+        }
+        const groupKey =
+          type === 'polygon' ? 'polygonZoneEntities'
+            : type === 'polygonExclusion' ? 'polygonExclusionEntities'
+              : 'polygonEntryEntities';
+        return EntityResolver.resolvePolygonZoneEntity(entityMappings, entityNamePrefix, groupKey, key, template);
+      };
+
+      const polygonMap = entityMap?.polygonZoneEntities as Record<string, string> | undefined;
+      const polygonExclusionMap = entityMap?.polygonExclusionEntities as Record<string, string> | undefined;
+      const polygonEntryMap = entityMap?.polygonEntryEntities as Record<string, string> | undefined;
+
+      const resolvedEntities = (zones ?? []).map((zone) => {
+        let key = '';
+        let template: string | undefined;
+        let type: 'polygon' | 'polygonExclusion' | 'polygonEntry' = 'polygon';
+        const indexMatch = zone.id.match(/(\d+)/);
+        const index = indexMatch ? parseInt(indexMatch[1], 10) : 1;
+
+        if (zone.type === 'exclusion') {
+          key = `exclusion${index}`;
+          type = 'polygonExclusion';
+          template = polygonExclusionMap?.[key];
+        } else if (zone.type === 'entry') {
+          key = `entry${index}`;
+          type = 'polygonEntry';
+          template = polygonEntryMap?.[key];
+        } else {
+          key = `zone${index}`;
+          type = 'polygon';
+          template = polygonMap?.[key];
+        }
+
+        const entityId = resolvePolygonEntity(type, key, template);
+        return { zoneId: zone.id, entityId };
+      });
+
+      const entityIds = resolvedEntities.map((entry) => entry.entityId).filter(Boolean) as string[];
+
+      if (entityIds.length > 0) {
+        let registryById = new Map<string, { disabled_by: string | null }>();
+        try {
+          const registry = await readTransport.listEntityRegistry();
+          registryById = new Map(registry.map((entry) => [entry.entity_id, { disabled_by: entry.disabled_by ?? null }]));
+        } catch (error) {
+          logger.warn({ error }, 'Failed to load entity registry for polygon zone checks');
+        }
+
+        let statesById = new Map<string, { state: string }>();
+        try {
+          const states = await readTransport.getStates(entityIds);
+          statesById = states as Map<string, { state: string }>;
+        } catch (error) {
+          logger.warn({ error }, 'Failed to load entity states for polygon zone checks');
+        }
+
+        for (const entry of resolvedEntities) {
+          if (!entry.entityId) {
+            warnings.push({
+              description: `${entry.zoneId} entity could not be resolved`,
+              error: 'Entity not resolved',
+            });
+            continue;
+          }
+
+          const registryEntry = registryById.get(entry.entityId);
+          if (registryEntry?.disabled_by) {
+            warnings.push({
+              entityId: entry.entityId,
+              description: `${entry.zoneId} entity is disabled`,
+              error: `disabled_by:${registryEntry.disabled_by}`,
+            });
+            continue;
+          }
+
+          const state = statesById.get(entry.entityId);
+          if (!state) {
+            warnings.push({
+              entityId: entry.entityId,
+              description: `${entry.zoneId} entity state is missing`,
+              error: 'state_missing',
+            });
+            continue;
+          }
+
+          if (isUnavailableState(state.state)) {
+            warnings.push({
+              entityId: entry.entityId,
+              description: `${entry.zoneId} entity is unavailable`,
+              error: state.state,
+            });
+          }
+        }
+      }
+
+      const result = await zoneWriter.applyPolygonZones(entityMap, zones ?? [], entityNamePrefix, entityMappings, deviceId);
+      const combinedWarnings = [...warnings, ...result.failures];
+      return res.json({ ok: result.ok, warnings: combinedWarnings });
     } catch (error) {
       logger.error({ error }, 'Failed to apply polygon zones');
       return res.status(500).json({ message: 'Failed to apply polygon zones' });

@@ -272,6 +272,7 @@ export interface LiveState {
   deviceId: string;
   profileId: string;
   timestamp: number;
+  availability?: Record<string, 'ok' | 'unavailable'>;
   presence?: boolean;
   distance?: number | null;
   speed?: number | null;
@@ -364,6 +365,7 @@ export interface EP1LiveData {
 export interface ZoneAvailabilityEntry {
   enabled: boolean;
   disabledBy: 'user' | 'integration' | 'config_entry' | null;
+  status: 'enabled' | 'disabled' | 'unavailable' | 'unknown';
 }
 
 export type ZoneAvailability = Record<string, ZoneAvailabilityEntry>;
@@ -371,6 +373,7 @@ export type ZoneAvailability = Record<string, ZoneAvailabilityEntry>;
 // Full response from zone-availability endpoint including feature availability
 export interface ZoneAvailabilityResponse {
   availability: ZoneAvailability;
+  polygonAvailability?: ZoneAvailability;
   polygonZonesAvailable: boolean;
   entryZonesAvailable: boolean;
 }

@@ -150,6 +150,24 @@ function App() {
                 if (!prev) return prev;
 
                 const updated = { ...prev, timestamp: message.timestamp };
+                const normalizedState = typeof message.state === 'string' ? message.state.toLowerCase() : '';
+                const isUnavailable = normalizedState === 'unavailable' || normalizedState === 'unknown';
+                const setAvailability = (key: string) => {
+                  if (!updated.availability) {
+                    updated.availability = {};
+                  }
+                  updated.availability[key] = isUnavailable ? 'unavailable' : 'ok';
+                };
+                const parseNumberValue = (): number | null => {
+                  if (isUnavailable) return null;
+                  const value = parseFloat(message.state);
+                  return Number.isFinite(value) ? value : null;
+                };
+                const parseIntValue = (): number | null => {
+                  if (isUnavailable) return null;
+                  const value = parseInt(message.state, 10);
+                  return Number.isFinite(value) ? value : null;
+                };
 
                 // Map entity_id to state field
                 // Check for zone occupancy first (more specific pattern)
@@ -165,68 +183,103 @@ function App() {
                   }
                 } else if (message.entityId.includes('occupancy')) {
                   // Main presence occupancy (not zone-specific)
-                  updated.presence = message.state === 'on';
+                  setAvailability('presence');
+                  if (!isUnavailable) {
+                    updated.presence = message.state === 'on';
+                  }
                 } else if (message.entityId.includes('target_distance') || message.entityId.includes('mmwave_target_distance')) {
-                  updated.distance = parseFloat(message.state) || null;
+                  setAvailability('distance');
+                  updated.distance = parseNumberValue();
                 } else if (message.entityId.includes('target_speed') || message.entityId.includes('mmwave_target_speed')) {
-                  updated.speed = parseFloat(message.state) || null;
+                  setAvailability('speed');
+                  updated.speed = parseNumberValue();
                 } else if (message.entityId.includes('target_energy') || message.entityId.includes('mmwave_target_energy')) {
-                  updated.energy = parseInt(message.state, 10) || null;
+                  setAvailability('energy');
+                  updated.energy = parseIntValue();
                 } else if (message.entityId.includes('target_count')) {
-                  updated.targetCount = parseInt(message.state, 10) || 0;
+                  setAvailability('targetCount');
+                  updated.targetCount = parseIntValue() ?? 0;
                 } else if (message.entityId.includes('_mmwave') && !message.entityId.includes('_target') && !message.entityId.includes('_mode') && !message.entityId.includes('_distance') && !message.entityId.includes('_sensitivity') && !message.entityId.includes('_latency') && !message.entityId.includes('_threshold')) {
-                  updated.mmwave = message.state === 'on';
+                  setAvailability('mmwave');
+                  if (!isUnavailable) {
+                    updated.mmwave = message.state === 'on';
+                  }
                 } else if (message.entityId.includes('_pir')) {
-                  updated.pir = message.state === 'on';
+                  setAvailability('pir');
+                  if (!isUnavailable) {
+                    updated.pir = message.state === 'on';
+                  }
                 } else if (message.entityId.includes('_temperature')) {
-                  updated.temperature = parseFloat(message.state) || null;
+                  setAvailability('temperature');
+                  updated.temperature = parseNumberValue();
                 } else if (message.entityId.includes('_humidity')) {
-                  updated.humidity = parseFloat(message.state) || null;
+                  setAvailability('humidity');
+                  updated.humidity = parseNumberValue();
                 } else if (message.entityId.includes('_illuminance')) {
-                  updated.illuminance = parseFloat(message.state) || null;
+                  setAvailability('illuminance');
+                  updated.illuminance = parseNumberValue();
                 } else if (message.entityId.endsWith('_co2')) {
-                  updated.co2 = parseFloat(message.state) || null;
+                  setAvailability('co2');
+                  updated.co2 = parseNumberValue();
                 }
 
                 // Handle EP1 config entities
                 else if (message.entityId.includes('mmwave_mode')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.mode = message.state as any;
+                  setAvailability('mode');
+                  if (!isUnavailable) {
+                    updated.config.mode = message.state as any;
+                  }
                 } else if (message.entityId.includes('distance_min')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.distanceMin = parseFloat(message.state) || null;
+                  setAvailability('distanceMin');
+                  updated.config.distanceMin = parseNumberValue();
                 } else if (message.entityId.includes('max_distance')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.distanceMax = parseFloat(message.state) || null;
+                  setAvailability('distanceMax');
+                  updated.config.distanceMax = parseNumberValue();
                 } else if (message.entityId.includes('trigger_distance')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.triggerDistance = parseFloat(message.state) || null;
+                  setAvailability('triggerDistance');
+                  updated.config.triggerDistance = parseNumberValue();
                 }
                 // Handle EPL max distance entity (number.${name}_distance)
                 else if (message.entityId.match(/number\.\w+_distance$/) && !message.entityId.includes('target') && !message.entityId.includes('trigger')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.distanceMax = parseFloat(message.state) || null;
+                  setAvailability('distanceMax');
+                  updated.config.distanceMax = parseNumberValue();
                 } else if (message.entityId.includes('sustain_sensitivity')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.sensitivity = parseInt(message.state, 10) || null;
+                  setAvailability('sensitivity');
+                  updated.config.sensitivity = parseIntValue();
                 } else if (message.entityId.includes('trigger_sensitivity')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.triggerSensitivity = parseInt(message.state, 10) || null;
+                  setAvailability('triggerSensitivity');
+                  updated.config.triggerSensitivity = parseIntValue();
                 } else if (message.entityId.includes('off_latency')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.offLatency = parseInt(message.state, 10) || null;
+                  setAvailability('offLatency');
+                  updated.config.offLatency = parseIntValue();
                 } else if (message.entityId.includes('on_latency')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.onLatency = parseInt(message.state, 10) || null;
+                  setAvailability('onLatency');
+                  updated.config.onLatency = parseIntValue();
                 } else if (message.entityId.includes('threshold_factor')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.thresholdFactor = parseInt(message.state, 10) || null;
+                  setAvailability('thresholdFactor');
+                  updated.config.thresholdFactor = parseIntValue();
                 } else if (message.entityId.includes('micro_motion')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.microMotionEnabled = message.state === 'on';
+                  setAvailability('microMotion');
+                  if (!isUnavailable) {
+                    updated.config.microMotionEnabled = message.state === 'on';
+                  }
                 } else if (message.entityId.includes('update_rate')) {
                   if (!updated.config) updated.config = {} as any;
-                  updated.config.updateRate = message.state || null;
+                  setAvailability('updateRate');
+                  if (!isUnavailable) {
+                    updated.config.updateRate = message.state || null;
+                  }
                 }
 
                 // Handle EPL target tracking entities

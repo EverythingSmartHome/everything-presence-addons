@@ -17,6 +17,23 @@ interface ZoneEntityMap {
   [zoneKey: string]: ZoneEntityConfig;
 }
 
+interface ZoneWriteTask {
+  execute: () => Promise<unknown>;
+  description: string;
+  entityId?: string;
+}
+
+export interface ZoneWriteFailure {
+  entityId?: string;
+  description: string;
+  error: string;
+}
+
+export interface ZoneWriteResult {
+  ok: boolean;
+  failures: ZoneWriteFailure[];
+}
+
 export class ZoneWriter {
   private readonly writeClient: IHaWriteClient;
 
@@ -29,10 +46,11 @@ export class ZoneWriter {
    * This helps with opening too many requests to HA all at once
    */
   private async executeTasksSequentially(
-    tasks: Array<{ execute: () => Promise<unknown>; description: string }>,
-    options: { delayMs?: number; maxRetries?: number } = {}
-  ): Promise<void> {
-    const { delayMs = 50, maxRetries = 2 } = options;
+    tasks: ZoneWriteTask[],
+    options: { delayMs?: number; maxRetries?: number; continueOnError?: boolean } = {}
+  ): Promise<ZoneWriteFailure[]> {
+    const { delayMs = 50, maxRetries = 2, continueOnError = true } = options;
+    const failures: ZoneWriteFailure[] = [];
 
     for (const task of tasks) {
       let lastError: Error | null = null;
@@ -54,7 +72,14 @@ export class ZoneWriter {
 
       if (lastError) {
         logger.error({ description: task.description, error: lastError.message }, 'Task failed after retries');
-        throw lastError;
+        failures.push({
+          entityId: task.entityId,
+          description: task.description,
+          error: lastError.message,
+        });
+        if (!continueOnError) {
+          throw lastError;
+        }
       }
 
       // Small delay between successful tasks to prevent overwhelming the device
@@ -62,6 +87,8 @@ export class ZoneWriter {
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
+
+    return failures;
   }
 
   /**
@@ -86,8 +113,8 @@ export class ZoneWriter {
     entityNamePrefix: string,
     entityMappings?: EntityMappings,
     deviceId?: string
-  ): Promise<void> {
-    const tasks: Array<{ execute: () => Promise<unknown>; description: string }> = [];
+  ): Promise<ZoneWriteResult> {
+    const tasks: ZoneWriteTask[] = [];
 
     logger.debug({ entityNamePrefix, deviceId, zoneCount: zones.length, hasMappings: !!entityMappings }, 'Applying polygon zones');
 
@@ -116,6 +143,7 @@ export class ZoneWriter {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, textValue),
             description: `polygon zone ${idx + 1}`,
+            entityId,
           });
         }
       });
@@ -129,6 +157,7 @@ export class ZoneWriter {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, ''),
             description: `clear polygon zone ${i + 1}`,
+            entityId,
           });
         }
       }
@@ -146,6 +175,7 @@ export class ZoneWriter {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, textValue),
             description: `exclusion polygon ${idx + 1}`,
+            entityId,
           });
         }
       });
@@ -158,6 +188,7 @@ export class ZoneWriter {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, ''),
             description: `clear exclusion polygon ${i + 1}`,
+            entityId,
           });
         }
       }
@@ -175,6 +206,7 @@ export class ZoneWriter {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, textValue),
             description: `entry polygon ${idx + 1}`,
+            entityId,
           });
         }
       });
@@ -187,13 +219,15 @@ export class ZoneWriter {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, ''),
             description: `clear entry polygon ${i + 1}`,
+            entityId,
           });
         }
       }
     }
 
     logger.info({ taskCount: tasks.length }, 'Executing polygon zone updates sequentially');
-    await this.executeTasksSequentially(tasks);
+    const failures = await this.executeTasksSequentially(tasks);
+    return { ok: failures.length === 0, failures };
   }
 
   /**
@@ -256,8 +290,8 @@ export class ZoneWriter {
     entityNamePrefix: string,
     entityMappings?: EntityMappings,
     deviceId?: string
-  ): Promise<void> {
-    const tasks: Promise<unknown>[] = [];
+  ): Promise<ZoneWriteResult> {
+    const tasks: ZoneWriteTask[] = [];
 
     logger.debug({ entityNamePrefix, deviceId, zoneCount: zones.length, hasMappings: !!entityMappings }, 'Applying rectangular zones');
 
@@ -306,7 +340,11 @@ export class ZoneWriter {
         }
 
         updates.forEach(({ entity, value }) => {
-          tasks.push(this.writeClient.setNumberEntity(entity, value));
+          tasks.push({
+            execute: () => this.writeClient.setNumberEntity(entity, value),
+            description: `regular zone ${i} ${entity}`,
+            entityId: entity,
+          });
         });
       }
     }
@@ -342,7 +380,11 @@ export class ZoneWriter {
         }
 
         updates.forEach(({ entity, value }) => {
-          tasks.push(this.writeClient.setNumberEntity(entity, value));
+          tasks.push({
+            execute: () => this.writeClient.setNumberEntity(entity, value),
+            description: `exclusion zone ${i} ${entity}`,
+            entityId: entity,
+          });
         });
       }
     }
@@ -378,12 +420,29 @@ export class ZoneWriter {
         }
 
         updates.forEach(({ entity, value }) => {
-          tasks.push(this.writeClient.setNumberEntity(entity, value));
+          tasks.push({
+            execute: () => this.writeClient.setNumberEntity(entity, value),
+            description: `entry zone ${i} ${entity}`,
+            entityId: entity,
+          });
         });
       }
     }
 
     logger.info({ taskCount: tasks.length }, 'Executing zone updates');
-    await Promise.all(tasks);
+    const results = await Promise.allSettled(tasks.map((task) => task.execute()));
+    const failures: ZoneWriteFailure[] = [];
+    results.forEach((result, idx) => {
+      if (result.status === 'rejected') {
+        const error = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        failures.push({
+          entityId: tasks[idx].entityId,
+          description: tasks[idx].description,
+          error,
+        });
+      }
+    });
+
+    return { ok: failures.length === 0, failures };
   }
 }

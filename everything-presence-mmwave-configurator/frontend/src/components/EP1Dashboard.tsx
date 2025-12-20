@@ -45,6 +45,28 @@ export const EP1Dashboard: React.FC<EP1DashboardProps> = ({ roomId, room, liveSt
     offLatency: null,
     onLatency: null,
   };
+  const presenceAvailability = liveState.availability?.presence;
+  const mmwaveAvailability = liveState.availability?.mmwave;
+  const pirAvailability = liveState.availability?.pir;
+
+  const presenceLabel =
+    presenceAvailability === 'unavailable'
+      ? 'Unavailable'
+      : liveState.presence
+      ? '✓ Detected'
+      : '✗ Clear';
+  const mmwaveLabel =
+    mmwaveAvailability === 'unavailable'
+      ? 'Unavailable'
+      : liveState.mmwave
+      ? '✓ Active'
+      : '✗ Inactive';
+  const pirLabel =
+    pirAvailability === 'unavailable'
+      ? 'Unavailable'
+      : liveState.pir
+      ? '✓ Motion'
+      : '✗ No Motion';
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -116,24 +138,60 @@ export const EP1Dashboard: React.FC<EP1DashboardProps> = ({ roomId, room, liveSt
 
             {/* Presence Indicators */}
             <div className="grid grid-cols-3 gap-3">
-              <div className={`rounded-xl border p-4 ${liveState.presence ? 'border-emerald-600/50 bg-emerald-600/10' : 'border-slate-700 bg-slate-800/50'}`}>
+              <div className={`rounded-xl border p-4 ${
+                presenceAvailability === 'unavailable'
+                  ? 'border-amber-600/50 bg-amber-600/10'
+                  : liveState.presence
+                  ? 'border-emerald-600/50 bg-emerald-600/10'
+                  : 'border-slate-700 bg-slate-800/50'
+              }`}>
                 <div className="text-xs font-semibold text-slate-400 uppercase mb-1">Occupancy</div>
-                <div className={`text-lg font-bold ${liveState.presence ? 'text-emerald-400' : 'text-slate-500'}`}>
-                  {liveState.presence ? '✓ Detected' : '✗ Clear'}
+                <div className={`text-lg font-bold ${
+                  presenceAvailability === 'unavailable'
+                    ? 'text-amber-300'
+                    : liveState.presence
+                    ? 'text-emerald-400'
+                    : 'text-slate-500'
+                }`}>
+                  {presenceLabel}
                 </div>
               </div>
 
-              <div className={`rounded-xl border p-4 ${liveState.mmwave ? 'border-blue-600/50 bg-blue-600/10' : 'border-slate-700 bg-slate-800/50'}`}>
+              <div className={`rounded-xl border p-4 ${
+                mmwaveAvailability === 'unavailable'
+                  ? 'border-amber-600/50 bg-amber-600/10'
+                  : liveState.mmwave
+                  ? 'border-blue-600/50 bg-blue-600/10'
+                  : 'border-slate-700 bg-slate-800/50'
+              }`}>
                 <div className="text-xs font-semibold text-slate-400 uppercase mb-1">mmWave</div>
-                <div className={`text-lg font-bold ${liveState.mmwave ? 'text-blue-400' : 'text-slate-500'}`}>
-                  {liveState.mmwave ? '✓ Active' : '✗ Inactive'}
+                <div className={`text-lg font-bold ${
+                  mmwaveAvailability === 'unavailable'
+                    ? 'text-amber-300'
+                    : liveState.mmwave
+                    ? 'text-blue-400'
+                    : 'text-slate-500'
+                }`}>
+                  {mmwaveLabel}
                 </div>
               </div>
 
-              <div className={`rounded-xl border p-4 ${liveState.pir ? 'border-purple-600/50 bg-purple-600/10' : 'border-slate-700 bg-slate-800/50'}`}>
+              <div className={`rounded-xl border p-4 ${
+                pirAvailability === 'unavailable'
+                  ? 'border-amber-600/50 bg-amber-600/10'
+                  : liveState.pir
+                  ? 'border-purple-600/50 bg-purple-600/10'
+                  : 'border-slate-700 bg-slate-800/50'
+              }`}>
                 <div className="text-xs font-semibold text-slate-400 uppercase mb-1">PIR</div>
-                <div className={`text-lg font-bold ${liveState.pir ? 'text-purple-400' : 'text-slate-500'}`}>
-                  {liveState.pir ? '✓ Motion' : '✗ No Motion'}
+                <div className={`text-lg font-bold ${
+                  pirAvailability === 'unavailable'
+                    ? 'text-amber-300'
+                    : liveState.pir
+                    ? 'text-purple-400'
+                    : 'text-slate-500'
+                }`}>
+                  {pirLabel}
                 </div>
               </div>
             </div>
