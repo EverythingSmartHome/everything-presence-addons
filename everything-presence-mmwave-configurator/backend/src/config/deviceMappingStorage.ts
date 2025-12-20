@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../logger';
+import { normalizeMappingKeys } from '../domain/mappingUtils';
 
 /**
  * Device entity mapping - stores resolved entity IDs for a specific device.
@@ -129,6 +130,7 @@ class DeviceMappingStorageImpl {
         return null;
       }
 
+      mapping.mappings = normalizeMappingKeys(mapping.mappings);
       return mapping;
     } catch (error) {
       logger.warn(
