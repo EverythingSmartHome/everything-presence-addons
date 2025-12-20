@@ -121,7 +121,16 @@ export interface EntityMappings {
   modeEntity?: string;
 
   // Configuration entities
+  distanceMinEntity?: string;
   maxDistanceEntity?: string;
+  triggerDistanceEntity?: string;
+  sensitivityEntity?: string;
+  triggerSensitivityEntity?: string;
+  offLatencyEntity?: string;
+  onLatencyEntity?: string;
+  thresholdFactorEntity?: string;
+  microMotionEntity?: string;
+  updateRateEntity?: string;
   installationAngleEntity?: string;
   polygonZonesEnabledEntity?: string;
 
