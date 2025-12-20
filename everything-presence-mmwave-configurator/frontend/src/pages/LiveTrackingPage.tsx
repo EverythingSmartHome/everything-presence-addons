@@ -558,6 +558,48 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     speed: number | null;
     angle: number | null;
   }>;
+  const presenceAvailability = liveState?.availability?.presence;
+  const mmwaveAvailability = liveState?.availability?.mmwave;
+  const pirAvailability = liveState?.availability?.pir;
+
+  const presenceLabel =
+    presenceAvailability === 'unavailable'
+      ? 'Unavailable'
+      : liveState?.presence
+      ? 'Detected'
+      : 'Not detected';
+  const presenceClass =
+    presenceAvailability === 'unavailable'
+      ? 'text-amber-300'
+      : liveState?.presence
+      ? 'text-emerald-400'
+      : 'text-slate-400';
+
+  const mmwaveLabel =
+    mmwaveAvailability === 'unavailable'
+      ? 'Unavailable'
+      : liveState?.mmwave
+      ? 'Active'
+      : 'Inactive';
+  const mmwaveClass =
+    mmwaveAvailability === 'unavailable'
+      ? 'text-amber-300'
+      : liveState?.mmwave
+      ? 'text-emerald-400'
+      : 'text-slate-400';
+
+  const pirLabel =
+    pirAvailability === 'unavailable'
+      ? 'Unavailable'
+      : liveState?.pir
+      ? 'Active'
+      : 'Inactive';
+  const pirClass =
+    pirAvailability === 'unavailable'
+      ? 'text-amber-300'
+      : liveState?.pir
+      ? 'text-emerald-400'
+      : 'text-slate-400';
 
   return (
     <div className="fixed inset-0 bg-slate-950 overflow-hidden">
@@ -1102,7 +1144,13 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             {/* Main Status Panel */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-4 text-sm text-slate-200 shadow-xl">
               <div className="flex items-center gap-2 mb-3">
-                <div className={`w-3 h-3 rounded-full ${liveState?.presence ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
+                <div className={`w-3 h-3 rounded-full ${
+                  presenceAvailability === 'unavailable'
+                    ? 'bg-amber-500'
+                    : liveState?.presence
+                    ? 'bg-emerald-500 animate-pulse'
+                    : 'bg-slate-600'
+                }`} />
                 <span className="font-semibold text-white">{isEP1 ? 'EP1 Status' : 'Live Tracking'}</span>
               </div>
 
@@ -1110,9 +1158,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between py-1 border-b border-slate-700/50">
                   <span className="text-slate-400">Presence:</span>
-                  <span className={liveState.presence ? 'text-emerald-400' : 'text-slate-400'}>
-                    {liveState.presence ? 'Detected' : 'Not detected'}
-                  </span>
+                  <span className={presenceClass}>{presenceLabel}</span>
                 </div>
 
                 {liveState.distance !== null && liveState.distance !== undefined && (
@@ -1157,21 +1203,17 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                   </div>
                 )}
 
-                {isEP1 && liveState.mmwave !== undefined && (
+                {isEP1 && (liveState.mmwave !== undefined || mmwaveAvailability === 'unavailable') && (
                   <div className="flex justify-between py-1 border-b border-slate-700/50">
                     <span className="text-slate-400">mmWave:</span>
-                    <span className={liveState.mmwave ? 'text-emerald-400' : 'text-slate-400'}>
-                      {liveState.mmwave ? 'Active' : 'Inactive'}
-                    </span>
+                    <span className={mmwaveClass}>{mmwaveLabel}</span>
                   </div>
                 )}
 
-                {liveState.pir !== undefined && (
+                {(liveState.pir !== undefined || pirAvailability === 'unavailable') && (
                   <div className="flex justify-between py-1 border-b border-slate-700/50">
                     <span className="text-slate-400">PIR:</span>
-                    <span className={liveState.pir ? 'text-emerald-400' : 'text-slate-400'}>
-                      {liveState.pir ? 'Active' : 'Inactive'}
-                    </span>
+                    <span className={pirClass}>{pirLabel}</span>
                   </div>
                 )}
 

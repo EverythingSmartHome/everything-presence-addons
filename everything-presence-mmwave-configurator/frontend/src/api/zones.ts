@@ -32,13 +32,13 @@ export const pushZonesToDevice = async (
   zones: RoomConfig['zones'],
   entityNamePrefix: string,
   entityMappings?: EntityMappings
-) => {
+): Promise<{ ok: boolean; warnings?: Array<{ entityId?: string; description: string; error: string }> }> => {
   const res = await fetch(ingressAware(`api/devices/${deviceId}/zones`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profileId, zones, entityNamePrefix, entityMappings }),
   });
-  return handle<{ ok: boolean }>(res);
+  return handle<{ ok: boolean; warnings?: Array<{ entityId?: string; description: string; error: string }> }>(res);
 };
 
 // ==================== POLYGON ZONE ENDPOINTS ====================
@@ -111,11 +111,11 @@ export const pushPolygonZonesToDevice = async (
   zones: ZonePolygon[],
   entityNamePrefix: string,
   entityMappings?: EntityMappings
-): Promise<{ ok: boolean }> => {
+): Promise<{ ok: boolean; warnings?: Array<{ entityId?: string; description: string; error: string }> }> => {
   const res = await fetch(ingressAware(`api/devices/${deviceId}/polygon-zones`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profileId, zones, entityNamePrefix, entityMappings }),
   });
-  return handle<{ ok: boolean }>(res);
+  return handle<{ ok: boolean; warnings?: Array<{ entityId?: string; description: string; error: string }> }>(res);
 };

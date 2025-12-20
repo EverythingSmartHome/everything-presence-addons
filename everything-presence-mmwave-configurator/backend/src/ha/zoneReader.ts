@@ -12,6 +12,24 @@ export class ZoneReader {
     this.readTransport = readTransport;
   }
 
+  private normalizeState(state?: string | null): string {
+    return typeof state === 'string' ? state.toLowerCase() : '';
+  }
+
+  private isUnavailableState(state?: string | null): boolean {
+    const normalized = this.normalizeState(state);
+    return normalized === '' || normalized === 'unavailable' || normalized === 'unknown';
+  }
+
+  private parseStateNumber(state: { state: string } | null): number | null {
+    if (!state) return null;
+    if (this.isUnavailableState(state.state)) {
+      return null;
+    }
+    const value = parseFloat(state.state);
+    return Number.isFinite(value) ? value : null;
+  }
+
   /**
    * Read polygon zones from text entities.
    * @param entityMap - Profile entity template map
@@ -53,7 +71,9 @@ export class ZoneReader {
         try {
           const state = await this.readTransport.getState(entityId);
           logger.debug({ key, entityId, state: state?.state, hasState: !!state }, 'Polygon zone entity state');
-          if (!state || !state.state || state.state === '') continue;
+          if (!state || !state.state || this.isUnavailableState(state.state)) {
+            continue;
+          }
 
           const vertices = textToPolygon(state.state);
           if (vertices.length < 3) continue;
@@ -94,7 +114,9 @@ export class ZoneReader {
 
         try {
           const state = await this.readTransport.getState(entityId);
-          if (!state || !state.state || state.state === '') continue;
+          if (!state || !state.state || this.isUnavailableState(state.state)) {
+            continue;
+          }
 
           const vertices = textToPolygon(state.state);
           if (vertices.length < 3) continue;
@@ -135,7 +157,9 @@ export class ZoneReader {
 
         try {
           const state = await this.readTransport.getState(entityId);
-          if (!state || !state.state || state.state === '') continue;
+          if (!state || !state.state || this.isUnavailableState(state.state)) {
+            continue;
+          }
 
           const vertices = textToPolygon(state.state);
           if (vertices.length < 3) continue;
@@ -203,10 +227,12 @@ export class ZoneReader {
 
         if (!beginXState || !endXState || !beginYState || !endYState) continue;
 
-        const beginX = parseFloat(beginXState.state);
-        const endX = parseFloat(endXState.state);
-        const beginY = parseFloat(beginYState.state);
-        const endY = parseFloat(endYState.state);
+        const beginX = this.parseStateNumber(beginXState);
+        const endX = this.parseStateNumber(endXState);
+        const beginY = this.parseStateNumber(beginYState);
+        const endY = this.parseStateNumber(endYState);
+
+        if (beginX === null || endX === null || beginY === null || endY === null) continue;
 
         // Skip unconfigured zones (all zeros)
         if (beginX === 0 && endX === 0 && beginY === 0 && endY === 0) continue;
@@ -266,12 +292,14 @@ export class ZoneReader {
 
           if (!beginXState || !endXState || !beginYState || !endYState) continue;
 
-          const beginX = parseFloat(beginXState.state);
-          const endX = parseFloat(endXState.state);
-          const beginY = parseFloat(beginYState.state);
-          const endY = parseFloat(endYState.state);
+        const beginX = this.parseStateNumber(beginXState);
+        const endX = this.parseStateNumber(endXState);
+        const beginY = this.parseStateNumber(beginYState);
+        const endY = this.parseStateNumber(endYState);
 
-          if (beginX === 0 && endX === 0 && beginY === 0 && endY === 0) continue;
+        if (beginX === null || endX === null || beginY === null || endY === null) continue;
+
+        if (beginX === 0 && endX === 0 && beginY === 0 && endY === 0) continue;
 
           const x = Math.min(beginX, endX);
           const y = Math.min(beginY, endY);
@@ -327,10 +355,12 @@ export class ZoneReader {
 
           if (!beginXState || !endXState || !beginYState || !endYState) continue;
 
-          const beginX = parseFloat(beginXState.state);
-          const endX = parseFloat(endXState.state);
-          const beginY = parseFloat(beginYState.state);
-          const endY = parseFloat(endYState.state);
+          const beginX = this.parseStateNumber(beginXState);
+          const endX = this.parseStateNumber(endXState);
+          const beginY = this.parseStateNumber(beginYState);
+          const endY = this.parseStateNumber(endYState);
+
+          if (beginX === null || endX === null || beginY === null || endY === null) continue;
 
           if (beginX === 0 && endX === 0 && beginY === 0 && endY === 0) continue;
 

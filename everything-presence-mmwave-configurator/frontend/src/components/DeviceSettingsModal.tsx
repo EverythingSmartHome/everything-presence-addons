@@ -13,9 +13,12 @@ interface DeviceSettingsModalProps {
 }
 
 interface SettingState {
-  value: string | number | boolean;
+  value: string | number | boolean | null;
   entityId: string;
   loading: boolean;
+  status: 'enabled' | 'disabled' | 'unavailable' | 'unknown';
+  disabledBy?: string | null;
+  hiddenBy?: string | null;
 }
 
 // Number input component with local state (updates on blur/enter)
@@ -94,9 +97,22 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
       // Flatten all settings from all groups
       const allSettings = settingsGroups.flatMap(group => group.settings);
+      const settingsToFetch = allSettings.filter((setting) => setting.status !== 'disabled');
+
+      for (const setting of allSettings) {
+        const status = setting.status ?? 'unknown';
+        newSettings[setting.key] = {
+          value: null,
+          entityId: setting.entityId,
+          loading: status === 'enabled' || status === 'unavailable' || status === 'unknown',
+          status,
+          disabledBy: setting.disabledBy ?? null,
+          hiddenBy: setting.hiddenBy ?? null,
+        };
+      }
 
       // Fetch all settings in parallel for better performance
-      const fetchPromises = allSettings.map(async (setting) => {
+      const fetchPromises = settingsToFetch.map(async (setting) => {
         if (!setting.entityId) return null;
 
         try {
@@ -105,11 +121,18 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
           if (response.ok) {
             const data = await response.json();
             let value: string | number | boolean = data.state;
+            let status: SettingState['status'] = 'enabled';
+            const normalizedState = typeof data.state === 'string' ? data.state.toLowerCase() : '';
+
+            if (normalizedState === 'unavailable' || normalizedState === 'unknown') {
+              status = 'unavailable';
+              value = null;
+            }
 
             // Convert based on control type
-            if (setting.controlType === 'number') {
+            if (status === 'enabled' && setting.controlType === 'number') {
               value = parseFloat(data.state) || 0;
-            } else if (setting.controlType === 'switch' || setting.controlType === 'light') {
+            } else if (status === 'enabled' && (setting.controlType === 'switch' || setting.controlType === 'light')) {
               value = data.state === 'on';
             }
 
@@ -119,6 +142,9 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
                 value,
                 entityId: setting.entityId,
                 loading: false,
+                status,
+                disabledBy: setting.disabledBy ?? null,
+                hiddenBy: setting.hiddenBy ?? null,
               },
             };
           } else if (response.status === 404) {
@@ -141,6 +167,13 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
       for (const result of results) {
         if (result) {
           newSettings[result.key] = result.state;
+        }
+      }
+
+      for (const setting of allSettings) {
+        const state = newSettings[setting.key];
+        if (state && state.loading) {
+          state.loading = false;
         }
       }
 
@@ -200,13 +233,32 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
   const renderSetting = (setting: SettingEntity) => {
     const state = settingValues[setting.key];
     if (!state) return null;
+    const status = state.status;
+    const canEdit = status === 'enabled';
 
     return (
       <div key={setting.key} className="py-2">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-300">{setting.label || setting.key}</span>
           <div className="flex items-center gap-2">
-          {setting.controlType === 'number' && (
+            <span className="text-sm text-slate-300">{setting.label || setting.key}</span>
+            {status === 'disabled' && (
+              <span className="text-[10px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded">
+                Disabled
+              </span>
+            )}
+            {status === 'unavailable' && (
+              <span className="text-[10px] text-sky-300 bg-sky-500/10 px-2 py-0.5 rounded">
+                Unavailable
+              </span>
+            )}
+            {setting.hiddenBy && status === 'enabled' && (
+              <span className="text-[10px] text-slate-400 bg-slate-700/40 px-2 py-0.5 rounded">
+                Hidden
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+          {setting.controlType === 'number' && canEdit && typeof state.value === 'number' && (
             <NumberInput
               value={state.value as number}
               min={setting.min}
@@ -218,7 +270,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             />
           )}
 
-          {(setting.controlType === 'switch' || setting.controlType === 'light') && (
+          {(setting.controlType === 'switch' || setting.controlType === 'light') && canEdit && typeof state.value === 'boolean' && (
             <button
               onClick={() => updateSetting(setting.key, !(state.value as boolean))}
               disabled={state.loading}
@@ -234,9 +286,9 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             </button>
           )}
 
-          {setting.controlType === 'select' && setting.options && (
+          {setting.controlType === 'select' && setting.options && canEdit && typeof state.value === 'string' && (
             <select
-              value={state.value as string}
+              value={(state.value ?? '') as string}
               onChange={(e) => updateSetting(setting.key, e.target.value)}
               disabled={state.loading}
               className="px-2 py-1.5 text-sm bg-slate-800/70 border border-slate-700 rounded-lg focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-50 max-w-[160px]"
@@ -247,6 +299,20 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
                 </option>
               ))}
             </select>
+          )}
+
+          {canEdit && !state.loading && state.value === null && (
+            <span className="text-xs text-slate-500 italic">Value unavailable</span>
+          )}
+
+          {!canEdit && (
+            <span className="text-xs text-slate-500 italic">
+              {status === 'disabled'
+                ? `Disabled${state.disabledBy ? ` (${state.disabledBy})` : ''}`
+                : status === 'unavailable'
+                ? 'Unavailable'
+                : 'Status unknown'}
+            </span>
           )}
 
           {state.loading && (

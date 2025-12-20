@@ -216,7 +216,7 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
    * GET /api/device-mappings/:deviceId/settings
    * Get settings entities grouped for UI display.
    */
-  router.get('/:deviceId/settings', (req, res) => {
+  router.get('/:deviceId/settings', async (req, res) => {
     const { deviceId } = req.params;
 
     try {
@@ -228,7 +228,69 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
       }
 
       const groups = deviceEntityService.getSettingsGrouped(deviceId);
-      return res.json({ groups });
+
+      if (!readTransport || groups.length === 0) {
+        return res.json({ groups });
+      }
+
+      const entityIds = groups.flatMap((group) => group.settings.map((setting) => setting.entityId));
+      const uniqueEntityIds = Array.from(new Set(entityIds));
+
+      let registryById = new Map<string, { disabled_by: string | null; hidden_by: string | null }>();
+      try {
+        const registry = await readTransport.listEntityRegistry();
+        registryById = new Map(
+          registry.map((entry) => [entry.entity_id, { disabled_by: entry.disabled_by ?? null, hidden_by: entry.hidden_by ?? null }])
+        );
+      } catch (error) {
+        logger.warn({ error }, 'Failed to load entity registry for settings availability');
+      }
+
+      let statesById = new Map<string, { state: string }>();
+      if (uniqueEntityIds.length > 0) {
+        try {
+          const states = await readTransport.getStates(uniqueEntityIds);
+          statesById = states as Map<string, { state: string }>;
+        } catch (error) {
+          logger.warn({ error }, 'Failed to load entity states for settings availability');
+        }
+      }
+
+      const normalizeStateValue = (state?: string | null) => (typeof state === 'string' ? state.toLowerCase() : '');
+      const isUnavailableState = (state?: string | null) => {
+        const normalized = normalizeStateValue(state);
+        return normalized === 'unavailable' || normalized === 'unknown';
+      };
+
+      const enrichedGroups = groups.map((group) => ({
+        ...group,
+        settings: group.settings.map((setting) => {
+          const registryEntry = registryById.get(setting.entityId);
+          const disabledBy = registryEntry?.disabled_by ?? null;
+          const hiddenBy = registryEntry?.hidden_by ?? null;
+          const state = statesById.get(setting.entityId);
+
+          let status: 'enabled' | 'disabled' | 'unavailable' | 'unknown' = 'unknown';
+          if (disabledBy) {
+            status = 'disabled';
+          } else if (state) {
+            if (isUnavailableState(state.state)) {
+              status = 'unavailable';
+            } else {
+              status = 'enabled';
+            }
+          }
+
+          return {
+            ...setting,
+            disabledBy,
+            hiddenBy,
+            status,
+          };
+        }),
+      }));
+
+      return res.json({ groups: enrichedGroups });
     } catch (error) {
       logger.error({ error, deviceId }, 'Failed to get device settings');
       return res.status(500).json({ message: 'Failed to get device settings' });

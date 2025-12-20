@@ -88,6 +88,9 @@ export interface SettingEntity {
   unit?: string;
   options?: string[];
   description?: string;
+  disabledBy?: 'user' | 'integration' | 'config_entry' | null;
+  hiddenBy?: string | null;
+  status?: 'enabled' | 'disabled' | 'unavailable' | 'unknown';
 }
 
 /**

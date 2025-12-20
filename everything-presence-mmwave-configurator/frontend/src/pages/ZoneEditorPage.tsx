@@ -52,6 +52,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [rangeMm, setRangeMm] = useState(15000);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [snapGridMm, setSnapGridMm] = useState(100);
   const [zoom, setZoom] = useState(1.1);
@@ -59,6 +60,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [showZoneList, setShowZoneList] = useState(false);
   const [zoneAvailability, setZoneAvailability] = useState<ZoneAvailability>({});
+  const [polygonAvailability, setPolygonAvailability] = useState<ZoneAvailability>({});
   const [polygonZonesAvailable, setPolygonZonesAvailable] = useState<boolean | null>(null);
   const [entryZonesAvailable, setEntryZonesAvailable] = useState<boolean | null>(null);
   const [isDraggingZone, setIsDraggingZone] = useState(false);
@@ -188,16 +190,34 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     const availability = zoneAvailability[key];
     // If no availability info, assume available
     if (!availability) return true;
-    return availability.enabled;
+    if (availability.status === 'disabled' || availability.status === 'unavailable') return false;
+    return true;
   };
 
   // Get why a zone is disabled
   const getDisabledReason = (zone: ZoneRect): string | null => {
     const key = getAvailabilityKey(zone.id, zone.type);
     const availability = zoneAvailability[key];
-    if (!availability || availability.enabled) return null;
+    if (!availability || availability.status !== 'disabled') return null;
     return availability.disabledBy ?? 'unknown';
   };
+
+  const getZoneStatus = (zone: ZoneRect): 'enabled' | 'disabled' | 'unavailable' | 'unknown' => {
+    const key = getAvailabilityKey(zone.id, zone.type);
+    const availability = zoneAvailability[key];
+    return availability?.status ?? 'unknown';
+  };
+
+  const getPolygonStatus = (zoneId: string): 'enabled' | 'disabled' | 'unavailable' | 'unknown' => {
+    const availability = polygonAvailability[zoneId];
+    return availability?.status ?? 'unknown';
+  };
+
+  useEffect(() => {
+    if (!warning) return;
+    const timer = setTimeout(() => setWarning(null), 6000);
+    return () => clearTimeout(timer);
+  }, [warning]);
 
   useEffect(() => {
     const load = async () => {
@@ -345,11 +365,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           entityMappingsToUse
         );
         setZoneAvailability(response.availability);
+        setPolygonAvailability(response.polygonAvailability ?? {});
         setPolygonZonesAvailable(response.polygonZonesAvailable);
         setEntryZonesAvailable(response.entryZonesAvailable);
       } catch (err) {
         // Silently fail - availability info is optional
         setZoneAvailability({});
+        setPolygonAvailability({});
         setPolygonZonesAvailable(null);
         setEntryZonesAvailable(null);
       }
@@ -627,6 +649,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
 
     setSaving(true);
+    setWarning(null);
     try {
       const effectiveProfile = selectedRoom.profileId ?? selectedProfileId;
 
@@ -642,23 +665,78 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         if (polygonModeStatus.enabled) {
           // Save polygon zones
-          await pushPolygonZonesToDevice(
+          const result = await pushPolygonZonesToDevice(
             selectedRoom.deviceId,
             effectiveProfile,
             polygonZones,
             entityNamePrefix,
             entityMappingsToUse
           );
+          const warningMessages: string[] = [];
+          if (result.warnings && result.warnings.length > 0) {
+            const sample = result.warnings
+              .map((warning) => warning.entityId ?? warning.description)
+              .filter(Boolean)
+              .slice(0, 3)
+              .join(', ');
+            warningMessages.push(
+              `Saved, but ${result.warnings.length} entity update(s) failed. ${sample ? `(${sample})` : ''}`.trim()
+            );
+          }
+
+          const disabledPolygonZones = polygonZones
+            .map((zone) => ({ id: zone.id, status: getPolygonStatus(zone.id) }))
+            .filter((zone) => zone.status === 'disabled' || zone.status === 'unavailable');
+
+          if (disabledPolygonZones.length > 0) {
+            const sample = disabledPolygonZones
+              .slice(0, 3)
+              .map((zone) => `${zone.id} (${zone.status})`)
+              .join(', ');
+            warningMessages.push(
+              `Some polygon zones could not be written because their entities are disabled or unavailable. ${sample ? `(${sample})` : ''}`.trim()
+            );
+          }
+
+          if (warningMessages.length > 0) {
+            setWarning(warningMessages.join(' '));
+          }
         } else {
           // Save rectangle zones
           // Filter out zones whose entities are disabled in Home Assistant
           const availableZones = (selectedRoom.zones ?? []).filter(zone => isZoneAvailable(zone));
+          const skippedZones = (selectedRoom.zones ?? [])
+            .map((zone) => ({ id: zone.id, status: getZoneStatus(zone) }))
+            .filter((zone) => zone.status === 'disabled' || zone.status === 'unavailable');
 
           // Validate zones
           await validateZones(availableZones);
 
           // Push zones to device (device is source of truth)
-          await pushZonesToDevice(selectedRoom.deviceId, effectiveProfile, availableZones, entityNamePrefix, entityMappingsToUse);
+          const result = await pushZonesToDevice(selectedRoom.deviceId, effectiveProfile, availableZones, entityNamePrefix, entityMappingsToUse);
+          const warningMessages: string[] = [];
+          if (result.warnings && result.warnings.length > 0) {
+            const sample = result.warnings
+              .map((warning) => warning.entityId ?? warning.description)
+              .filter(Boolean)
+              .slice(0, 3)
+              .join(', ');
+            warningMessages.push(
+              `Saved, but ${result.warnings.length} entity update(s) failed. ${sample ? `(${sample})` : ''}`.trim()
+            );
+          }
+          if (skippedZones.length > 0) {
+            const sample = skippedZones
+              .slice(0, 3)
+              .map((zone) => `${zone.id} (${zone.status})`)
+              .join(', ');
+            warningMessages.push(
+              `Some zones were skipped because their entities are disabled or unavailable. ${sample ? `(${sample})` : ''}`.trim()
+            );
+          }
+          if (warningMessages.length > 0) {
+            setWarning(warningMessages.join(' '));
+          }
         }
       }
 
@@ -739,6 +817,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       {error && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
           {error}
+        </div>
+      )}
+      {warning && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-amber-500/50 bg-amber-500/10 backdrop-blur px-6 py-3 text-amber-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
+          {warning}
         </div>
       )}
 
@@ -1313,6 +1396,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                   ) : (
                     polygonZones.map((polygon) => {
                       const isSelected = selectedZoneId === polygon.id;
+                      const polygonStatus = getPolygonStatus(polygon.id);
                       return (
                         <div
                           key={polygon.id}
@@ -1335,6 +1419,16 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                               </span>
                               {polygon.label && (
                                 <span className="text-xs text-slate-500">({polygon.id})</span>
+                              )}
+                              {polygonStatus === 'disabled' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200">
+                                  Disabled
+                                </span>
+                              )}
+                              {polygonStatus === 'unavailable' && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-200">
+                                  Unavailable
+                                </span>
                               )}
                               <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                                 polygon.type === 'regular' ? 'bg-blue-500/30 text-blue-200' :
@@ -1381,6 +1475,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                 <div className="p-4 space-y-3">
                   {displayZones.map((zone) => {
                     const available = isZoneAvailable(zone);
+                    const status = getZoneStatus(zone);
                     const disabledReason = getDisabledReason(zone);
 
                     return (
@@ -1397,7 +1492,15 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                               : 'border-amber-600/50 bg-amber-600/10'
                             : 'border-slate-700 bg-slate-800/30'
                         } p-3 transition-all`}
-                        title={!available ? `Entity disabled in Home Assistant (by ${disabledReason}). Enable the entity in HA to use this zone.` : undefined}
+                        title={
+                          status === 'disabled'
+                            ? `Entity disabled in Home Assistant (by ${disabledReason}). Enable the entity in HA to use this zone.`
+                            : status === 'unavailable'
+                            ? 'Entity is currently unavailable in Home Assistant. Check the device connection.'
+                            : status === 'unknown'
+                            ? 'Zone entity status is unknown. Try reloading to refresh availability.'
+                            : undefined
+                        }
                       >
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
@@ -1407,9 +1510,14 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                             {zone.label && (
                               <span className="text-xs text-slate-500">({zone.id})</span>
                             )}
-                            {!available && (
+                            {status === 'disabled' && (
                               <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
                                 Entity Disabled
+                              </span>
+                            )}
+                            {status === 'unavailable' && (
+                              <span className="text-xs text-sky-300 bg-sky-500/10 px-2 py-0.5 rounded">
+                                Entity Unavailable
                               </span>
                             )}
                             {available && !zone.enabled && (
@@ -1435,13 +1543,18 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                             </button>
                           ) : (
                             <span className="text-xs text-slate-500 italic">
-                              Enable in HA
+                              {status === 'unavailable' ? 'Unavailable' : 'Enable in HA'}
                             </span>
                           )}
                         </div>
-                        {!available && (
+                        {!available && status === 'disabled' && (
                           <div className="text-xs text-slate-400 mb-2">
                             Enable the zone entity in Home Assistant to configure this zone.
+                          </div>
+                        )}
+                        {!available && status === 'unavailable' && (
+                          <div className="text-xs text-slate-400 mb-2">
+                            Entity is unavailable. Restore device connectivity to edit this zone.
                           </div>
                         )}
                         {available && zone.enabled && (
