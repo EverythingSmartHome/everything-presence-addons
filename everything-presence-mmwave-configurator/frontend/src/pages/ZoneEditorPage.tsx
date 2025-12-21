@@ -81,6 +81,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     clipRadarToWalls,
   } = useDisplaySettings();
   const liveState = propLiveState;
+  const installationAngle =
+    typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
   const loadedRoomRef = useRef<string | null>(null);
   const previousRoomIdRef = useRef<string | null>(null);
 
@@ -1030,6 +1032,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             furniture={selectedRoom.furniture ?? []}
             doors={selectedRoom.doors ?? []}
             devicePlacement={selectedRoom.devicePlacement}
+            installationAngle={installationAngle}
             fieldOfViewDeg={selectedProfile?.limits?.fieldOfViewDegrees}
             maxRangeMeters={selectedProfile?.limits?.maxRangeMeters}
             deviceIconUrl={selectedProfile?.iconUrl}

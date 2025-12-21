@@ -25,6 +25,7 @@ interface ZoneCanvasProps {
   roomShellFillMode?: 'overlay' | 'material';
   floorMaterial?: 'wood-oak' | 'wood-walnut' | 'wood-cherry' | 'wood-ash' | 'wood-mahogany' | 'wood-herringbone' | 'carpet-beige' | 'carpet-gray' | 'carpet-charcoal' | 'carpet-navy' | 'carpet-burgundy' | 'tile-white' | 'tile-gray' | 'tile-terracotta' | 'marble-white' | 'marble-black' | 'slate' | 'concrete' | 'vinyl-light' | 'none';
   devicePlacement?: DevicePlacement;
+  installationAngle?: number;
   fieldOfViewDeg?: number;
   maxRangeMeters?: number;
   deviceIconUrl?: string;
@@ -69,6 +70,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   roomShellFillMode,
   floorMaterial,
   devicePlacement,
+  installationAngle,
   fieldOfViewDeg,
   maxRangeMeters,
   deviceIconUrl,
@@ -97,14 +99,17 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   const [polygonDragOffset, setPolygonDragOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const [draggingVertex, setDraggingVertex] = useState<{ zoneId: string; vertexIndex: number } | null>(null);
 
+  const effectiveRotationDeg =
+    devicePlacement ? (devicePlacement.rotationDeg ?? 0) + (installationAngle ?? 0) : 0;
+
   // Transform device-relative coordinates to room coordinates
   const deviceToRoom = (deviceX: number, deviceY: number): { x: number; y: number } => {
     if (!devicePlacement) {
       return { x: deviceX, y: deviceY };
     }
 
-    // Use device rotation as-is (device coordinates already have 0° = right)
-    const angleRad = (devicePlacement.rotationDeg ?? 0) * (Math.PI / 180);
+    // Apply installation angle offset to match firmware coordinate rotation
+    const angleRad = effectiveRotationDeg * (Math.PI / 180);
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
 
@@ -130,7 +135,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
     const translatedY = roomY - devicePlacement.y;
 
     // Rotate by inverse angle (no offset needed)
-    const angleRad = -(devicePlacement.rotationDeg ?? 0) * (Math.PI / 180);
+    const angleRad = -effectiveRotationDeg * (Math.PI / 180);
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
 
@@ -382,7 +387,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
           const canvasHeight = Math.hypot(deviceDown.x - deviceOrigin.x, deviceDown.y - deviceOrigin.y);
 
           // Get device rotation for SVG transform
-          const rotationDeg = devicePlacement?.rotationDeg ?? 0;
+          const rotationDeg = devicePlacement ? effectiveRotationDeg : 0;
 
           const isSelected = selectedId === zone.id;
 

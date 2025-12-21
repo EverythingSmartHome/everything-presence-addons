@@ -408,13 +408,17 @@ function App() {
   }, [selectedRoom, selectedProfile]);
 
   // Transform device-relative coordinates to room coordinates
+  const installationAngle =
+    typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
+
   const deviceToRoom = React.useCallback((deviceX: number, deviceY: number) => {
     if (!selectedRoom?.devicePlacement) {
       return { x: deviceX, y: deviceY };
     }
 
     const { x, y, rotationDeg } = selectedRoom.devicePlacement;
-    const angleRad = ((rotationDeg ?? 0) * Math.PI) / 180;
+    const effectiveRotationDeg = (rotationDeg ?? 0) + installationAngle;
+    const angleRad = (effectiveRotationDeg * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
 
@@ -425,7 +429,7 @@ function App() {
       x: rotatedX + x,
       y: rotatedY + y,
     };
-  }, [selectedRoom]);
+  }, [selectedRoom, installationAngle]);
 
   // Compute target positions in room coordinates
   const targetPositions = useMemo(() => {
