@@ -216,6 +216,7 @@ export interface AppSettings {
   outlineDone?: boolean;
   placementDone?: boolean;
   zonesReady?: boolean;
+  defaultRoomId?: string | null;
 }
 
 // Custom floor material added by user

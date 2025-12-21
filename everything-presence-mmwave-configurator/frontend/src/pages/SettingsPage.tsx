@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchRooms, deleteRoom, updateRoom } from '../api/rooms';
+import { fetchSettings, updateSettings } from '../api/client';
 import {
   fetchCustomFloors,
   createCustomFloor,
@@ -25,6 +26,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   const [syncingRoom, setSyncingRoom] = useState<RoomConfig | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [defaultRoomId, setDefaultRoomId] = useState<string | null>(null);
+  const [updatingDefaultRoomId, setUpdatingDefaultRoomId] = useState<string | null>(null);
+  const [clearingDefaultRoom, setClearingDefaultRoom] = useState(false);
 
   // Device mappings context - used to refresh cache after resync
   const { refreshMapping } = useDeviceMappings();
@@ -54,14 +58,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   useEffect(() => {
     const load = async () => {
       try {
-        const [roomsRes, floorsRes, furnitureRes] = await Promise.all([
+        const [roomsRes, floorsRes, furnitureRes, settingsRes] = await Promise.all([
           fetchRooms(),
           fetchCustomFloors(),
           fetchCustomFurniture(),
+          fetchSettings(),
         ]);
         setRooms(roomsRes.rooms);
         setCustomFloors(floorsRes.floors);
         setCustomFurniture(furnitureRes.furniture);
+        setDefaultRoomId(typeof settingsRes.settings.defaultRoomId === 'string' ? settingsRes.settings.defaultRoomId : null);
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -82,11 +88,47 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
       await deleteRoom(roomId);
       setRooms((prev) => prev.filter((r) => r.id !== roomId));
       onRoomDeleted?.(roomId);
+      if (defaultRoomId === roomId) {
+        await updateSettings({ defaultRoomId: null });
+        setDefaultRoomId(null);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete room');
     } finally {
       setDeletingRoomId(null);
+    }
+  };
+
+  const handleSetDefaultRoom = async (room: RoomConfig) => {
+    setUpdatingDefaultRoomId(room.id);
+    try {
+      await updateSettings({ defaultRoomId: room.id });
+      setDefaultRoomId(room.id);
+      setSuccess(`Default room set to "${room.name}"`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update default room');
+    } finally {
+      setUpdatingDefaultRoomId(null);
+    }
+  };
+
+  const handleClearDefaultRoom = async () => {
+    if (!defaultRoomId) return;
+    if (!confirm('Clear the default room selection?')) {
+      return;
+    }
+    setClearingDefaultRoom(true);
+    try {
+      await updateSettings({ defaultRoomId: null });
+      setDefaultRoomId(null);
+      setSuccess('Default room cleared');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear default room');
+    } finally {
+      setClearingDefaultRoom(false);
     }
   };
 
@@ -444,6 +486,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                   >
                     📤 Import
                   </button>
+                  <button
+                    onClick={handleClearDefaultRoom}
+                    disabled={!defaultRoomId || clearingDefaultRoom}
+                    className="rounded-lg border border-amber-600/50 bg-amber-600/10 px-4 py-2 text-sm font-semibold text-amber-100 transition-all hover:bg-amber-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Clear the default room selection"
+                  >
+                    {clearingDefaultRoom ? 'Clearing...' : 'Clear Default'}
+                  </button>
                 </div>
               </div>
 
@@ -459,7 +509,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                     className="flex items-center justify-between rounded-lg border border-slate-700/50 bg-slate-800/50 p-4"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-white">{room.name}</div>
+                      <div className="flex items-center gap-2 font-semibold text-white">
+                        <span>{room.name}</span>
+                        {defaultRoomId === room.id && (
+                          <span className="rounded-full border border-emerald-500/50 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">
+                            Default
+                          </span>
+                        )}
+                      </div>
                       <div className="text-sm text-slate-400">
                         {room.deviceId ? 'Device linked' : 'No device linked'}
                         {room.roomShell?.points && room.roomShell.points.length > 0 && (
@@ -480,6 +537,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2 justify-end">
+                      <button
+                        onClick={() => handleSetDefaultRoom(room)}
+                        disabled={defaultRoomId === room.id || updatingDefaultRoomId === room.id}
+                        className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Set this room as the default for the live dashboard"
+                      >
+                        {defaultRoomId === room.id
+                          ? 'Default Room'
+                          : updatingDefaultRoomId === room.id
+                          ? 'Setting...'
+                          : 'Set Default'}
+                      </button>
                       {room.deviceId && room.profileId && (
                         <button
                           onClick={() => handleStartSync(room)}
@@ -809,3 +878,5 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
     </div>
   );
 };
+
+

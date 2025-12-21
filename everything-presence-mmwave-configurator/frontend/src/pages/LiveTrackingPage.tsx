@@ -200,6 +200,17 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     load();
   }, []);
 
+  useEffect(() => {
+    if (!initialRoomId || initialRoomId === selectedRoomId) return;
+    const room = rooms.find((r) => r.id === initialRoomId);
+    if (!room) return;
+    setSelectedRoomId(initialRoomId);
+    if (room.profileId) {
+      setSelectedProfileId(room.profileId);
+    }
+    onRoomChange?.(initialRoomId, room.profileId ?? selectedProfileId ?? null);
+  }, [initialRoomId, rooms, selectedRoomId, selectedProfileId, onRoomChange]);
+
   // Update trail history when target positions change
   useEffect(() => {
     if (!showTrails) {

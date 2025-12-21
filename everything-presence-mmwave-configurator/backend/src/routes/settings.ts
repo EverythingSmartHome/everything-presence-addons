@@ -10,14 +10,28 @@ export const createSettingsRouter = (): Router => {
   });
 
   router.put('/', (req, res) => {
-    const next = storage.saveSettings({
-      wizardCompleted:
-        typeof req.body?.wizardCompleted === 'boolean' ? req.body.wizardCompleted : undefined,
-      wizardStep: typeof req.body?.wizardStep === 'string' ? req.body.wizardStep : undefined,
-      outlineDone: typeof req.body?.outlineDone === 'boolean' ? req.body.outlineDone : undefined,
-      placementDone: typeof req.body?.placementDone === 'boolean' ? req.body.placementDone : undefined,
-      zonesReady: typeof req.body?.zonesReady === 'boolean' ? req.body.zonesReady : undefined,
-    });
+    const nextSettings: Record<string, unknown> = {};
+    if (typeof req.body?.wizardCompleted === 'boolean') {
+      nextSettings.wizardCompleted = req.body.wizardCompleted;
+    }
+    if (typeof req.body?.wizardStep === 'string') {
+      nextSettings.wizardStep = req.body.wizardStep;
+    }
+    if (typeof req.body?.outlineDone === 'boolean') {
+      nextSettings.outlineDone = req.body.outlineDone;
+    }
+    if (typeof req.body?.placementDone === 'boolean') {
+      nextSettings.placementDone = req.body.placementDone;
+    }
+    if (typeof req.body?.zonesReady === 'boolean') {
+      nextSettings.zonesReady = req.body.zonesReady;
+    }
+    if (typeof req.body?.defaultRoomId === 'string') {
+      nextSettings.defaultRoomId = req.body.defaultRoomId;
+    } else if (req.body?.defaultRoomId === null) {
+      nextSettings.defaultRoomId = null;
+    }
+    const next = storage.saveSettings(nextSettings);
     res.json({ settings: next });
   });
 

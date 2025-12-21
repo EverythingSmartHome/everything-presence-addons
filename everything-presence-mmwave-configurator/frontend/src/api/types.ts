@@ -266,6 +266,7 @@ export interface AppSettings {
   outlineDone?: boolean;
   placementDone?: boolean;
   zonesReady?: boolean;
+  defaultRoomId?: string | null;
 }
 
 export interface LiveState {
