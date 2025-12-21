@@ -6,6 +6,7 @@ interface HeatmapOverlayProps {
   visible: boolean;
   toCanvas: (point: { x: number; y: number }) => { x: number; y: number };
   devicePlacement?: DevicePlacement | null;
+  installationAngle?: number;
   intensityThreshold?: number; // 0-1, cells below this won't be shown
   roomShellPoints?: Array<{ x: number; y: number }> | null; // Canvas coordinates for room boundary
   clipToRoom?: boolean;
@@ -55,7 +56,7 @@ const getHeatColor = (intensity: number, threshold: number): { fill: string; opa
   };
 };
 
-export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, toCanvas, devicePlacement, intensityThreshold = 0.15, roomShellPoints, clipToRoom = true, showAveragePosition = true }) => {
+export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, toCanvas, devicePlacement, installationAngle, intensityThreshold = 0.15, roomShellPoints, clipToRoom = true, showAveragePosition = true }) => {
   // Transform device-relative coordinates to room coordinates
   const deviceToRoom = useMemo(() => {
     if (!devicePlacement) {
@@ -63,7 +64,8 @@ export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, t
     }
 
     const { x, y, rotationDeg } = devicePlacement;
-    const angleRad = ((rotationDeg ?? 0) * Math.PI) / 180;
+    const effectiveRotationDeg = (rotationDeg ?? 0) + (installationAngle ?? 0);
+    const angleRad = (effectiveRotationDeg * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
 
@@ -75,7 +77,7 @@ export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, t
         y: rotatedY + y,
       };
     };
-  }, [devicePlacement]);
+  }, [devicePlacement, installationAngle]);
 
   // Calculate average position in canvas coordinates
   const avgPositionCanvas = useMemo(() => {

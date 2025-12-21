@@ -78,6 +78,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   // Recording mode state - permanent trail capture
   const [isRecording, setIsRecording] = useState(false);
   const [recordedTrail, setRecordedTrail] = useState<RecordedPoint[]>([]);
+  const installationAngle =
+    typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
   const [showDetailedTracking, setShowDetailedTracking] = useState(false);
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(false);
@@ -768,6 +770,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             roomShellFillMode={selectedRoom.roomShellFillMode}
             floorMaterial={selectedRoom.floorMaterial}
             devicePlacement={selectedRoom.devicePlacement}
+            installationAngle={installationAngle}
             fieldOfViewDeg={selectedProfile?.limits?.fieldOfViewDegrees}
             maxRangeMeters={selectedProfile?.limits?.maxRangeMeters}
             deviceIconUrl={selectedProfile?.iconUrl}
@@ -784,7 +787,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               // Heatmap overlay (renders behind everything else)
               // Pass devicePlacement to transform device-relative coordinates to room coordinates
               const heatmapOverlay = (
-                <HeatmapOverlay data={heatmapData} visible={heatmapEnabled} toCanvas={toCanvas} devicePlacement={selectedRoom?.devicePlacement} intensityThreshold={heatmapThreshold} roomShellPoints={roomShellPoints} />
+                <HeatmapOverlay data={heatmapData} visible={heatmapEnabled} toCanvas={toCanvas} devicePlacement={selectedRoom?.devicePlacement} installationAngle={installationAngle} intensityThreshold={heatmapThreshold} roomShellPoints={roomShellPoints} />
               );
 
               // Define colors for each target (up to 3 targets)
@@ -1026,8 +1029,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               // Render distance arcs for EPL (tracking devices)
               if (selectedProfile?.capabilities?.tracking && !selectedProfile?.capabilities?.distanceOnlyTracking && selectedRoom?.devicePlacement) {
                 const maxDistanceMeters = liveState?.config?.distanceMax;
-                const installationAngle = liveState?.config?.installationAngle ?? 0;
-
                 // EPL configurable max distance (from number.${name}_distance entity)
                 return (
                   <g>
