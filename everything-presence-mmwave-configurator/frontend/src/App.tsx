@@ -53,6 +53,19 @@ function App() {
         setWizardOutlineDone(Boolean(settingsRes.settings.outlineDone));
         setWizardPlacementDone(Boolean(settingsRes.settings.placementDone));
         setWizardZonesReady(Boolean(settingsRes.settings.zonesReady));
+        const defaultRoomId =
+          typeof settingsRes.settings.defaultRoomId === 'string' ? settingsRes.settings.defaultRoomId : null;
+        if (!selectedRoomId && defaultRoomId) {
+          const defaultRoom = roomsRes.rooms.find((room) => room.id === defaultRoomId);
+          if (defaultRoom) {
+            setSelectedRoomId(defaultRoomId);
+            if (defaultRoom.profileId) {
+              setSelectedProfileId(defaultRoom.profileId);
+            }
+          } else {
+            updateSettings({ defaultRoomId: null }).catch(() => null);
+          }
+        }
         // Auto-launch wizard only on first run (when not yet completed AND no rooms exist)
         // If rooms exist, assume wizard was completed in a previous version
         if (!settingsRes.settings.wizardCompleted && roomsRes.rooms.length === 0) {

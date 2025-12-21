@@ -42,24 +42,52 @@ const writeRooms = (rooms: RoomConfig[]) => {
 const readSettings = (): AppSettings => {
   ensureDataDir();
   if (!fs.existsSync(SETTINGS_FILE)) {
-    return { wizardCompleted: false, wizardStep: 'device', outlineDone: false, placementDone: false, zonesReady: false };
+    return {
+      wizardCompleted: false,
+      wizardStep: 'device',
+      outlineDone: false,
+      placementDone: false,
+      zonesReady: false,
+      defaultRoomId: null,
+    };
   }
   try {
     const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
+      const rawDefaultRoom = (parsed as any).defaultRoomId;
       return {
         wizardCompleted: Boolean((parsed as any).wizardCompleted),
         wizardStep: typeof (parsed as any).wizardStep === 'string' ? (parsed as any).wizardStep : 'device',
         outlineDone: Boolean((parsed as any).outlineDone),
         placementDone: Boolean((parsed as any).placementDone),
         zonesReady: Boolean((parsed as any).zonesReady),
+        defaultRoomId:
+          typeof rawDefaultRoom === 'string'
+            ? rawDefaultRoom
+            : rawDefaultRoom === null
+            ? null
+            : undefined,
       };
     }
-    return { wizardCompleted: false, wizardStep: 'device', outlineDone: false, placementDone: false, zonesReady: false };
+    return {
+      wizardCompleted: false,
+      wizardStep: 'device',
+      outlineDone: false,
+      placementDone: false,
+      zonesReady: false,
+      defaultRoomId: null,
+    };
   } catch (error) {
     logger.warn({ error }, 'Failed to read settings.json; returning defaults');
-    return { wizardCompleted: false, wizardStep: 'device', outlineDone: false, placementDone: false, zonesReady: false };
+    return {
+      wizardCompleted: false,
+      wizardStep: 'device',
+      outlineDone: false,
+      placementDone: false,
+      zonesReady: false,
+      defaultRoomId: null,
+    };
   }
 };
 
