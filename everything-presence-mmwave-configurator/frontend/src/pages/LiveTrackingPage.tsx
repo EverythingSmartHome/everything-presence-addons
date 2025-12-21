@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, ZonePolygon } from '../api/types';
-import { fetchDevices, fetchProfiles, ingressAware } from '../api/client';
+import { fetchDevices, fetchProfiles, fetchSettings, ingressAware } from '../api/client';
 import { fetchRooms, updateRoom } from '../api/rooms';
 import { fetchZonesFromDevice, fetchPolygonModeStatus, fetchPolygonZonesFromDevice, PolygonModeStatus } from '../api/zones';
 import { ZoneCanvas } from '../components/ZoneCanvas';
@@ -84,8 +84,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   // Recording mode state - permanent trail capture
   const [isRecording, setIsRecording] = useState(false);
   const [recordedTrail, setRecordedTrail] = useState<RecordedPoint[]>([]);
-  const installationAngle =
-    typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
   const [showDetailedTracking, setShowDetailedTracking] = useState(false);
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(false);
@@ -123,6 +121,15 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   // Check if device supports tracking (EP Lite only for heatmap)
   const supportsHeatmap = selectedProfile?.capabilities &&
     (selectedProfile.capabilities as { tracking?: boolean }).tracking === true && !isEP1;
+
+  const hasLiveStateForRoom = Boolean(
+    liveState && selectedRoom?.deviceId && liveState.deviceId === selectedRoom.deviceId
+  );
+  const showLiveOverlays = isEP1 ? true : hasLiveStateForRoom;
+  const installationAngle =
+    hasLiveStateForRoom && typeof liveState?.config?.installationAngle === 'number'
+      ? liveState.config.installationAngle
+      : 0;
 
   // Device mappings context - used to check if device has valid entity mappings
   // useDeviceMapping triggers loading the mapping into cache, useDeviceMappings provides the check
@@ -164,24 +171,45 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   useEffect(() => {
     const load = async () => {
       try {
-        const [devicesRes, profilesRes, roomsRes] = await Promise.all([
+        const [devicesRes, profilesRes, roomsRes, settingsRes] = await Promise.all([
           fetchDevices(),
           fetchProfiles(),
           fetchRooms(),
+          fetchSettings(),
         ]);
         setDevices(devicesRes.devices);
         setProfiles(profilesRes.profiles);
         setRooms(roomsRes.rooms);
 
-        let roomId = selectedRoomId;
-        let profileId = selectedProfileId;
+        let roomId = selectedRoomId ?? initialRoomId ?? null;
+        const defaultRoomId =
+          typeof settingsRes.settings.defaultRoomId === 'string' ? settingsRes.settings.defaultRoomId : null;
 
+        if (!roomId && defaultRoomId) {
+          const defaultRoom = roomsRes.rooms.find((room) => room.id === defaultRoomId);
+          if (defaultRoom) {
+            roomId = defaultRoomId;
+          }
+        }
         if (!roomId && roomsRes.rooms.length > 0) {
           roomId = roomsRes.rooms[0].id;
-          setSelectedRoomId(roomId);
+        }
+
+        let profileId = selectedProfileId ?? initialProfileId ?? null;
+        if (roomId) {
+          const selected = roomsRes.rooms.find((room) => room.id === roomId);
+          if (selected?.profileId) {
+            profileId = selected.profileId;
+          }
         }
         if (!profileId && profilesRes.profiles.length > 0) {
           profileId = profilesRes.profiles[0].id;
+        }
+
+        if (roomId && roomId !== selectedRoomId) {
+          setSelectedRoomId(roomId);
+        }
+        if (profileId && profileId !== selectedProfileId) {
           setSelectedProfileId(profileId);
         }
 
@@ -213,11 +241,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
   // Update trail history when target positions change
   useEffect(() => {
-    if (!showTrails) {
+    if (!showTrails || !showLiveOverlays) {
       return;
     }
 
-    const targets = propTargetPositions ?? [];
+    const targets = showLiveOverlays ? (propTargetPositions ?? []) : [];
     if (targets.length === 0) {
       return;
     }
@@ -252,11 +280,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
       return updated;
     });
-  }, [propTargetPositions, showTrails]);
+  }, [propTargetPositions, showTrails, showLiveOverlays]);
 
   // Recording mode - capture permanent trail while recording
   useEffect(() => {
-    if (!isRecording) {
+    if (!isRecording || !showLiveOverlays) {
       return;
     }
 
@@ -291,10 +319,15 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
       return newPoints.length > 0 ? [...prev, ...newPoints] : prev;
     });
-  }, [propTargetPositions, isRecording]);
+  }, [propTargetPositions, isRecording, showLiveOverlays]);
 
   // Smooth tracking animation with requestAnimationFrame
   useEffect(() => {
+    if (!showLiveOverlays) {
+      setAnimatedPositions(new Map());
+      return;
+    }
+
     const targets = propTargetPositions ?? [];
 
     if (!smoothTracking) {
@@ -351,7 +384,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [propTargetPositions, smoothTracking]);
+  }, [propTargetPositions, smoothTracking, showLiveOverlays]);
 
   // Fetch existing zones from device when room is loaded
   // Using refs to prevent re-fetching when entityMappings changes (which happens after zone sync)
@@ -578,6 +611,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     speed: number | null;
     angle: number | null;
   }>;
+  const displayTargetPositions = showLiveOverlays ? targetPositions : [];
   const presenceAvailability = liveState?.availability?.presence;
   const mmwaveAvailability = liveState?.availability?.mmwave;
   const pirAvailability = liveState?.availability?.pir;
@@ -799,14 +833,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             showWalls={showWalls}
             showFurniture={showFurniture}
             showDoors={showDoors}
-            showZones={showZones}
+            showZones={showZones && showLiveOverlays}
             showDevice={showDeviceIcon}
             renderOverlay={({ toCanvas, roomShellPoints, devicePlacement: devicePlacementFromCanvas, fieldOfViewDeg }) => {
               // Heatmap overlay (renders behind everything else)
               // Pass devicePlacement to transform device-relative coordinates to room coordinates
-              const heatmapOverlay = (
+              const heatmapOverlay = showLiveOverlays ? (
                 <HeatmapOverlay data={heatmapData} visible={heatmapEnabled} toCanvas={toCanvas} devicePlacement={selectedRoom?.devicePlacement} installationAngle={installationAngle} intensityThreshold={heatmapThreshold} roomShellPoints={roomShellPoints} />
-              );
+              ) : null;
 
               // Define colors for each target (up to 3 targets)
               const targetColors = [
@@ -879,10 +913,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               ) : null;
 
               // Render live target positions (EP Lite with tracking)
-              const targetElements = targetPositions.length > 0 ? (
+              const targetElements = displayTargetPositions.length > 0 ? (
                 <g>
                   {/* Render trails first (so they appear behind targets) */}
-                  {showTrails && targetPositions.map((target) => {
+                  {showTrails && displayTargetPositions.map((target) => {
                     const trail = trailHistory.get(target.id) || [];
                     if (trail.length < 2) return null;
 
@@ -929,7 +963,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                   })}
 
                   {/* Render target markers */}
-                  {targetPositions.map((target) => {
+                  {displayTargetPositions.map((target) => {
                     // Use animated positions if smooth tracking is enabled
                     const animatedPos = animatedPositions.get(target.id);
                     const renderPos = animatedPos || { x: target.x, y: target.y };
@@ -1192,7 +1226,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 {!isEP1 && (
                   <div className="flex justify-between py-1 border-b border-slate-700/50">
                     <span className="text-slate-400">Targets:</span>
-                    <span className="text-aqua-400">{targetPositions.length}</span>
+                    <span className="text-aqua-400">{displayTargetPositions.length}</span>
                   </div>
                 )}
 
@@ -1205,7 +1239,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                   </div>
                 )}
 
-                {!isEP1 && liveState.config?.installationAngle !== undefined && liveState.config.installationAngle !== 0 && (
+                {!isEP1 && hasLiveStateForRoom && liveState.config?.installationAngle !== undefined && liveState.config.installationAngle !== 0 && (
                   <div className="flex justify-between py-1 border-b border-slate-700/50">
                     <span className="text-slate-400">Install Angle:</span>
                     <span className="text-amber-400">{liveState.config.installationAngle}°</span>
