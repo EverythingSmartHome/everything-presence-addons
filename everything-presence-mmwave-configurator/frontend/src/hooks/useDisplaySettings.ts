@@ -7,6 +7,7 @@ export interface DisplaySettings {
   showZones: boolean;
   showDeviceIcon: boolean;
   showDeviceRadar: boolean;
+  showAlignedDirection: boolean;
   clipRadarToWalls: boolean;
   // Heatmap settings
   heatmapEnabled: boolean;
@@ -23,6 +24,7 @@ const defaultSettings: DisplaySettings = {
   showZones: true,
   showDeviceIcon: true,
   showDeviceRadar: false,
+  showAlignedDirection: false,
   clipRadarToWalls: true,
   // Heatmap defaults
   heatmapEnabled: false,
@@ -85,6 +87,10 @@ export const useDisplaySettings = () => {
     setSettings((prev) => ({ ...prev, showDeviceRadar: value }));
   }, []);
 
+  const setShowAlignedDirection = useCallback((value: boolean) => {
+    setSettings((prev) => ({ ...prev, showAlignedDirection: value }));
+  }, []);
+
   const setClipRadarToWalls = useCallback((value: boolean) => {
     setSettings((prev) => ({ ...prev, clipRadarToWalls: value }));
   }, []);
@@ -109,6 +115,7 @@ export const useDisplaySettings = () => {
     showZones: settings.showZones,
     showDeviceIcon: settings.showDeviceIcon,
     showDeviceRadar: settings.showDeviceRadar,
+    showAlignedDirection: settings.showAlignedDirection,
     clipRadarToWalls: settings.clipRadarToWalls,
     heatmapEnabled: settings.heatmapEnabled,
     heatmapHours: settings.heatmapHours,
@@ -120,6 +127,7 @@ export const useDisplaySettings = () => {
     setShowZones,
     setShowDeviceIcon,
     setShowDeviceRadar,
+    setShowAlignedDirection,
     setClipRadarToWalls,
     setHeatmapEnabled,
     setHeatmapHours,

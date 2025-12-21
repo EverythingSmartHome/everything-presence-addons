@@ -268,6 +268,10 @@ function App() {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('thresholdFactor');
                   updated.config.thresholdFactor = parseIntValue();
+                } else if (message.entityId.includes('installation_angle')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('installationAngle');
+                  updated.config.installationAngle = parseNumberValue();
                 } else if (message.entityId.includes('micro_motion')) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('microMotion');
