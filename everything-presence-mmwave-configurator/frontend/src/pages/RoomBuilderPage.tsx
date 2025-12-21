@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchDevices, fetchProfiles } from '../api/client';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { fetchDevices, fetchProfiles, ingressAware } from '../api/client';
 import { fetchRooms, updateRoom } from '../api/rooms';
 import { RoomCanvas } from '../components/RoomCanvas';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, FurnitureInstance, FurnitureType, Door } from '../api/types';
@@ -9,6 +9,8 @@ import { FurnitureEditor } from '../components/FurnitureEditor';
 import { DoorEditor } from '../components/DoorEditor';
 import { FLOOR_MATERIALS } from '../components/FloorMaterials';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
+import { getEffectiveEntityPrefix } from '../utils/entityUtils';
+import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -35,6 +37,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   initialRoomId,
   initialProfileId,
   onWizardProgress,
+  liveState,
 }) => {
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
@@ -83,6 +86,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     startY: number;
     originalPosition: number;
   } | null>(null);
+  const [showRotationSuggestion, setShowRotationSuggestion] = useState(false);
+  const [rotationSuggestion, setRotationSuggestion] = useState<{ suggestedAngle: number; targetAxis: number } | null>(null);
+  const [applyingInstallationAngle, setApplyingInstallationAngle] = useState(false);
+  const [rotationSuggestionError, setRotationSuggestionError] = useState<string | null>(null);
+  const lastRotationSuggestionRef = useRef<number | null>(null);
   const CANVAS_SIZE = 700;
   const HALF = CANVAS_SIZE / 2;
   const toCanvas = (v: number, range: number) => (v / range) * CANVAS_SIZE;
@@ -97,6 +105,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     [profiles, selectedProfileId, selectedRoom?.profileId],
   );
 
+  const selectedDevice = useMemo(
+    () => (selectedRoom?.deviceId ? devices.find((d) => d.id === selectedRoom.deviceId) ?? null : null),
+    [devices, selectedRoom?.deviceId],
+  );
+
   const selectedFurniture = useMemo(
     () => (selectedFurnitureId ? selectedRoom?.furniture?.find((f) => f.id === selectedFurnitureId) ?? null : null),
     [selectedFurnitureId, selectedRoom?.furniture],
@@ -106,6 +119,75 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     () => (selectedDoorId ? selectedRoom?.doors?.find((d) => d.id === selectedDoorId) ?? null : null),
     [selectedDoorId, selectedRoom?.doors],
   );
+
+  const currentInstallationAngle =
+    typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : null;
+
+  const isEplDevice = useMemo(() => {
+    const caps = selectedProfile?.capabilities as { tracking?: boolean; distanceOnlyTracking?: boolean } | undefined;
+    return Boolean(caps?.tracking) && !caps?.distanceOnlyTracking;
+  }, [selectedProfile]);
+
+  const resolveInstallationAngleEntityId = useCallback(() => {
+    if (!selectedRoom) return null;
+    const mappingEntity = selectedRoom.entityMappings?.installationAngleEntity;
+    if (mappingEntity) return mappingEntity;
+
+    const devicePrefix = selectedRoom.entityNamePrefix ?? selectedDevice?.entityNamePrefix;
+    const prefix = getEffectiveEntityPrefix(selectedRoom.entityMappings, devicePrefix);
+    if (!prefix) return null;
+    return `number.${prefix}_installation_angle`;
+  }, [selectedRoom, selectedDevice]);
+
+  const handleRotationSuggestion = useCallback(
+    (rotationDeg: number) => {
+      if (!selectedRoom || !isEplDevice) return;
+      const suggestion = getInstallationAngleSuggestion(rotationDeg, selectedRoom.roomShell?.points);
+      if (!suggestion) return;
+      if (lastRotationSuggestionRef.current === rotationDeg) return;
+
+      const entityId = resolveInstallationAngleEntityId();
+      if (!entityId) return;
+
+      setRotationSuggestion({ suggestedAngle: suggestion.suggestedAngle, targetAxis: suggestion.targetAxis });
+      setRotationSuggestionError(null);
+      setShowRotationSuggestion(true);
+      lastRotationSuggestionRef.current = rotationDeg;
+    },
+    [selectedRoom, isEplDevice, currentInstallationAngle, resolveInstallationAngleEntityId]
+  );
+
+  const applyInstallationAngleSuggestion = useCallback(async () => {
+    if (!selectedRoom?.deviceId || !rotationSuggestion) return;
+    const entityId = resolveInstallationAngleEntityId();
+    if (!entityId) {
+      setRotationSuggestionError('Installation angle entity could not be resolved for this device.');
+      return;
+    }
+
+    setApplyingInstallationAngle(true);
+    setRotationSuggestionError(null);
+    try {
+      const response = await fetch(ingressAware(`api/live/${selectedRoom.deviceId}/entity`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entityId,
+          value: rotationSuggestion.suggestedAngle,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update installation angle');
+      }
+
+      setShowRotationSuggestion(false);
+    } catch (err) {
+      setRotationSuggestionError('Failed to update installation angle.');
+    } finally {
+      setApplyingInstallationAngle(false);
+    }
+  }, [selectedRoom?.deviceId, rotationSuggestion, resolveInstallationAngleEntityId]);
 
   const handlePointsChange = useCallback((nextPoints: { x: number; y: number }[]) => {
     if (!selectedRoom) return;
@@ -708,12 +790,78 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   }, [selectedRoom?.id, handleAutoZoom]);
 
+  const isSuggestionApplied =
+    currentInstallationAngle !== null &&
+    rotationSuggestion &&
+    rotationSuggestion.suggestedAngle === currentInstallationAngle;
+  const isZeroSuggestion = rotationSuggestion?.suggestedAngle === 0;
+
   return (
     <div className="fixed inset-0 bg-slate-950 overflow-hidden">
       {/* Error Toast */}
       {error && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
           {error}
+        </div>
+      )}
+
+      {/* Installation Angle Suggestion Modal */}
+      {showRotationSuggestion && rotationSuggestion && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowRotationSuggestion(false)}
+          />
+          {/* Modal */}
+          <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl animate-in zoom-in-95 fade-in duration-200">
+            <div className="p-6">
+              <div className="flex justify-center mb-4">
+                <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center">
+                  <span className="text-xl">!</span>
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-white text-center mb-2">
+                Align zones to your walls?
+              </h3>
+              <p className="text-sm text-slate-300 text-center mb-4">
+                Based on your room outline, we can set the Installation Angle so zones stay square to the walls.
+              </p>
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center text-amber-200 text-sm font-semibold mb-4">
+                Suggested Installation Angle: {rotationSuggestion.suggestedAngle > 0 ? "+" : ""}{rotationSuggestion.suggestedAngle} deg
+              </div>
+              {isZeroSuggestion && !rotationSuggestionError && !isSuggestionApplied && (
+                <div className="mb-4 text-sm text-slate-300 text-center">
+                  Rotation already aligns with your walls. Installation angle can stay at 0.
+                </div>
+              )}
+              {isSuggestionApplied && !rotationSuggestionError && (
+                <div className="mb-4 text-sm text-emerald-300 text-center">
+                  Installation angle is already set to this value.
+                </div>
+              )}
+              {rotationSuggestionError && (
+                <div className="mb-4 text-sm text-rose-300 text-center">
+                  {rotationSuggestionError}
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowRotationSuggestion(false)}
+                  className="flex-1 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 active:scale-95"
+                >
+                  Not now
+                </button>
+                <button
+                  onClick={applyInstallationAngleSuggestion}
+                  disabled={applyingInstallationAngle || isSuggestionApplied}
+                  className="flex-1 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-amber-500/30 transition-all hover:shadow-xl hover:shadow-amber-500/40 disabled:opacity-50 active:scale-95"
+                >
+                  {isSuggestionApplied ? 'Already set' : applyingInstallationAngle ? 'Applying...' : 'Apply'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1151,6 +1299,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: placement };
                               setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
                             }}
+                            onMouseUp={(e) => {
+                              handleRotationSuggestion(Number((e.currentTarget as HTMLInputElement).value) || 0);
+                            }}
+                            onTouchEnd={(e) => {
+                              handleRotationSuggestion(Number((e.currentTarget as HTMLInputElement).value) || 0);
+                            }}
                             className="w-full"
                           />
                           <span>{selectedRoom?.devicePlacement?.rotationDeg ?? 0}</span>
@@ -1477,5 +1631,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     </div>
   );
 };
+
 
 

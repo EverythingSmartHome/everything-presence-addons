@@ -45,6 +45,12 @@ interface LiveTrackingPageProps {
   onRoomChange?: (roomId: string | null, profileId: string | null) => void;
 }
 
+const normalizeAngle = (angle: number): number => {
+  let normalized = ((angle % 360) + 360) % 360;
+  if (normalized > 180) normalized -= 360;
+  return normalized;
+};
+
 export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   onBack,
   onNavigate,
@@ -94,6 +100,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    showAlignedDirection, setShowAlignedDirection,
     clipRadarToWalls, setClipRadarToWalls,
     heatmapEnabled, setHeatmapEnabled,
     heatmapHours, setHeatmapHours,
@@ -1059,11 +1066,13 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                       />
                     )}
 
-                    {/* Installation Angle Indicator - shows physical sensor direction */}
-                    {installationAngle !== 0 && (() => {
+                    {/* Installation Angle Indicator - shows compensated direction */}
+                    {showAlignedDirection && installationAngle !== 0 && (() => {
                       const devicePos = toCanvas({ x: selectedRoom.devicePlacement.x, y: selectedRoom.devicePlacement.y });
-                      // Device rotation + 90 (so 0° points down/forward) + installation angle offset
-                      const physicalAngleRad = ((selectedRoom.devicePlacement.rotationDeg ?? 0) + 90 + installationAngle) * Math.PI / 180;
+                      const rotationDeg = selectedRoom.devicePlacement.rotationDeg ?? 0;
+                      const effectiveRotationDeg = normalizeAngle(rotationDeg + installationAngle);
+                      // Device rotation + 90 (so 0 deg points down/forward) + installation angle compensation
+                      const physicalAngleRad = (effectiveRotationDeg + 90) * Math.PI / 180;
                       const lineLength = 80; // pixels
                       const endX = devicePos.x + Math.cos(physicalAngleRad) * lineLength;
                       const endY = devicePos.y + Math.sin(physicalAngleRad) * lineLength;
@@ -1079,7 +1088,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
                       return (
                         <g style={{ pointerEvents: 'none' }}>
-                          {/* Dashed line showing physical direction */}
+                          {/* Dashed line showing compensated direction */}
                           <line
                             x1={devicePos.x}
                             y1={devicePos.y}
@@ -1104,7 +1113,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                             fill="#f59e0b"
                             fontWeight="600"
                           >
-                            Physical ({installationAngle > 0 ? '+' : ''}{installationAngle}°)
+                            Aligned ({effectiveRotationDeg > 0 ? "+" : ""}{effectiveRotationDeg} deg)
                           </text>
                         </g>
                       );
@@ -1669,6 +1678,22 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                     </span>
                   </label>
 
+                  {/* Aligned direction - EPL only */}
+                  {!isEP1 && (
+                    <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={showAlignedDirection}
+                        onChange={(e) => setShowAlignedDirection(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-0"
+                      />
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-3 h-3 rounded-full bg-amber-500"></span>
+                        Aligned Direction
+                      </span>
+                    </label>
+                  )}
+
                   {/* Movement Trails - EPL only */}
                   {!isEP1 && (
                     <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
@@ -2122,3 +2147,4 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     </div>
   );
 };
+
