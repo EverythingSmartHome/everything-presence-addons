@@ -11,6 +11,19 @@ export interface DiscoveredDevice {
   areaName?: string; // Home Assistant area name (e.g., "Living Room")
 }
 
+const normalizeManufacturer = (value: unknown): string => {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => String(item ?? '')).join(', ').trim();
+  }
+  if (value == null) {
+    return '';
+  }
+  return String(value).trim();
+};
+
 export class DeviceDiscoveryService {
   private readonly readTransport: IHaReadTransport;
   private readonly manufacturerFilters = [
@@ -173,13 +186,13 @@ export class DeviceDiscoveryService {
       .map((d: any) => ({
         id: d.id as string,
         name: (d.name_by_user as string) || (d.name as string) || 'Unnamed device',
-        manufacturer: (d.manufacturer as string | undefined)?.trim(),
+        manufacturer: normalizeManufacturer(d.manufacturer) || undefined,
         model: d.model as string | undefined,
         firmwareVersion: d.sw_version as string | undefined,
         areaId: d.area_id as string | undefined,
       }))
       .filter((d) => {
-        const manufacturer = (d.manufacturer ?? '').toLowerCase();
+        const manufacturer = normalizeManufacturer(d.manufacturer).toLowerCase();
         return this.manufacturerFilters.some(filter => manufacturer === filter.toLowerCase());
       });
 
