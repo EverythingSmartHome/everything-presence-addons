@@ -6,7 +6,6 @@ url: https://github.com/everythingsmarthome/everything-presence-addons
 arch:
   - aarch64
   - amd64
-  - armhf
   - armv7
 startup: services
 boot: auto
