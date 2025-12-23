@@ -53,7 +53,7 @@ jobs:
           push: false
           load: true
           build-args: |
-            BUILD_FROM=ghcr.io/home-assistant/base:latest
+            BUILD_FROM=ghcr.io/home-assistant/base:19.0.0
           tags: |
             ${{ env.IMAGE_TAG }}
             ${{ env.LATEST_TAG }}
@@ -72,10 +72,10 @@ jobs:
         include:
           - platform: linux/amd64
             arch: amd64
-            build_from: ghcr.io/home-assistant/base:latest
+            build_from: ghcr.io/home-assistant/base:19.0.0
           - platform: linux/arm64
             arch: arm64
-            build_from: ghcr.io/home-assistant/base:latest
+            build_from: ghcr.io/home-assistant/base:19.0.0
           - platform: linux/arm/v7
             arch: armv7
             build_from: ghcr.io/home-assistant/base:3.22
