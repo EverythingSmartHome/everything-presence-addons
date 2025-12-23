@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/base:3.22
+ARG BUILD_FROM
 
 FROM node:20-alpine AS build
 WORKDIR /app
