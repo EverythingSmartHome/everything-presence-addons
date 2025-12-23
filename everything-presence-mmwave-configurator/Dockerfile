@@ -1,4 +1,4 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=ghcr.io/hassio-addons/base:19.0.0
 
 FROM node:20-alpine AS build
 WORKDIR /app
