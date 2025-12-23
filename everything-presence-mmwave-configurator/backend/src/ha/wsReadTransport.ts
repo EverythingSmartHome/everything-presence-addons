@@ -118,6 +118,9 @@ export class WsReadTransport implements IHaReadTransport {
           this._isConnected = true;
           this.setReady();
           resolve();
+          if (this.subscriptions.size > 0) {
+            void this.activateStateSubscription();
+          }
           return;
         }
 
