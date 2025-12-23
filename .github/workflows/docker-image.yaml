@@ -78,7 +78,7 @@ jobs:
             build_from: ghcr.io/hassio-addons/base:19.0.0
           - platform: linux/arm/v7
             arch: armv7
-            build_from: ghcr.io/home-assistant/base:3.22
+            build_from: ghcr.io/home-assistant/armv7-base:latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
