@@ -1,5 +1,4 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/base:19.0.0
-
 FROM node:20-alpine AS build
 WORKDIR /app
 ENV NODE_ENV=development
