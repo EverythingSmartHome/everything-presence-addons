@@ -1,3 +1,18 @@
+## 2.0.7
+* Clarify installation steps in README.md by @gregschwartz in https://github.com/EverythingSmartHome/everything-presence-addons/pull/177
+* Cleanup Javascript Repo Setup  by @ndom91 in https://github.com/EverythingSmartHome/everything-presence-addons/pull/119
+* Show when entities are disabled during discovery by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/181
+* Handle unavailable/unknown entity states consistently by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/182
+* Fix issue with trigger distance overlay not enabling by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/183
+* Improve displaying of installation angle and rotation angle in UI and live dashboard by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/184
+* Add auto suggestion of installation angle when rotating UI by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/187
+* Feature: Set default room by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/188
+* Improve loading of rooms initially by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/189
+* Fix issue where no devices would show up to be added by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/190
+* Improve re-connecting of WS by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/194
+* Support installing on arm by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/195
+* Add more builds by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/199
+
 ## 2.0.6
 This release adds quite a bit of work to discovering entities, which in turn resolves a lot of the UI issues like settings not showing up, missing sensors, tracking not updating real-time. Recommend re-syncing entities after by going to Settings > Re-Sync entities. Make sure that the auto discovered entities are matched correctly and change any that have not.
 
