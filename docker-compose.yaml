@@ -1,0 +1,12 @@
+services:
+  zone-configurator:
+    image: everythingsmarthome/everything-presence-mmwave-configurator:latest
+    container_name: everything-presence-mmwave-configurator
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      HA_BASE_URL: "http://homeassistant.local:8123"
+      HA_LONG_LIVED_TOKEN: "REPLACE_WITH_LONG_LIVED_TOKEN"
+    volumes:
+      - ./config:/config

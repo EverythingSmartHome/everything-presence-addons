@@ -44,6 +44,23 @@ everythingsmarthome/everything-presence-mmwave-configurator:latest
 
 Set `HA_BASE_URL` and `HA_LONG_LIVED_TOKEN` for standalone mode. The `:addon` tag is the Home Assistant add-on base image and requires Supervisor to run.
 
+Example `docker-compose.yaml`:
+
+```yaml
+services:
+  zone-configurator:
+    image: everythingsmarthome/everything-presence-mmwave-configurator:latest
+    container_name: everything-presence-mmwave-configurator
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      HA_BASE_URL: "http://homeassistant.local:8123"
+      HA_LONG_LIVED_TOKEN: "REPLACE_WITH_LONG_LIVED_TOKEN"
+    volumes:
+      - ./config:/config
+```
+
 ### Documentation
 
-For more information about Everything Presence devices, visit [Everything Smart Home](https://everythingsmarthome.co.uk)
+For more information about Everything Presence devices, visit [Everything Smart Home](https://docs.everythingsmart.io)
