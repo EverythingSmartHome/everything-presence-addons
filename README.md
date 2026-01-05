@@ -34,6 +34,16 @@ A visual configuration tool for Everything Presence devices in Home Assistant.
 4. Click "Everything Presence Zone Configurator" and then Install
 5. Start the add-on and open the web UI
 
+### Standalone Docker
+
+Use the standalone image for non-Home Assistant installs:
+
+```
+everythingsmarthome/everything-presence-mmwave-configurator:latest
+```
+
+Set `HA_BASE_URL` and `HA_LONG_LIVED_TOKEN` for standalone mode. The `:addon` tag is the Home Assistant add-on base image and requires Supervisor to run.
+
 ### Documentation
 
 For more information about Everything Presence devices, visit [Everything Smart Home](https://everythingsmarthome.co.uk)
