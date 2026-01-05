@@ -16,7 +16,7 @@ COPY frontend frontend
 RUN npm run build --workspaces
 RUN npm prune --omit=dev --workspaces
 
-FROM ${BUILD_FROM}
+FROM ${BUILD_FROM} AS addon
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV NODE_ENV=production \
     PORT=3000 \
@@ -38,3 +38,23 @@ RUN rm -rf /etc/services.d/zone-configurator && \
     chmod +x /etc/s6-overlay/s6-rc.d/zone-configurator/run
 
 EXPOSE 3000/tcp
+
+FROM node:20-alpine AS standalone
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000 \
+    FRONTEND_DIST=/app/frontend/dist
+
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/backend/package.json ./backend/package.json
+COPY --from=build /app/backend/node_modules ./backend/node_modules
+COPY --from=build /app/backend/dist ./backend/dist
+COPY --from=build /app/frontend/dist ./frontend/dist
+COPY config ./config
+
+EXPOSE 3000/tcp
+CMD ["node", "backend/dist/index.js"]
+
+# Default build target for Home Assistant add-on builds.
+FROM addon AS final

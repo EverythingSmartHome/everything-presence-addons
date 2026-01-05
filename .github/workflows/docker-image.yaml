@@ -13,7 +13,7 @@ on:
 
 jobs:
   build-pr:
-    name: Build Docker Image (PR)
+    name: Build Docker Images (PR)
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
@@ -41,28 +41,100 @@ jobs:
 
       - name: Set Image Tags
         run: |
-          echo "IMAGE_TAG=test/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
-          echo "LATEST_TAG=test/everything-presence-mmwave-configurator:latest" >> $GITHUB_ENV
+          echo "STANDALONE_IMAGE_TAG=test/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
+          echo "ADDON_IMAGE_TAG=test/everything-presence-mmwave-configurator:addon-${{ env.VERSION }}" >> $GITHUB_ENV
 
-      - name: Build Docker image (amd64)
+      - name: Build standalone image (amd64)
         uses: docker/build-push-action@v4
         with:
           context: ./everything-presence-mmwave-configurator
+          target: standalone
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: |
+            ${{ env.STANDALONE_IMAGE_TAG }}
+
+      - name: Build add-on image (amd64)
+        uses: docker/build-push-action@v4
+        with:
+          context: ./everything-presence-mmwave-configurator
+          target: addon
           platforms: linux/amd64
           push: false
           load: true
           build-args: |
             BUILD_FROM=ghcr.io/hassio-addons/base:19.0.0
           tags: |
-            ${{ env.IMAGE_TAG }}
-            ${{ env.LATEST_TAG }}
+            ${{ env.ADDON_IMAGE_TAG }}
+
+      - name: Test standalone image
+        run: |
+          docker run --rm --entrypoint /bin/echo ${{ env.STANDALONE_IMAGE_TAG }} "Image built successfully"
+
+      - name: Test add-on image
+        run: |
+          docker run --rm --entrypoint /bin/echo ${{ env.ADDON_IMAGE_TAG }} "Image built successfully"
+
+  build-push-standalone:
+    name: Build and Push Standalone Image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
+          - platform: linux/arm/v7
+            arch: armv7
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Extract version from config.yaml
+        run: |
+          VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
+          echo "Extracted version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Set Image Tags
+        run: |
+          echo "IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
+          echo "LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest" >> $GITHUB_ENV
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./everything-presence-mmwave-configurator
+          target: standalone
+          platforms: ${{ matrix.platform }}
+          push: true
+          load: false
+          tags: |
+            ${{ env.IMAGE_TAG }}-${{ matrix.arch }}
+            ${{ env.LATEST_TAG }}-${{ matrix.arch }}
 
       - name: Test Docker image
         run: |
-          docker run --rm --entrypoint /bin/echo ${{ env.IMAGE_TAG }} "Image built successfully"
+          docker run --rm --platform ${{ matrix.platform }} --entrypoint /bin/echo ${{ env.IMAGE_TAG }}-${{ matrix.arch }} "Image built successfully"
 
-  build-push:
-    name: Build and Push Docker Image
+  build-push-addon:
+    name: Build and Push Add-on Image
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
@@ -88,13 +160,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract version from config.yaml
         run: |
           VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
@@ -103,8 +168,8 @@ jobs:
 
       - name: Set Image Tags
         run: |
-          echo "IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
-          echo "LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest" >> $GITHUB_ENV
+          echo "ADDON_IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon-${{ env.VERSION }}" >> $GITHUB_ENV
+          echo "ADDON_LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon" >> $GITHUB_ENV
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
@@ -116,23 +181,24 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: ./everything-presence-mmwave-configurator
+          target: addon
           platforms: ${{ matrix.platform }}
           push: true
           load: false
           build-args: |
             BUILD_FROM=${{ matrix.build_from }}
           tags: |
-            ${{ env.IMAGE_TAG }}-${{ matrix.arch }}
-            ${{ env.LATEST_TAG }}-${{ matrix.arch }}
+            ${{ env.ADDON_IMAGE_TAG }}-${{ matrix.arch }}
+            ${{ env.ADDON_LATEST_TAG }}-${{ matrix.arch }}
 
       - name: Test Docker image
         run: |
-          docker run --rm --platform ${{ matrix.platform }} --entrypoint /bin/echo ${{ env.IMAGE_TAG }}-${{ matrix.arch }} "Image built successfully"
+          docker run --rm --platform ${{ matrix.platform }} --entrypoint /bin/echo ${{ env.ADDON_IMAGE_TAG }}-${{ matrix.arch }} "Image built successfully"
 
-  manifest:
-    name: Create Multi-Arch Manifest
+  manifest-standalone:
+    name: Create Standalone Multi-Arch Manifest
     if: github.event_name == 'push'
-    needs: build-push
+    needs: build-push-standalone
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -162,7 +228,53 @@ jobs:
         run: |
           docker buildx imagetools create \
             -t ${{ env.IMAGE_TAG }} \
-            -t ${{ env.LATEST_TAG }} \
             ${{ env.IMAGE_TAG }}-amd64 \
             ${{ env.IMAGE_TAG }}-arm64 \
             ${{ env.IMAGE_TAG }}-armv7
+          docker buildx imagetools create \
+            -t ${{ env.LATEST_TAG }} \
+            ${{ env.LATEST_TAG }}-amd64 \
+            ${{ env.LATEST_TAG }}-arm64 \
+            ${{ env.LATEST_TAG }}-armv7
+
+  manifest-addon:
+    name: Create Add-on Multi-Arch Manifest
+    if: github.event_name == 'push'
+    needs: build-push-addon
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Extract version from config.yaml
+        run: |
+          VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
+          echo "Extracted version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Set Image Tags
+        run: |
+          echo "ADDON_IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon-${{ env.VERSION }}" >> $GITHUB_ENV
+          echo "ADDON_LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon" >> $GITHUB_ENV
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create multi-arch manifests
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.ADDON_IMAGE_TAG }} \
+            ${{ env.ADDON_IMAGE_TAG }}-amd64 \
+            ${{ env.ADDON_IMAGE_TAG }}-arm64 \
+            ${{ env.ADDON_IMAGE_TAG }}-armv7
+          docker buildx imagetools create \
+            -t ${{ env.ADDON_LATEST_TAG }} \
+            ${{ env.ADDON_LATEST_TAG }}-amd64 \
+            ${{ env.ADDON_LATEST_TAG }}-arm64 \
+            ${{ env.ADDON_LATEST_TAG }}-armv7
