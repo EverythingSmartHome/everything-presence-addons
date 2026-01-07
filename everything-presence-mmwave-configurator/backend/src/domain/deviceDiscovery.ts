@@ -73,6 +73,36 @@ export class DeviceDiscoveryService {
         // Note: Order matters - more specific patterns should come first
         const prefix = withoutDomain.replace(
           new RegExp([
+            // EPP-specific suffixes (must come first - more specific patterns)
+            '_exclusion_zone_\\d+_start_[xy]$',
+            '_exclusion_zone_\\d+_end_[xy]$',
+            '_exclusion_zone_\\d+_target_count$',
+            '_zone_\\d+_start_[xy]$',
+            '_zone_\\d+_timeout$',
+            '_zone_\\d+_presence$',
+            '_tracking_detection_range$',
+            '_tracking_presence_timeout$',
+            '_tracking_sensor_angle$',
+            '_tracking_update_rate$',
+            '_target_tracking_detail$',
+            '_target_update_rate$',
+            '_auto_clear_stuck_targets$',
+            '_stuck_target_timeout$',
+            '_tracking_presence$',
+            '_mmwave_presence$',
+            '_tracking_sensor_firmware$',
+            '_tracking_configuration_mode$',
+            '_ld2450_bluetooth$',
+            // EPP environmental/control suffixes
+            '_relay_output$',
+            '_relay_trigger_mode$',
+            '_led_mode$',
+            '_led_brightness$',
+            '_occupancy_timeout$',
+            '_motion_timeout$',
+            '_temperature_calibration$',
+            '_humidity_calibration$',
+            '_illuminance_calibration$',
             // Zone-related suffixes (more specific first)
             '_zone_\\d+_occupancy_off_delay$',
             '_zone_\\d+_target_count$',

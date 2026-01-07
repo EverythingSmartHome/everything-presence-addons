@@ -1,0 +1,659 @@
+{
+  "id": "everything_presence_pro",
+  "schemaVersion": "1.0",
+  "label": "Everything Presence Pro",
+  "model": "Everything Presence Pro",
+  "manufacturer": "EverythingSmartTechnology",
+  "iconUrl": "./icons/devices/everything_presence_pro.png",
+  "capabilities": {
+    "tracking": true,
+    "zones": true,
+    "exclusionZones": true,
+    "entryZones": false,
+    "polygonZones": false,
+    "distanceOnlyTracking": false,
+    "sensors": {
+      "mmwavePresence": true,
+      "pir": false,
+      "light": false,
+      "temperature": false
+    }
+  },
+  "limits": {
+    "maxZones": 4,
+    "maxExclusionZones": 2,
+    "maxEntryZones": 0,
+    "maxTargets": 3,
+    "maxRangeMeters": 6,
+    "fieldOfViewDegrees": 120
+  },
+  "entities": {
+    "presence": {
+      "template": "binary_sensor.${name}_occupancy",
+      "category": "sensor",
+      "subcategory": "presence",
+      "label": "Occupancy",
+      "required": true
+    },
+    "co2": {
+      "template": "sensor.${name}_co2",
+      "category": "sensor",
+      "subcategory": "environment",
+      "label": "CO2",
+      "required": false
+    },
+    "maxDistance": {
+      "template": "number.${name}_tracking_detection_range",
+      "category": "setting",
+      "group": "Detection",
+      "label": "Max Distance",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 1,
+      "unit": "cm",
+      "required": true
+    },
+    "occupancyOffDelay": {
+      "template": "number.${name}_tracking_presence_timeout",
+      "category": "setting",
+      "group": "Detection",
+      "label": "Occupancy Off Delay",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 1,
+      "unit": "s",
+      "required": true
+    },
+    "installationAngle": {
+      "template": "number.${name}_tracking_sensor_angle",
+      "category": "setting",
+      "group": "Installation",
+      "label": "Installation Angle",
+      "controlType": "number",
+      "min": -45,
+      "max": 45,
+      "step": 1,
+      "unit": "deg",
+      "description": "Compensates for horizontal mounting angle (yaw).",
+      "required": false
+    },
+    "upsideDownMounting": {
+      "template": "switch.${name}_upside_down_mounting",
+      "category": "setting",
+      "group": "Installation",
+      "label": "Upside Down Mounting",
+      "controlType": "switch",
+      "description": "Enable if the device is mounted upside down.",
+      "required": false
+    },
+    "updateSpeed": {
+      "template": "select.${name}_tracking_update_rate",
+      "category": "setting",
+      "group": "Tracking",
+      "label": "Update Speed",
+      "controlType": "select",
+      "options": ["Faster (0.1s)", "Fast (0.2s)", "Normal (0.3s)", "Slow (0.4s)", "Slower (0.5s)"],
+      "required": false
+    },
+    "trackingBehaviour": {
+      "template": "select.${name}_target_tracking_detail",
+      "category": "setting",
+      "group": "Tracking",
+      "label": "Tracking Behaviour",
+      "controlType": "select",
+      "options": ["None", "Targets Position", "Above + Zone count", "Above + Targets active", "Above + Distance and Angle", "Above + Speed and Resolution"],
+      "required": false
+    },
+    "staleTargetReset": {
+      "template": "switch.${name}_auto_clear_stuck_targets",
+      "category": "setting",
+      "group": "Advanced",
+      "label": "Stale Target Reset",
+      "controlType": "switch",
+      "required": false
+    },
+    "staleTargetResetTimeout": {
+      "template": "number.${name}_stuck_target_timeout",
+      "category": "setting",
+      "group": "Advanced",
+      "label": "Stale Target Reset Timeout",
+      "controlType": "number",
+      "min": 1,
+      "max": 60,
+      "step": 1,
+      "unit": "s",
+      "required": false
+    },
+    "zone1OffDelay": {
+      "template": "number.${name}_zone_1_timeout",
+      "category": "setting",
+      "group": "Zone Off Delays",
+      "label": "Zone 1 Off Delay",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 1,
+      "unit": "s",
+      "zoneIndex": 1,
+      "required": false
+    },
+    "zone2OffDelay": {
+      "template": "number.${name}_zone_2_timeout",
+      "category": "setting",
+      "group": "Zone Off Delays",
+      "label": "Zone 2 Off Delay",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 1,
+      "unit": "s",
+      "zoneIndex": 2,
+      "required": false
+    },
+    "zone3OffDelay": {
+      "template": "number.${name}_zone_3_timeout",
+      "category": "setting",
+      "group": "Zone Off Delays",
+      "label": "Zone 3 Off Delay",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 1,
+      "unit": "s",
+      "zoneIndex": 3,
+      "required": false
+    },
+    "zone4OffDelay": {
+      "template": "number.${name}_zone_4_timeout",
+      "category": "setting",
+      "group": "Zone Off Delays",
+      "label": "Zone 4 Off Delay",
+      "controlType": "number",
+      "min": 0,
+      "max": 600,
+      "step": 1,
+      "unit": "s",
+      "zoneIndex": 4,
+      "required": false
+    },
+    "zone1BeginX": {
+      "template": "number.${name}_zone_1_start_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 1,
+      "coord": "beginX",
+      "required": false
+    },
+    "zone1EndX": {
+      "template": "number.${name}_zone_1_end_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 1,
+      "coord": "endX",
+      "required": false
+    },
+    "zone1BeginY": {
+      "template": "number.${name}_zone_1_start_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 1,
+      "coord": "beginY",
+      "required": false
+    },
+    "zone1EndY": {
+      "template": "number.${name}_zone_1_end_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 1,
+      "coord": "endY",
+      "required": false
+    },
+    "zone2BeginX": {
+      "template": "number.${name}_zone_2_start_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 2,
+      "coord": "beginX",
+      "required": false
+    },
+    "zone2EndX": {
+      "template": "number.${name}_zone_2_end_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 2,
+      "coord": "endX",
+      "required": false
+    },
+    "zone2BeginY": {
+      "template": "number.${name}_zone_2_start_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 2,
+      "coord": "beginY",
+      "required": false
+    },
+    "zone2EndY": {
+      "template": "number.${name}_zone_2_end_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 2,
+      "coord": "endY",
+      "required": false
+    },
+    "zone3BeginX": {
+      "template": "number.${name}_zone_3_start_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 3,
+      "coord": "beginX",
+      "required": false
+    },
+    "zone3EndX": {
+      "template": "number.${name}_zone_3_end_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 3,
+      "coord": "endX",
+      "required": false
+    },
+    "zone3BeginY": {
+      "template": "number.${name}_zone_3_start_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 3,
+      "coord": "beginY",
+      "required": false
+    },
+    "zone3EndY": {
+      "template": "number.${name}_zone_3_end_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 3,
+      "coord": "endY",
+      "required": false
+    },
+    "zone4BeginX": {
+      "template": "number.${name}_zone_4_start_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 4,
+      "coord": "beginX",
+      "required": false
+    },
+    "zone4EndX": {
+      "template": "number.${name}_zone_4_end_x",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 4,
+      "coord": "endX",
+      "required": false
+    },
+    "zone4BeginY": {
+      "template": "number.${name}_zone_4_start_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 4,
+      "coord": "beginY",
+      "required": false
+    },
+    "zone4EndY": {
+      "template": "number.${name}_zone_4_end_y",
+      "category": "zone",
+      "zoneType": "regular",
+      "zoneIndex": 4,
+      "coord": "endY",
+      "required": false
+    },
+    "exclusion1BeginX": {
+      "template": "number.${name}_exclusion_zone_1_start_x",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 1,
+      "coord": "beginX",
+      "required": false
+    },
+    "exclusion1EndX": {
+      "template": "number.${name}_exclusion_zone_1_end_x",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 1,
+      "coord": "endX",
+      "required": false
+    },
+    "exclusion1BeginY": {
+      "template": "number.${name}_exclusion_zone_1_start_y",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 1,
+      "coord": "beginY",
+      "required": false
+    },
+    "exclusion1EndY": {
+      "template": "number.${name}_exclusion_zone_1_end_y",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 1,
+      "coord": "endY",
+      "required": false
+    },
+    "exclusion2BeginX": {
+      "template": "number.${name}_exclusion_zone_2_start_x",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 2,
+      "coord": "beginX",
+      "required": false
+    },
+    "exclusion2EndX": {
+      "template": "number.${name}_exclusion_zone_2_end_x",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 2,
+      "coord": "endX",
+      "required": false
+    },
+    "exclusion2BeginY": {
+      "template": "number.${name}_exclusion_zone_2_start_y",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 2,
+      "coord": "beginY",
+      "required": false
+    },
+    "exclusion2EndY": {
+      "template": "number.${name}_exclusion_zone_2_end_y",
+      "category": "zone",
+      "zoneType": "exclusion",
+      "zoneIndex": 2,
+      "coord": "endY",
+      "required": false
+    },
+    "target1X": {
+      "template": "sensor.${name}_target_1_x",
+      "category": "tracking",
+      "targetIndex": 1,
+      "property": "x",
+      "required": false
+    },
+    "target1Y": {
+      "template": "sensor.${name}_target_1_y",
+      "category": "tracking",
+      "targetIndex": 1,
+      "property": "y",
+      "required": false
+    },
+    "target1Speed": {
+      "template": "sensor.${name}_target_1_speed",
+      "category": "tracking",
+      "targetIndex": 1,
+      "property": "speed",
+      "required": false
+    },
+    "target1Distance": {
+      "template": "sensor.${name}_target_1_distance",
+      "category": "tracking",
+      "targetIndex": 1,
+      "property": "distance",
+      "required": false
+    },
+    "target1Angle": {
+      "template": "sensor.${name}_target_1_angle",
+      "category": "tracking",
+      "targetIndex": 1,
+      "property": "angle",
+      "required": false
+    },
+    "target1Resolution": {
+      "template": "sensor.${name}_target_1_resolution",
+      "category": "tracking",
+      "targetIndex": 1,
+      "property": "resolution",
+      "required": false
+    },
+    "target1Active": {
+      "template": "binary_sensor.${name}_target_1_active",
+      "category": "tracking",
+      "targetIndex": 1,
+      "property": "active",
+      "required": false
+    },
+    "target2X": {
+      "template": "sensor.${name}_target_2_x",
+      "category": "tracking",
+      "targetIndex": 2,
+      "property": "x",
+      "required": false
+    },
+    "target2Y": {
+      "template": "sensor.${name}_target_2_y",
+      "category": "tracking",
+      "targetIndex": 2,
+      "property": "y",
+      "required": false
+    },
+    "target2Speed": {
+      "template": "sensor.${name}_target_2_speed",
+      "category": "tracking",
+      "targetIndex": 2,
+      "property": "speed",
+      "required": false
+    },
+    "target2Distance": {
+      "template": "sensor.${name}_target_2_distance",
+      "category": "tracking",
+      "targetIndex": 2,
+      "property": "distance",
+      "required": false
+    },
+    "target2Angle": {
+      "template": "sensor.${name}_target_2_angle",
+      "category": "tracking",
+      "targetIndex": 2,
+      "property": "angle",
+      "required": false
+    },
+    "target2Resolution": {
+      "template": "sensor.${name}_target_2_resolution",
+      "category": "tracking",
+      "targetIndex": 2,
+      "property": "resolution",
+      "required": false
+    },
+    "target2Active": {
+      "template": "binary_sensor.${name}_target_2_active",
+      "category": "tracking",
+      "targetIndex": 2,
+      "property": "active",
+      "required": false
+    },
+    "target3X": {
+      "template": "sensor.${name}_target_3_x",
+      "category": "tracking",
+      "targetIndex": 3,
+      "property": "x",
+      "required": false
+    },
+    "target3Y": {
+      "template": "sensor.${name}_target_3_y",
+      "category": "tracking",
+      "targetIndex": 3,
+      "property": "y",
+      "required": false
+    },
+    "target3Speed": {
+      "template": "sensor.${name}_target_3_speed",
+      "category": "tracking",
+      "targetIndex": 3,
+      "property": "speed",
+      "required": false
+    },
+    "target3Distance": {
+      "template": "sensor.${name}_target_3_distance",
+      "category": "tracking",
+      "targetIndex": 3,
+      "property": "distance",
+      "required": false
+    },
+    "target3Angle": {
+      "template": "sensor.${name}_target_3_angle",
+      "category": "tracking",
+      "targetIndex": 3,
+      "property": "angle",
+      "required": false
+    },
+    "target3Resolution": {
+      "template": "sensor.${name}_target_3_resolution",
+      "category": "tracking",
+      "targetIndex": 3,
+      "property": "resolution",
+      "required": false
+    },
+    "target3Active": {
+      "template": "binary_sensor.${name}_target_3_active",
+      "category": "tracking",
+      "targetIndex": 3,
+      "property": "active",
+      "required": false
+    },
+    "zone1Occupancy": {
+      "template": "binary_sensor.${name}_zone_1_presence",
+      "category": "sensor",
+      "subcategory": "zoneOccupancy",
+      "zoneType": "regular",
+      "zoneIndex": 1,
+      "required": false
+    },
+    "zone1TargetCount": {
+      "template": "sensor.${name}_zone_1_target_count",
+      "category": "sensor",
+      "subcategory": "zoneTargetCount",
+      "zoneType": "regular",
+      "zoneIndex": 1,
+      "required": false
+    },
+    "zone2Occupancy": {
+      "template": "binary_sensor.${name}_zone_2_presence",
+      "category": "sensor",
+      "subcategory": "zoneOccupancy",
+      "zoneType": "regular",
+      "zoneIndex": 2,
+      "required": false
+    },
+    "zone2TargetCount": {
+      "template": "sensor.${name}_zone_2_target_count",
+      "category": "sensor",
+      "subcategory": "zoneTargetCount",
+      "zoneType": "regular",
+      "zoneIndex": 2,
+      "required": false
+    },
+    "zone3Occupancy": {
+      "template": "binary_sensor.${name}_zone_3_presence",
+      "category": "sensor",
+      "subcategory": "zoneOccupancy",
+      "zoneType": "regular",
+      "zoneIndex": 3,
+      "required": false
+    },
+    "zone3TargetCount": {
+      "template": "sensor.${name}_zone_3_target_count",
+      "category": "sensor",
+      "subcategory": "zoneTargetCount",
+      "zoneType": "regular",
+      "zoneIndex": 3,
+      "required": false
+    },
+    "zone4Occupancy": {
+      "template": "binary_sensor.${name}_zone_4_presence",
+      "category": "sensor",
+      "subcategory": "zoneOccupancy",
+      "zoneType": "regular",
+      "zoneIndex": 4,
+      "required": false
+    },
+    "zone4TargetCount": {
+      "template": "sensor.${name}_zone_4_target_count",
+      "category": "sensor",
+      "subcategory": "zoneTargetCount",
+      "zoneType": "regular",
+      "zoneIndex": 4,
+      "required": false
+    }
+  },
+  "entityMap": {
+    "trackingTargetsEntity": null,
+    "trackingTargetCountEntity": "sensor.${name}_zone_1_target_count",
+    "maxDistanceEntity": "number.${name}_tracking_detection_range",
+    "installationAngleEntity": "number.${name}_tracking_sensor_angle",
+    "polygonZonesEnabledEntity": null,
+    "polygonZoneEntities": null,
+    "polygonExclusionEntities": null,
+    "polygonEntryEntities": null,
+    "zoneConfigEntities": {
+      "zone1": {
+        "beginX": "number.${name}_zone_1_start_x",
+        "endX": "number.${name}_zone_1_end_x",
+        "beginY": "number.${name}_zone_1_start_y",
+        "endY": "number.${name}_zone_1_end_y",
+        "offDelay": "number.${name}_zone_1_timeout"
+      },
+      "zone2": {
+        "beginX": "number.${name}_zone_2_start_x",
+        "endX": "number.${name}_zone_2_end_x",
+        "beginY": "number.${name}_zone_2_start_y",
+        "endY": "number.${name}_zone_2_end_y",
+        "offDelay": "number.${name}_zone_2_timeout"
+      },
+      "zone3": {
+        "beginX": "number.${name}_zone_3_start_x",
+        "endX": "number.${name}_zone_3_end_x",
+        "beginY": "number.${name}_zone_3_start_y",
+        "endY": "number.${name}_zone_3_end_y",
+        "offDelay": "number.${name}_zone_3_timeout"
+      },
+      "zone4": {
+        "beginX": "number.${name}_zone_4_start_x",
+        "endX": "number.${name}_zone_4_end_x",
+        "beginY": "number.${name}_zone_4_start_y",
+        "endY": "number.${name}_zone_4_end_y",
+        "offDelay": "number.${name}_zone_4_timeout"
+      }
+    },
+    "exclusionZoneConfigEntities": {
+      "exclusion1": {
+        "beginX": "number.${name}_exclusion_zone_1_start_x",
+        "endX": "number.${name}_exclusion_zone_1_end_x",
+        "beginY": "number.${name}_exclusion_zone_1_start_y",
+        "endY": "number.${name}_exclusion_zone_1_end_y"
+      },
+      "exclusion2": {
+        "beginX": "number.${name}_exclusion_zone_2_start_x",
+        "endX": "number.${name}_exclusion_zone_2_end_x",
+        "beginY": "number.${name}_exclusion_zone_2_start_y",
+        "endY": "number.${name}_exclusion_zone_2_end_y"
+      }
+    },
+    "entryZoneConfigEntities": null,
+    "presenceEntity": "binary_sensor.${name}_occupancy",
+    "pirEntity": null,
+    "lightEntity": null,
+    "temperatureEntity": null,
+    "co2Entity": "sensor.${name}_co2",
+    "settingsEntities": {
+      "maxDistance": "number.${name}_tracking_detection_range",
+      "occupancyOffDelay": "number.${name}_tracking_presence_timeout",
+      "zone1OffDelay": "number.${name}_zone_1_timeout",
+      "zone2OffDelay": "number.${name}_zone_2_timeout",
+      "zone3OffDelay": "number.${name}_zone_3_timeout",
+      "zone4OffDelay": "number.${name}_zone_4_timeout",
+      "installationAngle": "number.${name}_tracking_sensor_angle",
+      "upsideDownMounting": "switch.${name}_upside_down_mounting",
+      "updateSpeed": "select.${name}_tracking_update_rate",
+      "trackingBehaviour": "select.${name}_target_tracking_detail",
+      "staleTargetReset": "switch.${name}_auto_clear_stuck_targets",
+      "staleTargetResetTimeout": "number.${name}_stuck_target_timeout"
+    }
+  }
+}
