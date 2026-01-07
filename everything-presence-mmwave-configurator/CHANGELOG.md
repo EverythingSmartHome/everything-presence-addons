@@ -1,3 +1,10 @@
+## 2.0.9
+* Add support for Everything Presence Pro by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/222
+
+## 2.0.8
+* Fix standalone docker image by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/220
+* Add docker-compose example by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/221
+
 ## 2.0.7
 * Clarify installation steps in README.md by @gregschwartz in https://github.com/EverythingSmartHome/everything-presence-addons/pull/177
 * Cleanup Javascript Repo Setup  by @ndom91 in https://github.com/EverythingSmartHome/everything-presence-addons/pull/119
