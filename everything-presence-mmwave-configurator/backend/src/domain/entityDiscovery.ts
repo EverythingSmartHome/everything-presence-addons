@@ -293,13 +293,14 @@ export class EntityDiscoveryService {
       const entityIdLower = entity.entity_id.toLowerCase();
 
       // Filter by zone type to avoid cross-matching entry/regular/exclusion
-      if (isRegularZoneTemplate && (entityIdLower.includes('entry_zone_') || entityIdLower.includes('occupancy_mask_'))) {
+      // EPL uses occupancy_mask_ for exclusion zones, EPP uses exclusion_zone_
+      if (isRegularZoneTemplate && (entityIdLower.includes('entry_zone_') || entityIdLower.includes('occupancy_mask_') || entityIdLower.includes('exclusion_zone_'))) {
         return { score: -1, confidence: 'none' };
       }
       if (isEntryZoneTemplate && !entityIdLower.includes('entry_zone_')) {
         return { score: -1, confidence: 'none' };
       }
-      if (isExclusionZoneTemplate && !entityIdLower.includes('occupancy_mask_')) {
+      if (isExclusionZoneTemplate && !(entityIdLower.includes('occupancy_mask_') || entityIdLower.includes('exclusion_zone_'))) {
         return { score: -1, confidence: 'none' };
       }
 
