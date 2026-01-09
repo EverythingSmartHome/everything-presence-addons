@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchRooms, deleteRoom, updateRoom } from '../api/rooms';
+import { fetchRooms, deleteRoom, updateRoom, createRoom } from '../api/rooms';
 import { fetchSettings, updateSettings } from '../api/client';
 import {
   fetchCustomFloors,
@@ -298,14 +298,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
 
           // Add the imported room via API
           importPromises.push(
-            fetch('/api/rooms', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newRoom),
-            }).then((response) => {
-              if (!response.ok) {
-                throw new Error(`Failed to import room: ${newRoom.name}`);
-              }
+            createRoom(newRoom).then(() => {}).catch(() => {
+              throw new Error(`Failed to import room: ${newRoom.name}`);
             })
           );
         }
