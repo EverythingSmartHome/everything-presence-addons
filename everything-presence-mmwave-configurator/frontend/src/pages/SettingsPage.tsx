@@ -29,6 +29,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [defaultRoomId, setDefaultRoomId] = useState<string | null>(null);
   const [updatingDefaultRoomId, setUpdatingDefaultRoomId] = useState<string | null>(null);
   const [clearingDefaultRoom, setClearingDefaultRoom] = useState(false);
+  const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // Device mappings context - used to refresh cache after resync
   const { refreshMapping } = useDeviceMappings();
@@ -129,6 +131,38 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
       setError(err instanceof Error ? err.message : 'Failed to clear default room');
     } finally {
       setClearingDefaultRoom(false);
+    }
+  };
+
+  const handleStartRename = (room: RoomConfig) => {
+    setRenamingRoomId(room.id);
+    setRenameValue(room.name);
+  };
+
+  const handleCancelRename = () => {
+    setRenamingRoomId(null);
+    setRenameValue('');
+  };
+
+  const handleSaveRename = async (roomId: string) => {
+    const trimmedName = renameValue.trim();
+    if (!trimmedName) {
+      setError('Room name cannot be empty');
+      return;
+    }
+
+    try {
+      const result = await updateRoom(roomId, { name: trimmedName });
+      setRooms((prev) =>
+        prev.map((r) => (r.id === roomId ? { ...r, name: result.room.name } : r))
+      );
+      setSuccess(`Room renamed to "${trimmedName}"`);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename room');
+    } finally {
+      setRenamingRoomId(null);
+      setRenameValue('');
     }
   };
 
@@ -504,8 +538,50 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 font-semibold text-white">
-                        <span>{room.name}</span>
-                        {defaultRoomId === room.id && (
+                        {renamingRoomId === room.id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={renameValue}
+                              onChange={(e) => setRenameValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleSaveRename(room.id);
+                                } else if (e.key === 'Escape') {
+                                  handleCancelRename();
+                                }
+                              }}
+                              autoFocus
+                              className="rounded border border-cyan-500 bg-slate-700 px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                            />
+                            <button
+                              onClick={() => handleSaveRename(room.id)}
+                              className="rounded bg-cyan-600 px-2 py-1 text-xs font-semibold text-white hover:bg-cyan-500"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={handleCancelRename}
+                              className="rounded bg-slate-600 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-500"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <span>{room.name}</span>
+                            <button
+                              onClick={() => handleStartRename(room)}
+                              className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white"
+                              title="Rename room"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                          </>
+                        )}
+                        {defaultRoomId === room.id && renamingRoomId !== room.id && (
                           <span className="rounded-full border border-emerald-500/50 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">
                             Default
                           </span>
