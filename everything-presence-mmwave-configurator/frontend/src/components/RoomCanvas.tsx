@@ -55,6 +55,8 @@ interface RoomCanvasProps {
     roomShellPoints: Point[];
     devicePlacement: DevicePlacement | undefined;
     fieldOfViewDeg: number;
+    /** Device element to render (when deviceInteractive is false) - render at desired z-order */
+    deviceElement?: React.ReactNode;
   }) => React.ReactNode;
   lockShell?: boolean;
   furniture?: FurnitureInstance[];
@@ -77,6 +79,8 @@ interface RoomCanvasProps {
   showFurniture?: boolean;
   showDoors?: boolean;
   showDevice?: boolean;
+  // When false, device icon won't capture mouse events (allows interacting with zones behind it)
+  deviceInteractive?: boolean;
 }
 
 const CANVAS_SIZE = 700;
@@ -349,6 +353,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   showFurniture = true,
   showDoors = true,
   showDevice = true,
+  deviceInteractive = true,
 }) => {
   const safePoints = Array.isArray(points) ? points : [];
   const safePlacement: DevicePlacement = {
@@ -1297,6 +1302,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           );
         })}
 
+        {/* Build device element for non-interactive mode (Zone Editor) - passed to renderOverlay for z-order control */}
         {renderOverlay?.({
           toCanvas: toCanvasCoord,
           fromCanvas: fromCanvasCoord,
@@ -1306,11 +1312,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           roomShellPoints: safePoints,
           devicePlacement: safePlacement,
           fieldOfViewDeg: effectiveFov,
-        })}
-
-        {/* Device rendering - radar overlay and icon placed after everything (including overlays) */}
-        {showDevice && devicePlacement && safePlacement && (
-          (() => {
+          deviceElement: (!deviceInteractive && showDevice && devicePlacement && safePlacement) ? (() => {
             const { x: px, y: py } = toCanvasCoord(safePlacement);
             // Add 90 degrees so that 0 degrees points down (Y+) instead of right (X+)
             const rotationRad = (((safePlacement.rotationDeg ?? 0) + 90) * Math.PI) / 180;
@@ -1429,7 +1431,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const iconSize = 36;
 
             return (
-              <g>
+              <g style={{ pointerEvents: 'none' }}>
                 {/* Radar coverage overlay - visible but non-blocking with pointerEvents: 'none' */}
                 {showRadar && (
                   <path
@@ -1450,12 +1452,172 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     y={py - iconSize / 2}
                     width={iconSize}
                     height={iconSize}
+                    style={{ cursor: 'default', pointerEvents: 'none' }}
+                  />
+                ) : (
+                  <>
+                    {/* Fallback: circle with direction indicator */}
+                    <circle
+                      cx={px}
+                      cy={py}
+                      r={12}
+                      fill="#3b82f6"
+                      stroke="#1d4ed8"
+                      strokeWidth={2}
+                      style={{ cursor: 'default', pointerEvents: 'none' }}
+                    />
+                    <line
+                      x1={px}
+                      y1={py}
+                      x2={px + Math.cos(rotationRad) * 18}
+                      y2={py + Math.sin(rotationRad) * 18}
+                      stroke="#ffffff"
+                      strokeWidth={3}
+                      strokeLinecap="round"
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  </>
+                )}
+              </g>
+            );
+          })() : undefined,
+        })}
+
+        {/* Device rendering - when interactive (Room Builder), render AFTER overlay so device can be dragged */}
+        {deviceInteractive && showDevice && devicePlacement && safePlacement && (
+          (() => {
+            const { x: px, y: py } = toCanvasCoord(safePlacement);
+            // Add 90 degrees so that 0 degrees points down (Y+) instead of right (X+)
+            const rotationRad = (((safePlacement.rotationDeg ?? 0) + 90) * Math.PI) / 180;
+            const halfFov = (effectiveFov * Math.PI) / 360;
+            const range = effectiveMaxRange * 1000;
+
+            // Calculate radar coverage points
+            const deviceWorld = { x: safePlacement.x, y: safePlacement.y };
+            const a1 = rotationRad - halfFov;
+            const a2 = rotationRad + halfFov;
+
+            // World coordinates for radar edges
+            const edge1World = {
+              x: deviceWorld.x + Math.cos(a1) * range,
+              y: deviceWorld.y + Math.sin(a1) * range,
+            };
+            const edge2World = {
+              x: deviceWorld.x + Math.cos(a2) * range,
+              y: deviceWorld.y + Math.sin(a2) * range,
+            };
+
+            // Build radar polygon with wall clipping
+            let radarPoints: Point[] = [deviceWorld];
+
+            if (clipRadarToWalls && safePoints.length >= 3) {
+              const minClipDistance = 10;
+
+              let clippedEdge1 = edge1World;
+              let minDist1 = Infinity;
+
+              for (let i = 0; i < safePoints.length; i++) {
+                const wallStart = safePoints[i];
+                const wallEnd = safePoints[(i + 1) % safePoints.length];
+                const intersection = lineIntersection(deviceWorld, edge1World, wallStart, wallEnd);
+
+                if (intersection) {
+                  const dist = Math.hypot(intersection.x - deviceWorld.x, intersection.y - deviceWorld.y);
+                  if (dist > minClipDistance && dist < minDist1) {
+                    minDist1 = dist;
+                    clippedEdge1 = intersection;
+                  }
+                }
+              }
+
+              let clippedEdge2 = edge2World;
+              let minDist2 = Infinity;
+
+              for (let i = 0; i < safePoints.length; i++) {
+                const wallStart = safePoints[i];
+                const wallEnd = safePoints[(i + 1) % safePoints.length];
+                const intersection = lineIntersection(deviceWorld, edge2World, wallStart, wallEnd);
+
+                if (intersection) {
+                  const dist = Math.hypot(intersection.x - deviceWorld.x, intersection.y - deviceWorld.y);
+                  if (dist > minClipDistance && dist < minDist2) {
+                    minDist2 = dist;
+                    clippedEdge2 = intersection;
+                  }
+                }
+              }
+
+              const arcSteps = 32;
+              const angleStep = (effectiveFov * Math.PI / 180) / arcSteps;
+
+              for (let i = 0; i <= arcSteps; i++) {
+                const angle = a1 + i * angleStep;
+                const rayEnd = {
+                  x: deviceWorld.x + Math.cos(angle) * range,
+                  y: deviceWorld.y + Math.sin(angle) * range,
+                };
+
+                let clippedPoint = rayEnd;
+                let minDist = Infinity;
+
+                for (let j = 0; j < safePoints.length; j++) {
+                  const wallStart = safePoints[j];
+                  const wallEnd = safePoints[(j + 1) % safePoints.length];
+                  const intersection = lineIntersection(deviceWorld, rayEnd, wallStart, wallEnd);
+
+                  if (intersection) {
+                    const dist = Math.hypot(intersection.x - deviceWorld.x, intersection.y - deviceWorld.y);
+                    if (dist > minClipDistance && dist < minDist) {
+                      minDist = dist;
+                      clippedPoint = intersection;
+                    }
+                  }
+                }
+
+                radarPoints.push(clippedPoint);
+              }
+            } else {
+              const arcSteps = 32;
+              for (let i = 0; i <= arcSteps; i++) {
+                const angle = a1 + (i / arcSteps) * (a2 - a1);
+                const arcPoint = {
+                  x: deviceWorld.x + Math.cos(angle) * range,
+                  y: deviceWorld.y + Math.sin(angle) * range,
+                };
+                radarPoints.push(arcPoint);
+              }
+            }
+
+            const radarPath = radarPoints.map(toCanvasCoord);
+            const pathData = radarPath.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
+
+            const iconSize = 36;
+
+            return (
+              <g>
+                {showRadar && (
+                  <path
+                    d={pathData}
+                    fill="#22c55e22"
+                    stroke="#22c55e"
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
+
+                {deviceIconUrl ? (
+                  <image
+                    href={deviceIconUrl}
+                    x={px - iconSize / 2}
+                    y={py - iconSize / 2}
+                    width={iconSize}
+                    height={iconSize}
                     style={{ cursor: 'grab', pointerEvents: 'all' }}
                     onMouseDown={() => setDragDevice(true)}
                   />
                 ) : (
                   <>
-                    {/* Fallback: circle with direction indicator */}
                     <circle
                       cx={px}
                       cy={py}
