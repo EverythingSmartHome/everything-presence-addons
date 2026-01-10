@@ -246,7 +246,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
     };
     load();
-  }, [initialProfileId, initialRoomId, selectedProfileId, selectedRoomId]);
+    // Note: selectedRoomId and selectedProfileId intentionally excluded - this is initialization only.
+  }, [initialProfileId, initialRoomId]);
 
   useEffect(() => {
     // Only run when room ID actually changes (not on every render)
