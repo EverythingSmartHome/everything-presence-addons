@@ -98,6 +98,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    showTargets, setShowTargets,
     showAlignedDirection, setShowAlignedDirection,
     clipRadarToWalls, setClipRadarToWalls,
     heatmapEnabled, setHeatmapEnabled,
@@ -927,7 +928,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               ) : null;
 
               // Render live target positions (EP Lite with tracking)
-              const targetElements = displayTargetPositions.length > 0 ? (
+              const targetElements = showTargets && displayTargetPositions.length > 0 ? (
                 <g>
                   {/* Render trails first (so they appear behind targets) */}
                   {showTrails && displayTargetPositions.map((target) => {
@@ -1924,6 +1925,18 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         <span className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded-full bg-green-500"></span>
                           Device Icon
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={showTargets}
+                          onChange={(e) => setShowTargets(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
+                        />
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
+                          Targets
                         </span>
                       </label>
                     </div>
