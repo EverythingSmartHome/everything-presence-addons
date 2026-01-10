@@ -677,6 +677,9 @@ function App() {
                 setSelectedRoomId(null);
               }
             }}
+            onRoomUpdated={(room) => {
+              setRooms((prev) => prev.map((r) => (r.id === room.id ? room : r)));
+            }}
           />
         )}
         </main>

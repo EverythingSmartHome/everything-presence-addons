@@ -2315,11 +2315,27 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                         ? 'border-slate-800 bg-slate-900/30 opacity-50 cursor-not-allowed'
                         : 'border-slate-800 bg-slate-900/60 cursor-pointer hover:border-slate-700 hover:bg-slate-900/80 hover:scale-102'
                     }`}
-                    onClick={() => {
+                    onClick={async () => {
                       if (hasDevice) return;
                       setRoomId(room.id);
                       if (room.profileId) setProfileId(room.profileId);
                       onSelectRoom(room.id, room.profileId ?? profileId ?? null);
+
+                      // Link the device to this existing room
+                      // Don't pass entityMappings - device mapping is source of truth
+                      if (deviceId) {
+                        try {
+                          const updatedRoom = await updateRoom(room.id, {
+                            deviceId,
+                            profileId: profileId ?? room.profileId,
+                          });
+                          onRoomUpdate?.(updatedRoom.room);
+                        } catch (err) {
+                          console.error('Failed to link device to room:', err);
+                          // Continue anyway - user can fix via settings
+                        }
+                      }
+
                       // Auto-advance to next step after brief delay for visual feedback
                       setTimeout(() => {
                         nextStep();
