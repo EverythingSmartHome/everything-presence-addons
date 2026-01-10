@@ -1115,10 +1115,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                 { fill: '#f59e0b', fillOpacity: 'rgba(245, 158, 11, 0.2)', name: 'Amber' },     // Target 3 - Amber
               ];
 
-              // Render live target positions
+              // Render live target positions (pointer-events: none so they don't block zone interaction)
               if (showTargets && targetPositions.length > 0) {
                 return (
-                  <g>
+                  <g style={{ pointerEvents: 'none' }}>
                     {targetPositions.map((target) => {
                       const canvasPos = toCanvas({ x: target.x, y: target.y });
                       const cx = canvasPos.x;

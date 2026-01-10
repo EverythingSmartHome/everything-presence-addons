@@ -324,6 +324,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       showFurniture={false}
       showDoors={showDoors}
       showDevice={showDevice}
+      deviceInteractive={false}
       lockShell
       renderOverlay={(params) => {
         const { toCanvas, toWorldFromEvent } = params;
@@ -652,16 +653,22 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
           );
         }).filter(Boolean) : [];
 
-        // Render custom overlay if provided
+        // Render custom overlay if provided (rendered BEFORE zones so zones are on top)
         const customOverlay = renderOverlay ? renderOverlay(params) : null;
+
+        // Extract device element from params (passed by RoomCanvas when deviceInteractive=false)
+        const deviceElement = (params as any).deviceElement;
 
         return (
           <>
             {furnitureElements}
+            {/* Device element rendered after furniture but before targets/zones (non-interactive mode) */}
+            {deviceElement}
+            {/* Custom overlay (targets, etc.) rendered before zones so zones are interactable */}
+            {customOverlay}
             {/* Show rectangle zones when NOT in polygon mode, polygon zones when in polygon mode */}
             {!polygonMode && zoneElements}
             {polygonMode && polygonZoneElements}
-            {customOverlay}
           </>
         );
       }}
