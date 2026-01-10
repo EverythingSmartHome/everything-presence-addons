@@ -16,9 +16,10 @@ import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 interface SettingsPageProps {
   onBack?: () => void;
   onRoomDeleted?: (roomId: string) => void;
+  onRoomUpdated?: (room: RoomConfig) => void;
 }
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDeleted }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDeleted, onRoomUpdated }) => {
   const [rooms, setRooms] = useState<RoomConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +32,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [clearingDefaultRoom, setClearingDefaultRoom] = useState(false);
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [unlinkingDeviceRoomId, setUnlinkingDeviceRoomId] = useState<string | null>(null);
 
   // Device mappings context - used to refresh cache after resync
   const { refreshMapping } = useDeviceMappings();
@@ -203,6 +205,43 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const handleSyncCancel = () => {
     setSyncingRoom(null);
     setIsSyncing(false);
+  };
+
+  const handleUnlinkDevice = async (room: RoomConfig) => {
+    if (!room.deviceId) return;
+
+    const confirmMessage = `Are you sure you want to unlink the device from "${room.name}"?\n\nThis will:\n• Remove the device association\n• Clear entity mappings\n\nThe room geometry, furniture, and zones will be preserved.`;
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    setUnlinkingDeviceRoomId(room.id);
+    try {
+      // Update room to remove device association and entity mappings
+      // Keep: name, zones, roomShell, furniture, doors, devicePlacement, etc.
+      // Note: Empty strings are converted to undefined by backend's normalizeRoom
+      // Note: null is used for entityMappings because undefined is stripped from JSON
+      const result = await updateRoom(room.id, {
+        deviceId: '',
+        profileId: '',
+        entityMappings: null as unknown as undefined,
+        entityNamePrefix: '',
+      });
+
+      setRooms((prev) =>
+        prev.map((r) => (r.id === room.id ? result.room : r))
+      );
+
+      // Notify parent (App.tsx) so it can update its rooms state
+      onRoomUpdated?.(result.room);
+
+      setSuccess(`Device unlinked from "${room.name}". Room data preserved.`);
+      setTimeout(() => setSuccess(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unlink device');
+    } finally {
+      setUnlinkingDeviceRoomId(null);
+    }
   };
 
   const handleExportRoom = (room: RoomConfig) => {
@@ -626,6 +665,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                           title="Re-discover and sync entity mappings"
                         >
                           🔄 Re-sync Entities
+                        </button>
+                      )}
+                      {room.deviceId && (
+                        <button
+                          onClick={() => handleUnlinkDevice(room)}
+                          disabled={unlinkingDeviceRoomId === room.id}
+                          className="rounded-lg border border-amber-600/50 bg-amber-600/10 px-4 py-2 text-sm font-semibold text-amber-100 transition-all hover:bg-amber-600/20 disabled:opacity-50"
+                          title="Remove device from room while preserving room geometry and furniture"
+                        >
+                          {unlinkingDeviceRoomId === room.id ? 'Unlinking...' : '🔗 Unlink Device'}
                         </button>
                       )}
                       <button
