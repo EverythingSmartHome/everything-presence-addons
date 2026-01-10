@@ -63,6 +63,8 @@ export interface DeviceMapping {
   rawSwVersion?: string;
   /** Schema version from device profile at time of last sync (e.g., "1.0") */
   profileSchemaVersion?: string;
+  /** Zone labels keyed by zone ID (e.g., "Zone 1" -> "Bed", "Exclusion 2" -> "Window") */
+  zoneLabels?: Record<string, string>;
 }
 
 /**
@@ -313,4 +315,48 @@ export const getMigrationPreview = async (): Promise<MigrationResponse | null> =
 export const hasValidMappings = async (deviceId: string): Promise<boolean> => {
   const mapping = await getDeviceMapping(deviceId);
   return mapping !== null;
+};
+
+/**
+ * Get zone labels for a device.
+ * Returns empty object if device has no mapping or no labels.
+ */
+export const getZoneLabels = async (deviceId: string): Promise<Record<string, string>> => {
+  try {
+    const res = await fetch(ingressAware(`api/device-mappings/${deviceId}/zone-labels`));
+    if (res.status === 404) {
+      return {};
+    }
+    const data = await handle<{ zoneLabels: Record<string, string> }>(res);
+    return data.zoneLabels;
+  } catch (error) {
+    console.error('Failed to fetch zone labels:', error);
+    return {};
+  }
+};
+
+/**
+ * Save zone labels for a device.
+ * Labels are stored in the device mapping, separate from zone coordinates.
+ */
+export const saveZoneLabels = async (
+  deviceId: string,
+  zoneLabels: Record<string, string>
+): Promise<Record<string, string> | null> => {
+  try {
+    const res = await fetch(ingressAware(`api/device-mappings/${deviceId}/zone-labels`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ zoneLabels }),
+    });
+    if (res.status === 404) {
+      console.warn('Device mapping not found - cannot save zone labels');
+      return null;
+    }
+    const data = await handle<{ zoneLabels: Record<string, string> }>(res);
+    return data.zoneLabels;
+  } catch (error) {
+    console.error('Failed to save zone labels:', error);
+    return null;
+  }
 };
