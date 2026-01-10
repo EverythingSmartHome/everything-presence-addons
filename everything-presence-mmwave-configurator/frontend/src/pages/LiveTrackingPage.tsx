@@ -793,6 +793,19 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         <div
           className="h-full w-full overflow-hidden overscroll-contain touch-none"
           onWheelCapture={(e) => {
+            // Check if the event target is within a scrollable container (like activity log panel)
+            // If so, let the native scroll happen instead of zooming
+            let target = e.target as HTMLElement | null;
+            while (target && target !== e.currentTarget) {
+              const style = window.getComputedStyle(target);
+              const overflowY = style.overflowY;
+              if (overflowY === 'auto' || overflowY === 'scroll') {
+                // Target is in a scrollable container, don't zoom
+                return;
+              }
+              target = target.parentElement;
+            }
+
             if (e.cancelable) e.preventDefault();
             if ((e.nativeEvent as any)?.cancelable) {
               (e.nativeEvent as any).preventDefault();
