@@ -80,6 +80,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     showDoors, setShowDoors,
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
+    showTargets, setShowTargets,
     clipRadarToWalls,
   } = useDisplaySettings();
   const liveState = propLiveState;
@@ -1115,7 +1116,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
               ];
 
               // Render live target positions
-              if (targetPositions.length > 0) {
+              if (showTargets && targetPositions.length > 0) {
                 return (
                   <g>
                     {targetPositions.map((target) => {
@@ -1338,6 +1339,18 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     <span className="flex items-center gap-1.5">
                       <span className="w-3 h-3 rounded-full bg-green-500"></span>
                       Device Icon
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={showTargets}
+                      onChange={(e) => setShowTargets(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
+                    />
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
+                      Targets
                     </span>
                   </label>
                 </div>
