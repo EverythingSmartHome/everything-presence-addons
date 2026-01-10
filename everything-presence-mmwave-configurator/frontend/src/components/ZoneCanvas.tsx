@@ -36,6 +36,8 @@ interface ZoneCanvasProps {
   onFurnitureSelect?: (id: string | null) => void;
   doors?: Door[];
   onDragStateChange?: (isDragging: boolean) => void;
+  // Zone labels from device mapping (overrides zone.label)
+  zoneLabels?: Record<string, string>;
   // Visibility toggles
   showWalls?: boolean;
   showFurniture?: boolean;
@@ -81,6 +83,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   onFurnitureSelect,
   doors = [],
   onDragStateChange,
+  zoneLabels,
   showWalls = true,
   showFurniture = true,
   showDoors = true,
@@ -460,7 +463,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   textShadow: '0 1px 3px rgba(0,0,0,0.8)'
                 }}
               >
-                {zone.label || zone.id}
+                {zoneLabels?.[zone.id] || zone.label || zone.id}
               </text>
               {/* Resize handles */}
               {handles.map((handle) => (
@@ -576,7 +579,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   textShadow: '0 1px 3px rgba(0,0,0,0.8)'
                 }}
               >
-                {polygon.label || polygon.id}
+                {zoneLabels?.[polygon.id] || polygon.label || polygon.id}
               </text>
               {/* Vertex handles (only when selected) */}
               {isSelected && canvasVertices.map((v, idx) => (

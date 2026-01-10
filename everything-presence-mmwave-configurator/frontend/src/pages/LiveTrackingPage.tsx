@@ -830,6 +830,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             showRadar={showDeviceRadar}
             furniture={selectedRoom.furniture ?? []}
             doors={selectedRoom.doors ?? []}
+            zoneLabels={deviceMapping?.zoneLabels}
             showWalls={showWalls}
             showFurniture={showFurniture}
             showDoors={showDoors}
@@ -1337,7 +1338,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                                   className="w-3 h-3 rounded border border-white/50"
                                   style={{ backgroundColor: regularZoneColors[index % regularZoneColors.length] }}
                                 />
-                                <span className="text-slate-300">{zone.label || zone.id}</span>
+                                <span className="text-slate-300">{deviceMapping?.zoneLabels?.[zone.id] || zone.label || zone.id}</span>
                               </div>
                             ));
                           })()}
@@ -1357,7 +1358,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                                   className="w-3 h-3 rounded border border-white/50"
                                   style={{ backgroundColor: regularZoneColors[index % regularZoneColors.length] }}
                                 />
-                                <span className="text-slate-300">{zone.label || zone.id}</span>
+                                <span className="text-slate-300">{deviceMapping?.zoneLabels?.[zone.id] || zone.label || zone.id}</span>
                               </div>
                             ));
                           })()}
@@ -1473,7 +1474,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                           const regularZoneColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b'];
                           // Find the matching zone to get its label
                           const matchingZone = selectedRoom?.zones?.find(z => z.id === `Zone ${zoneNum}` || z.id === `zone${zoneNum}` || z.id === `zone_${zoneNum}`);
-                          const zoneLabel = matchingZone?.label || `Zone ${zoneNum}`;
+                          const zoneLabel = (matchingZone && deviceMapping?.zoneLabels?.[matchingZone.id]) || matchingZone?.label || `Zone ${zoneNum}`;
 
                           return (
                             <div

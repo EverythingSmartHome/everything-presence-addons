@@ -348,6 +348,78 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
   });
 
   /**
+   * GET /api/device-mappings/:deviceId/zone-labels
+   * Get zone labels for a device.
+   */
+  router.get('/:deviceId/zone-labels', (req, res) => {
+    const { deviceId } = req.params;
+
+    try {
+      const mapping = deviceMappingStorage.getMapping(deviceId);
+      if (!mapping) {
+        return res.status(404).json({
+          message: 'Device mapping not found',
+          code: 'MAPPING_NOT_FOUND',
+        });
+      }
+
+      return res.json({ zoneLabels: mapping.zoneLabels ?? {} });
+    } catch (error) {
+      logger.error({ error, deviceId }, 'Failed to get zone labels');
+      return res.status(500).json({ message: 'Failed to get zone labels' });
+    }
+  });
+
+  /**
+   * PUT /api/device-mappings/:deviceId/zone-labels
+   * Update zone labels for a device.
+   * Body: { zoneLabels: { "Zone 1": "Bed", "Zone 2": "Desk" } }
+   */
+  router.put('/:deviceId/zone-labels', async (req, res) => {
+    const { deviceId } = req.params;
+    const { zoneLabels } = req.body as { zoneLabels?: Record<string, string> };
+
+    if (!zoneLabels || typeof zoneLabels !== 'object') {
+      return res.status(400).json({ message: 'zoneLabels object is required' });
+    }
+
+    try {
+      const existing = deviceMappingStorage.getMapping(deviceId);
+      if (!existing) {
+        return res.status(404).json({
+          message: 'Device mapping not found. Device must be synced before adding zone labels.',
+          code: 'MAPPING_NOT_FOUND',
+        });
+      }
+
+      // Clean up labels - remove empty strings and trim values
+      const cleanedLabels: Record<string, string> = {};
+      for (const [zoneId, label] of Object.entries(zoneLabels)) {
+        const trimmed = typeof label === 'string' ? label.trim() : '';
+        if (trimmed) {
+          cleanedLabels[zoneId] = trimmed;
+        }
+      }
+
+      // Update only the zoneLabels field
+      const updated: DeviceMapping = {
+        ...existing,
+        zoneLabels: cleanedLabels,
+        lastUpdated: new Date().toISOString(),
+      };
+
+      await deviceMappingStorage.saveMapping(updated);
+
+      logger.info({ deviceId, labelCount: Object.keys(cleanedLabels).length }, 'Zone labels updated');
+
+      return res.json({ zoneLabels: cleanedLabels });
+    } catch (error) {
+      logger.error({ error, deviceId }, 'Failed to update zone labels');
+      return res.status(500).json({ message: 'Failed to update zone labels' });
+    }
+  });
+
+  /**
    * POST /api/device-mappings/migrate
    * Trigger migration of all room entity mappings to device-level storage.
    */

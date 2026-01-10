@@ -13,6 +13,7 @@ import {
   PolygonModeStatus,
 } from '../api/zones';
 import { validateZones } from '../api/validate';
+import { getZoneLabels, saveZoneLabels } from '../api/deviceMappings';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, LiveState, ZoneAvailability } from '../api/types';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
@@ -71,6 +72,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [polygonZones, setPolygonZones] = useState<ZonePolygon[]>([]);
   const [togglingPolygonMode, setTogglingPolygonMode] = useState(false);
   const [showModeChangeConfirm, setShowModeChangeConfirm] = useState(false);
+  // Zone labels from device mapping (stored separately from zone coordinates)
+  const [deviceZoneLabels, setDeviceZoneLabels] = useState<Record<string, string>>({});
   // Display settings (persisted to localStorage)
   const {
     showWalls, setShowWalls,
@@ -103,7 +106,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   );
 
   // Device mappings context - used to check if device has valid entity mappings
-  const { hasValidMappings } = useDeviceMappings();
+  const { hasValidMappings, clearCache } = useDeviceMappings();
   const deviceHasValidMappings = selectedRoom?.deviceId ? hasValidMappings(selectedRoom.deviceId) : false;
 
   // Generate all possible zone slots based on profile limits
@@ -154,7 +157,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     return zones;
   }, [selectedProfile]);
 
-  // Merge device zones with all possible zones
+  // Merge device zones with all possible zones, applying labels from device mapping
   const displayZones = useMemo(() => {
     if (!selectedRoom) return allPossibleZones;
 
@@ -164,12 +167,14 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     return allPossibleZones.map(slot => {
       const deviceZone = deviceZones.find(z => z.id === slot.id && z.type === slot.type);
       if (deviceZone) {
-        return { ...slot, ...deviceZone, enabled: true };
+        // Apply label from device mapping (stored separately from coordinates)
+        const label = deviceZoneLabels[slot.id] ?? deviceZone.label;
+        return { ...slot, ...deviceZone, label, enabled: true };
       }
       // Return a fresh copy with enabled: false to ensure clean state
       return { ...slot, enabled: false };
     });
-  }, [selectedRoom, allPossibleZones]);
+  }, [selectedRoom, allPossibleZones, deviceZoneLabels]);
 
   // Only enabled zones should show on canvas
   const enabledZones = useMemo(() => {
@@ -269,6 +274,26 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
   }, [selectedRoom?.id]);
 
+  // Load zone labels from device mapping when device changes
+  useEffect(() => {
+    const loadDeviceZoneLabels = async () => {
+      if (!selectedRoom?.deviceId) {
+        setDeviceZoneLabels({});
+        return;
+      }
+
+      try {
+        const labels = await getZoneLabels(selectedRoom.deviceId);
+        setDeviceZoneLabels(labels);
+      } catch (err) {
+        // Silently fail - labels are optional
+        setDeviceZoneLabels({});
+      }
+    };
+
+    loadDeviceZoneLabels();
+  }, [selectedRoom?.deviceId]);
+
   // Fetch existing zones from device when room is loaded
   useEffect(() => {
     const loadZonesFromDevice = async () => {
@@ -304,23 +329,19 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           entityMappingsToUse
         );
 
-        // Preserve labels from existing zones (labels are UI-only, not stored on device)
-        const existingZones = selectedRoom.zones ?? [];
-        const mergedZones = deviceZones.map(deviceZone => {
-          const existingZone = existingZones.find(z => z.id === deviceZone.id);
-          return existingZone?.label ? { ...deviceZone, label: existingZone.label } : deviceZone;
-        });
+        // Device zones contain coordinates only - labels are stored separately in device mapping
+        // No need to merge labels here, they're loaded from device mapping via getZoneLabels
 
         // Always sync device zones to local storage (device is source of truth for coordinates)
-        const updatedRoom = { ...selectedRoom, zones: mergedZones };
+        const updatedRoom = { ...selectedRoom, zones: deviceZones };
 
         // Update local state
         setRooms((prev) => prev.map((r) =>
           r.id === selectedRoom.id ? updatedRoom : r
         ));
 
-        // Persist to add-on storage to keep it in sync with device (including labels)
-        await updateRoom(selectedRoom.id, { zones: mergedZones });
+        // Persist to add-on storage to keep it in sync with device (coordinates only, labels in device mapping)
+        await updateRoom(selectedRoom.id, { zones: deviceZones });
 
         // Only set selection if no zone is currently selected
         if (deviceZones.length > 0 && !selectedZoneId) {
@@ -488,6 +509,15 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     if (nextZones.length && !selectedZoneId) {
       setSelectedZoneId(nextZones[0].id);
     }
+
+    // Update local label state for immediate UI feedback (persisted on save)
+    const newLabels: Record<string, string> = {};
+    for (const zone of nextZones) {
+      if (zone.label) {
+        newLabels[zone.id] = zone.label;
+      }
+    }
+    setDeviceZoneLabels(newLabels);
   };
 
   const handlePolygonZonesChange = (nextZones: ZonePolygon[]) => {
@@ -746,6 +776,22 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       if (!polygonModeStatus.enabled) {
         const result = await updateRoom(selectedRoom.id, selectedRoom);
         setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? result.room : r)));
+
+        // Save zone labels to device mapping (separate from coordinates)
+        if (selectedRoom.deviceId) {
+          const labelsToSave: Record<string, string> = {};
+          for (const zone of selectedRoom.zones ?? []) {
+            if (zone.label) {
+              labelsToSave[zone.id] = zone.label;
+            }
+          }
+          const savedLabels = await saveZoneLabels(selectedRoom.deviceId, labelsToSave);
+          if (savedLabels) {
+            setDeviceZoneLabels(savedLabels);
+            // Invalidate the device mapping cache so other pages get fresh labels
+            clearCache(selectedRoom.deviceId);
+          }
+        }
       }
 
       onWizardZonesReady?.();
@@ -1031,6 +1077,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             floorMaterial={selectedRoom.floorMaterial}
             furniture={selectedRoom.furniture ?? []}
             doors={selectedRoom.doors ?? []}
+            zoneLabels={deviceZoneLabels}
             devicePlacement={selectedRoom.devicePlacement}
             installationAngle={installationAngle}
             fieldOfViewDeg={selectedProfile?.limits?.fieldOfViewDegrees}

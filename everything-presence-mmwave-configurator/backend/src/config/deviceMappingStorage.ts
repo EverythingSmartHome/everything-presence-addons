@@ -30,6 +30,8 @@ export interface DeviceMapping {
   unmappedEntities: string[];
   /** Unit of measurement for specific entities (e.g., "target1X" -> "in" or "mm") */
   entityUnits?: Record<string, string>;
+  /** Zone labels keyed by zone ID (e.g., "Zone 1" -> "Bed", "Exclusion 2" -> "Window") */
+  zoneLabels?: Record<string, string>;
   /** Device firmware version (e.g., "1.4.1") - parsed from sw_version */
   firmwareVersion?: string;
   /** ESPHome version the device is running (e.g., "2025.11.2") - parsed from sw_version */
