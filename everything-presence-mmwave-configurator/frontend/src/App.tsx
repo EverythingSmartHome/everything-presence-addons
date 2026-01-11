@@ -591,6 +591,8 @@ function App() {
               setWizardZonesReady(val);
               updateSettings({ zonesReady: val }).catch(() => null);
             }}
+            liveState={liveState}
+            targetPositions={targetPositions}
           />
         )}
         {view === 'zoneEditor' && (
