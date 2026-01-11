@@ -38,6 +38,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   initialProfileId,
   onWizardProgress,
   liveState,
+  targetPositions,
 }) => {
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
@@ -73,6 +74,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     showFurniture, setShowFurniture,
     showDoors, setShowDoors,
     showDeviceIcon, setShowDeviceIcon,
+    showTargets, setShowTargets,
     clipRadarToWalls,
   } = useDisplaySettings();
   const [panOffsetMm, setPanOffsetMm] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -1062,6 +1064,55 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   showFurniture={showFurniture}
                   showDoors={showDoors}
                   showDevice={showDeviceIcon}
+                  renderOverlay={({ toCanvas }) => {
+                    if (!showTargets || !targetPositions?.length) return null;
+
+                    const targetColors = [
+                      { fill: '#3b82f6', fillOpacity: 'rgba(59, 130, 246, 0.2)' },
+                      { fill: '#10b981', fillOpacity: 'rgba(16, 185, 129, 0.2)' },
+                      { fill: '#f59e0b', fillOpacity: 'rgba(245, 158, 11, 0.2)' },
+                    ];
+
+                    return (
+                      <g style={{ pointerEvents: 'none' }}>
+                        {targetPositions.map((target, idx) => {
+                          const pos = toCanvas({ x: target.x, y: target.y });
+                          const colors = targetColors[idx % targetColors.length];
+                          return (
+                            <g key={target.id}>
+                              {/* Outer pulsing circle */}
+                              <circle
+                                cx={pos.x}
+                                cy={pos.y}
+                                r={25}
+                                fill={colors.fillOpacity}
+                                stroke={colors.fill}
+                                strokeWidth={1.5}
+                              />
+                              {/* Inner solid dot */}
+                              <circle
+                                cx={pos.x}
+                                cy={pos.y}
+                                r={10}
+                                fill={colors.fill}
+                              />
+                              {/* Label */}
+                              <text
+                                x={pos.x}
+                                y={pos.y - 35}
+                                fill={colors.fill}
+                                fontSize="12"
+                                fontWeight="600"
+                                textAnchor="middle"
+                              >
+                                T{target.id}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </g>
+                    );
+                  }}
                 />
           {/* Floating Room Selector (top center) */}
           <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl">
@@ -1430,6 +1481,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           <span className="flex items-center gap-1.5">
                             <span className="w-3 h-3 rounded-full bg-green-500"></span>
                             Device Icon
+                          </span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={showTargets}
+                            onChange={(e) => setShowTargets(e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                          />
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-3 h-3 rounded-full bg-blue-500"></span>
+                            Live Tracking
+                            {!liveState?.deviceId && <span className="text-slate-500 text-xs ml-1">(No device)</span>}
                           </span>
                         </label>
                       </div>

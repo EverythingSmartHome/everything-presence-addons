@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
-import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, FurnitureInstance, FurnitureType, Door, EntityMappings } from '../api/types';
+import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, FurnitureInstance, FurnitureType, Door, EntityMappings, LiveState } from '../api/types';
 import { RoomCanvas, Point, DevicePlacement } from '../components/RoomCanvas';
 import { ZoneCanvas } from '../components/ZoneCanvas';
 import { ZoneEditor } from '../components/ZoneEditor';
@@ -15,6 +15,7 @@ import { fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getEffectiveEntityPrefix } from '../utils/entityUtils';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
+import { useDisplaySettings } from '../hooks/useDisplaySettings';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -37,6 +38,15 @@ interface WizardPageProps {
   setOutlineDone: (val: boolean) => void;
   setPlacementDone: (val: boolean) => void;
   setZonesReady: (val: boolean) => void;
+  liveState?: LiveState | null;
+  targetPositions?: Array<{
+    id: number;
+    x: number;
+    y: number;
+    distance: number | null;
+    speed: number | null;
+    angle: number | null;
+  }>;
 }
 
 type StepKey =
@@ -72,6 +82,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   setOutlineDone,
   setPlacementDone,
   setZonesReady,
+  liveState,
+  targetPositions,
 }) => {
   const [deviceId, setDeviceId] = useState<string | null>(selectedDeviceId ?? null);
   const [profileId, setProfileId] = useState<string | null>(selectedProfileId ?? null);
@@ -97,6 +109,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Radar overlay clipping toggle
   const [clipRadarToWalls, setClipRadarToWalls] = useState(true);
+
+  // Display settings for live tracking and device icon
+  const { showTargets, setShowTargets, showDeviceIcon, setShowDeviceIcon } = useDisplaySettings();
 
   // Cursor position tracking
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
@@ -319,15 +334,16 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         : [...base, 'roomDetails', 'placement', 'finish'];
     }
 
-    // New room (default): device → entityDiscovery → roomChoice → roomDetails → outline → doors → furniture → placement → (zones if supported) → finish
+    // New room (default): device → entityDiscovery → roomChoice → roomDetails → outline → placement → doors → furniture → (zones if supported) → finish
+    // Device placement after outline so room shape exists, but before doors/furniture so live tracking can help position them
     return supportsZones
-      ? [...base, 'roomDetails', 'outline', 'doors', 'furniture', 'placement', 'zones', 'finish']
-      : [...base, 'roomDetails', 'outline', 'doors', 'furniture', 'placement', 'finish'];
+      ? [...base, 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'zones', 'finish']
+      : [...base, 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'finish'];
   }, [roomPath, currentProfile]);
 
   const [stepIndex, setStepIndex] = useState<number>(() => {
     // Initialize with default 'new' room path steps for initialStep lookup
-    const defaultSteps: StepKey[] = ['device', 'entityDiscovery', 'roomChoice', 'roomDetails', 'outline', 'doors', 'furniture', 'placement', 'zones', 'finish'];
+    const defaultSteps: StepKey[] = ['device', 'entityDiscovery', 'roomChoice', 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'zones', 'finish'];
     const idx = defaultSteps.indexOf(initialStep as StepKey);
     return idx >= 0 ? idx : 0;
   });
@@ -1432,6 +1448,34 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onDoorDragMove={handleDoorDragMove}
               onDoorDragEnd={handleDoorDragEnd}
               showDoors={true}
+              devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
+              fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
+              maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
+              deviceIconUrl={currentProfile?.iconUrl}
+              clipRadarToWalls={clipRadarToWalls}
+              renderOverlay={({ toCanvas }) => {
+                if (!showTargets || !targetPositions?.length) return null;
+                const targetColors = [
+                  { fill: '#3b82f6', fillOpacity: 'rgba(59, 130, 246, 0.2)' },
+                  { fill: '#10b981', fillOpacity: 'rgba(16, 185, 129, 0.2)' },
+                  { fill: '#f59e0b', fillOpacity: 'rgba(245, 158, 11, 0.2)' },
+                ];
+                return (
+                  <g style={{ pointerEvents: 'none' }}>
+                    {targetPositions.map((target, idx) => {
+                      const pos = toCanvas({ x: target.x, y: target.y });
+                      const colors = targetColors[idx % targetColors.length];
+                      return (
+                        <g key={target.id}>
+                          <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
+                          <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
+                          <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              }}
             />
           )}
 
@@ -1457,6 +1501,34 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               }}
               onFurnitureChange={handleFurnitureChange}
               showFurniture={true}
+              devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
+              fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
+              maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
+              deviceIconUrl={currentProfile?.iconUrl}
+              clipRadarToWalls={clipRadarToWalls}
+              renderOverlay={({ toCanvas }) => {
+                if (!showTargets || !targetPositions?.length) return null;
+                const targetColors = [
+                  { fill: '#3b82f6', fillOpacity: 'rgba(59, 130, 246, 0.2)' },
+                  { fill: '#10b981', fillOpacity: 'rgba(16, 185, 129, 0.2)' },
+                  { fill: '#f59e0b', fillOpacity: 'rgba(245, 158, 11, 0.2)' },
+                ];
+                return (
+                  <g style={{ pointerEvents: 'none' }}>
+                    {targetPositions.map((target, idx) => {
+                      const pos = toCanvas({ x: target.x, y: target.y });
+                      const colors = targetColors[idx % targetColors.length];
+                      return (
+                        <g key={target.id}>
+                          <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
+                          <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
+                          <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              }}
             />
           )}
 
@@ -1488,6 +1560,29 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               showFurniture={true}
               doors={selectedRoom?.doors ?? []}
               showDoors={true}
+              renderOverlay={({ toCanvas }) => {
+                if (!showTargets || !targetPositions?.length) return null;
+                const targetColors = [
+                  { fill: '#3b82f6', fillOpacity: 'rgba(59, 130, 246, 0.2)' },
+                  { fill: '#10b981', fillOpacity: 'rgba(16, 185, 129, 0.2)' },
+                  { fill: '#f59e0b', fillOpacity: 'rgba(245, 158, 11, 0.2)' },
+                ];
+                return (
+                  <g style={{ pointerEvents: 'none' }}>
+                    {targetPositions.map((target, idx) => {
+                      const pos = toCanvas({ x: target.x, y: target.y });
+                      const colors = targetColors[idx % targetColors.length];
+                      return (
+                        <g key={target.id}>
+                          <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
+                          <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
+                          <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                );
+              }}
             />
           )}
 
@@ -1545,6 +1640,29 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 clipRadarToWalls={clipRadarToWalls}
                 furniture={selectedRoom?.furniture}
                 doors={selectedRoom?.doors}
+                renderOverlay={({ toCanvas }) => {
+                  if (!showTargets || !targetPositions?.length) return null;
+                  const targetColors = [
+                    { fill: '#3b82f6', fillOpacity: 'rgba(59, 130, 246, 0.2)' },
+                    { fill: '#10b981', fillOpacity: 'rgba(16, 185, 129, 0.2)' },
+                    { fill: '#f59e0b', fillOpacity: 'rgba(245, 158, 11, 0.2)' },
+                  ];
+                  return (
+                    <g style={{ pointerEvents: 'none' }}>
+                      {targetPositions.map((target, idx) => {
+                        const pos = toCanvas({ x: target.x, y: target.y });
+                        const colors = targetColors[idx % targetColors.length];
+                        return (
+                          <g key={target.id}>
+                            <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
+                            <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
+                            <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                }}
               />
             </div>
           )}
@@ -1669,6 +1787,34 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   {selectedRoom?.doors?.length} door{(selectedRoom?.doors?.length ?? 0) !== 1 ? 's' : ''} placed
                 </div>
               )}
+              {/* Display Toggles */}
+              <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-lg space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showTargets}
+                    onChange={(e) => setShowTargets(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                    Live Tracking
+                    {!liveState?.deviceId && <span className="text-slate-500 text-xs ml-1">(No device)</span>}
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showDeviceIcon}
+                    onChange={(e) => setShowDeviceIcon(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-sm">📡</span>
+                    Device Icon
+                  </span>
+                </label>
+              </div>
             </div>
           )}
 
@@ -1694,6 +1840,34 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   {selectedRoom?.furniture?.length} item{(selectedRoom?.furniture?.length ?? 0) !== 1 ? 's' : ''} placed
                 </div>
               )}
+              {/* Display Toggles */}
+              <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-lg space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showTargets}
+                    onChange={(e) => setShowTargets(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                    Live Tracking
+                    {!liveState?.deviceId && <span className="text-slate-500 text-xs ml-1">(No device)</span>}
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showDeviceIcon}
+                    onChange={(e) => setShowDeviceIcon(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-sm">📡</span>
+                    Device Icon
+                  </span>
+                </label>
+              </div>
             </div>
           )}
 
@@ -1710,6 +1884,23 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               >
                 {showZoneList ? '✕ Hide' : '☰ Show'} {polygonModeStatus.enabled ? `Polygon Zones (${polygonZones.length})` : `Zone Slots (${enabledZones.length}/${displayZones.length})`}
               </button>
+
+              {/* Live Tracking Toggle */}
+              <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-lg">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showTargets}
+                    onChange={(e) => setShowTargets(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                    Live Tracking
+                    {!liveState?.deviceId && <span className="text-slate-500 text-xs ml-1">(No device)</span>}
+                  </span>
+                </label>
+              </div>
 
               {/* Polygon mode prompt - show when supported but not enabled */}
               {showPolygonPrompt && !polygonModeStatus.enabled && (
@@ -2597,6 +2788,21 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   {v === 0 ? 'Off' : `${v}mm`}
                 </button>
               ))}
+              <div className="flex items-center gap-2 ml-4 pl-4 border-l border-slate-700">
+                <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={showTargets}
+                    onChange={(e) => setShowTargets(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                    Live Tracking
+                    {!liveState?.deviceId && <span className="text-slate-500">(No device)</span>}
+                  </span>
+                </label>
+              </div>
               <span className="ml-auto text-slate-500">Drag device • Right-drag to pan • Wheel to zoom</span>
             </div>
           </div>
