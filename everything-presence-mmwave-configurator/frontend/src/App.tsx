@@ -281,7 +281,12 @@ function App() {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('thresholdFactor');
                   updated.config.thresholdFactor = parseIntValue();
-                } else if (message.entityId.includes('installation_angle')) {
+                } else if (
+                  // Check against the mapped entity ID first (from room entityMappings)
+                  (selectedRoom.entityMappings?.installationAngleEntity && message.entityId === selectedRoom.entityMappings.installationAngleEntity) ||
+                  // Fallback to pattern matching for legacy rooms without explicit mapping
+                  (!selectedRoom.entityMappings?.installationAngleEntity && (message.entityId.includes('installation_angle') || message.entityId.includes('tracking_sensor_angle')))
+                ) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('installationAngle');
                   updated.config.installationAngle = parseNumberValue();
