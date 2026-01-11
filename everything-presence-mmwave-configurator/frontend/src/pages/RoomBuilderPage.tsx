@@ -11,6 +11,7 @@ import { FLOOR_MATERIALS } from '../components/FloorMaterials';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { getEffectiveEntityPrefix } from '../utils/entityUtils';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
+import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -130,16 +131,28 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     return Boolean(caps?.tracking) && !caps?.distanceOnlyTracking;
   }, [selectedProfile]);
 
+  // Device mappings context for entity resolution
+  const { getEntityId } = useDeviceMappings();
+
   const resolveInstallationAngleEntityId = useCallback(() => {
     if (!selectedRoom) return null;
+
+    // First try device mappings (new system - supports EPP and EPL)
+    if (selectedRoom.deviceId) {
+      const entityFromMapping = getEntityId(selectedRoom.deviceId, 'installationAngle');
+      if (entityFromMapping) return entityFromMapping;
+    }
+
+    // Fall back to legacy room-level mapping
     const mappingEntity = selectedRoom.entityMappings?.installationAngleEntity;
     if (mappingEntity) return mappingEntity;
 
+    // Last resort: hardcoded pattern (EPL only)
     const devicePrefix = selectedRoom.entityNamePrefix ?? selectedDevice?.entityNamePrefix;
     const prefix = getEffectiveEntityPrefix(selectedRoom.entityMappings, devicePrefix);
     if (!prefix) return null;
     return `number.${prefix}_installation_angle`;
-  }, [selectedRoom, selectedDevice]);
+  }, [selectedRoom, selectedDevice, getEntityId]);
 
   const handleRotationSuggestion = useCallback(
     (rotationDeg: number) => {
