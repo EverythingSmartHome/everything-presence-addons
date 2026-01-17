@@ -1,6 +1,6 @@
 {
   "id": "everything_presence_pro",
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "label": "Everything Presence Pro",
   "model": "Everything Presence Pro",
   "manufacturer": "EverythingSmartTechnology",
@@ -9,20 +9,20 @@
     "tracking": true,
     "zones": true,
     "exclusionZones": true,
-    "entryZones": false,
-    "polygonZones": false,
+    "entryZones": true,
+    "polygonZones": true,
     "distanceOnlyTracking": false,
     "sensors": {
       "mmwavePresence": true,
-      "pir": false,
-      "light": false,
-      "temperature": false
+      "pir": true,
+      "light": true,
+      "temperature": true
     }
   },
   "limits": {
     "maxZones": 4,
     "maxExclusionZones": 2,
-    "maxEntryZones": 0,
+    "maxEntryZones": 2,
     "maxTargets": 3,
     "maxRangeMeters": 6,
     "fieldOfViewDegrees": 120
@@ -94,7 +94,13 @@
       "group": "Tracking",
       "label": "Update Speed",
       "controlType": "select",
-      "options": ["Faster (0.1s)", "Fast (0.2s)", "Normal (0.3s)", "Slow (0.4s)", "Slower (0.5s)"],
+      "options": [
+        "Faster (0.1s)",
+        "Fast (0.2s)",
+        "Normal (0.3s)",
+        "Slow (0.4s)",
+        "Slower (0.5s)"
+      ],
       "required": false
     },
     "trackingBehaviour": {
@@ -103,7 +109,14 @@
       "group": "Tracking",
       "label": "Tracking Behaviour",
       "controlType": "select",
-      "options": ["None", "Targets Position", "Above + Zone count", "Above + Targets active", "Above + Distance and Angle", "Above + Speed and Resolution"],
+      "options": [
+        "None",
+        "Targets Position",
+        "Above + Zone count",
+        "Above + Targets active",
+        "Above + Distance and Angle",
+        "Above + Speed and Resolution"
+      ],
       "required": false
     },
     "staleTargetReset": {
@@ -124,6 +137,14 @@
       "max": 60,
       "step": 1,
       "unit": "s",
+      "required": false
+    },
+    "polygonZonesEnabled": {
+      "template": "switch.${name}_polygon_zones",
+      "category": "setting",
+      "group": "Zones",
+      "label": "Polygon Zones",
+      "controlType": "switch",
       "required": false
     },
     "zone1OffDelay": {
@@ -370,6 +391,126 @@
       "coord": "endY",
       "required": false
     },
+    "entry1BeginX": {
+      "template": "number.${name}_entry_zone_1_start_x",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 1,
+      "coord": "beginX",
+      "required": false
+    },
+    "entry1EndX": {
+      "template": "number.${name}_entry_zone_1_end_x",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 1,
+      "coord": "endX",
+      "required": false
+    },
+    "entry1BeginY": {
+      "template": "number.${name}_entry_zone_1_start_y",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 1,
+      "coord": "beginY",
+      "required": false
+    },
+    "entry1EndY": {
+      "template": "number.${name}_entry_zone_1_end_y",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 1,
+      "coord": "endY",
+      "required": false
+    },
+    "entry2BeginX": {
+      "template": "number.${name}_entry_zone_2_start_x",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 2,
+      "coord": "beginX",
+      "required": false
+    },
+    "entry2EndX": {
+      "template": "number.${name}_entry_zone_2_end_x",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 2,
+      "coord": "endX",
+      "required": false
+    },
+    "entry2BeginY": {
+      "template": "number.${name}_entry_zone_2_start_y",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 2,
+      "coord": "beginY",
+      "required": false
+    },
+    "entry2EndY": {
+      "template": "number.${name}_entry_zone_2_end_y",
+      "category": "zone",
+      "zoneType": "entry",
+      "zoneIndex": 2,
+      "coord": "endY",
+      "required": false
+    },
+    "polygonZone1": {
+      "template": "text.${name}_polygon_zone_1",
+      "category": "zone",
+      "zoneType": "polygon",
+      "zoneIndex": 1,
+      "required": false
+    },
+    "polygonZone2": {
+      "template": "text.${name}_polygon_zone_2",
+      "category": "zone",
+      "zoneType": "polygon",
+      "zoneIndex": 2,
+      "required": false
+    },
+    "polygonZone3": {
+      "template": "text.${name}_polygon_zone_3",
+      "category": "zone",
+      "zoneType": "polygon",
+      "zoneIndex": 3,
+      "required": false
+    },
+    "polygonZone4": {
+      "template": "text.${name}_polygon_zone_4",
+      "category": "zone",
+      "zoneType": "polygon",
+      "zoneIndex": 4,
+      "required": false
+    },
+    "polygonExclusion1": {
+      "template": "text.${name}_polygon_exclusion_1",
+      "category": "zone",
+      "zoneType": "polygonExclusion",
+      "zoneIndex": 1,
+      "required": false
+    },
+    "polygonExclusion2": {
+      "template": "text.${name}_polygon_exclusion_2",
+      "category": "zone",
+      "zoneType": "polygonExclusion",
+      "zoneIndex": 2,
+      "required": false
+    },
+    "polygonEntry1": {
+      "template": "text.${name}_polygon_entry_1",
+      "category": "zone",
+      "zoneType": "polygonEntry",
+      "zoneIndex": 1,
+      "required": false
+    },
+    "polygonEntry2": {
+      "template": "text.${name}_polygon_entry_2",
+      "category": "zone",
+      "zoneType": "polygonEntry",
+      "zoneIndex": 2,
+      "required": false
+    },
     "target1X": {
       "template": "sensor.${name}_target_1_x",
       "category": "tracking",
@@ -587,10 +728,21 @@
     "trackingTargetCountEntity": "sensor.${name}_zone_1_target_count",
     "maxDistanceEntity": "number.${name}_tracking_detection_range",
     "installationAngleEntity": "number.${name}_tracking_sensor_angle",
-    "polygonZonesEnabledEntity": null,
-    "polygonZoneEntities": null,
-    "polygonExclusionEntities": null,
-    "polygonEntryEntities": null,
+    "polygonZonesEnabledEntity": "switch.${name}_polygon_zones",
+    "polygonZoneEntities": {
+      "zone1": "text.${name}_polygon_zone_1",
+      "zone2": "text.${name}_polygon_zone_2",
+      "zone3": "text.${name}_polygon_zone_3",
+      "zone4": "text.${name}_polygon_zone_4"
+    },
+    "polygonExclusionEntities": {
+      "exclusion1": "text.${name}_polygon_exclusion_1",
+      "exclusion2": "text.${name}_polygon_exclusion_2"
+    },
+    "polygonEntryEntities": {
+      "entry1": "text.${name}_polygon_entry_1",
+      "entry2": "text.${name}_polygon_entry_2"
+    },
     "zoneConfigEntities": {
       "zone1": {
         "beginX": "number.${name}_zone_1_start_x",
