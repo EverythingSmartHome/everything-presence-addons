@@ -419,29 +419,28 @@ export function createLiveRouter(
         liveState.config = config;
       }
 
-      // Fetch assumed presence status for EPL (tracking devices with entry/exit feature)
-      if (capabilities?.tracking) {
-        try {
-          const assumedPresentEntityId = `binary_sensor.${deviceName}_assumed_present`;
-          const assumedPresentState = await readTransport.getState(assumedPresentEntityId);
-          if (assumedPresentState && !isUnavailableState(assumedPresentState.state)) {
-            liveState.assumedPresent = assumedPresentState.state === 'on';
+      // Fetch assumed presence status for EPL (tracking devices with entry/exit feature) - use profile templates
+      const entities = profile.entities as Record<string, { template?: string }> | undefined;
+      if (capabilities?.tracking && entities) {
+        // Use device profile templates for assumed_present entities
+        const assumedPresentTemplate = entities.assumedPresent?.template;
+        const assumedPresentRemainingTemplate = entities.assumedPresentRemaining?.template;
+
+        if (assumedPresentTemplate) {
+          const state = await getEntityState('assumedPresent', assumedPresentTemplate);
+          if (state && !isUnavailableState(state.state)) {
+            liveState.assumedPresent = state.state === 'on';
           }
-        } catch (err) {
-          // Entity might not exist
         }
 
-        try {
-          const assumedPresentRemainingEntityId = `sensor.${deviceName}_assumed_present_remaining`;
-          const assumedPresentRemainingState = await readTransport.getState(assumedPresentRemainingEntityId);
-          if (assumedPresentRemainingState && !isUnavailableState(assumedPresentRemainingState.state)) {
-            const value = parseFloat(assumedPresentRemainingState.state);
+        if (assumedPresentRemainingTemplate) {
+          const state = await getEntityState('assumedPresentRemaining', assumedPresentRemainingTemplate);
+          if (state && !isUnavailableState(state.state)) {
+            const value = parseFloat(state.state);
             if (!isNaN(value)) {
               liveState.assumedPresentRemaining = value;
             }
           }
-        } catch (err) {
-          // Entity might not exist
         }
       }
 

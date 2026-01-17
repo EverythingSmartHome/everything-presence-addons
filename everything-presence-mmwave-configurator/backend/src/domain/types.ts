@@ -182,6 +182,10 @@ export interface EntityMappings {
     target3?: TargetEntitySet;
   };
 
+  // Entry/Exit feature entities (EPL)
+  assumedPresentEntity?: string;
+  assumedPresentRemainingEntity?: string;
+
   // Settings entities (device configuration controls)
   settingsEntities?: Record<string, string>;
 

@@ -138,6 +138,20 @@
       "unit": "s",
       "required": false
     },
+    "assumedPresent": {
+      "template": "binary_sensor.${name}_assumed_present",
+      "category": "sensor",
+      "subcategory": "entryExit",
+      "label": "Assumed Present",
+      "required": false
+    },
+    "assumedPresentRemaining": {
+      "template": "sensor.${name}_assumed_present_remaining",
+      "category": "sensor",
+      "subcategory": "entryExit",
+      "label": "Assumed Present Remaining",
+      "required": false
+    },
     "staleTargetReset": {
       "template": "switch.${name}_stale_target_reset",
       "category": "setting",

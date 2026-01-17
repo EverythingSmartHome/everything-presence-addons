@@ -13,7 +13,6 @@ import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
 import { fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
-import { getEffectiveEntityPrefix } from '../utils/entityUtils';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 
@@ -213,12 +212,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     const mappingEntity = selectedRoom.entityMappings?.installationAngleEntity;
     if (mappingEntity) return mappingEntity;
 
-    // Last resort: hardcoded pattern (EPL only)
-    const devicePrefix = selectedRoom.entityNamePrefix ?? selectedDevice?.entityNamePrefix;
-    const prefix = getEffectiveEntityPrefix(selectedRoom.entityMappings, devicePrefix);
-    if (!prefix) return null;
-    return `number.${prefix}_installation_angle`;
-  }, [selectedRoom, selectedDevice, getEntityId]);
+    // No mapping found - return null (user should run entity discovery)
+    return null;
+  }, [selectedRoom, getEntityId]);
 
   const handleRotationSuggestion = useCallback(
     (rotationDeg: number) => {
