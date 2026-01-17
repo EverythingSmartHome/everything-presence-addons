@@ -75,6 +75,12 @@ interface HistoryPoint {
   targetIndex: number;
 }
 
+interface TargetEntityInfo {
+  targetIndex: number;
+  xEntity: string | null;
+  yEntity: string | null;
+}
+
 interface HaHistoryState {
   entity_id: string;
   state: string;
@@ -115,13 +121,13 @@ export class HeatmapService {
     const clampedResolution = Math.max(100, Math.min(1000, resolution)); // 100mm to 1000mm cells
 
     // Build entity list for targets 1-3 using device mappings first, then EntityResolver fallback
-    const entities = this.getTrackingEntities(entityNamePrefix, entityMappings, deviceId);
+    const { entities, targetInfo } = this.getTrackingEntities(entityNamePrefix, entityMappings, deviceId);
 
     // Fetch history from HA
     const history = await this.fetchHistory(entities, clampedHours);
 
-    // Correlate X/Y pairs by timestamp
-    const points = this.correlateCoordinates(history);
+    // Correlate X/Y pairs by timestamp using resolved entity mappings
+    const points = this.correlateCoordinates(history, targetInfo);
 
     if (points.length === 0) {
       return this.emptyResponse(clampedResolution, clampedHours);
@@ -166,9 +172,11 @@ export class HeatmapService {
   /**
    * Get entity IDs for target tracking (x,y coordinates for targets 1-3).
    * Uses device mappings first, then EntityResolver for legacy fallback.
+   * Returns both the entity list and target info for correlation.
    */
-  private getTrackingEntities(entityNamePrefix: string, entityMappings?: EntityMappings, deviceId?: string): string[] {
+  private getTrackingEntities(entityNamePrefix: string, entityMappings?: EntityMappings, deviceId?: string): { entities: string[]; targetInfo: TargetEntityInfo[] } {
     const entities: string[] = [];
+    const targetInfo: TargetEntityInfo[] = [];
     const hasDeviceMapping = deviceId ? deviceMappingStorage.hasMapping(deviceId) : false;
 
     for (let i = 1; i <= 3; i++) {
@@ -194,8 +202,13 @@ export class HeatmapService {
 
       if (xEntity) entities.push(xEntity);
       if (yEntity) entities.push(yEntity);
+
+      // Track the mapping for correlation
+      if (xEntity || yEntity) {
+        targetInfo.push({ targetIndex: i, xEntity, yEntity });
+      }
     }
-    return entities;
+    return { entities, targetInfo };
   }
 
   /**
@@ -234,13 +247,19 @@ export class HeatmapService {
   /**
    * Correlate X/Y coordinates by timestamp.
    * X and Y are stored as separate entities, so we match by timestamp within 1s tolerance.
+   * Uses resolved entity mappings to find x/y history arrays.
    */
-  private correlateCoordinates(history: HaHistoryState[][]): HistoryPoint[] {
+  private correlateCoordinates(history: HaHistoryState[][], targetInfo: TargetEntityInfo[]): HistoryPoint[] {
     const points: HistoryPoint[] = [];
 
-    for (let targetIdx = 1; targetIdx <= 3; targetIdx++) {
-      const xHistory = history.find(h => h[0]?.entity_id?.includes(`target_${targetIdx}_x`));
-      const yHistory = history.find(h => h[0]?.entity_id?.includes(`target_${targetIdx}_y`));
+    for (const target of targetInfo) {
+      // Find history arrays by exact entity ID match
+      const xHistory = target.xEntity
+        ? history.find(h => h[0]?.entity_id === target.xEntity)
+        : undefined;
+      const yHistory = target.yEntity
+        ? history.find(h => h[0]?.entity_id === target.yEntity)
+        : undefined;
 
       if (!xHistory || !yHistory) continue;
 
@@ -278,7 +297,7 @@ export class HeatmapService {
             x: xVal,
             y: yVal,
             timestamp: new Date(xState.last_changed),
-            targetIndex: targetIdx,
+            targetIndex: target.targetIndex,
           });
         }
       }

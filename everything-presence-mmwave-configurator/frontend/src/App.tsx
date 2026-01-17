@@ -182,205 +182,239 @@ function App() {
                   return Number.isFinite(value) ? value : null;
                 };
 
-                // Map entity_id to state field
-                // Check for zone occupancy first (more specific pattern)
-                if (message.entityId.match(/zone_(\d+)_occupancy/)) {
-                  const match = message.entityId.match(/zone_(\d+)_occupancy/);
-                  if (match) {
-                    const zoneNum = parseInt(match[1], 10);
-                    if (!updated.zoneOccupancy) {
-                      updated.zoneOccupancy = {};
-                    }
-                    const key = `zone${zoneNum}` as 'zone1' | 'zone2' | 'zone3' | 'zone4';
-                    updated.zoneOccupancy[key] = message.state === 'on';
+                // Helper to check if entity matches a mapping or falls back to pattern
+                const mappings = selectedRoom.entityMappings;
+                const matchesEntity = (mappedEntity: string | undefined, ...fallbackPatterns: string[]): boolean => {
+                  if (mappedEntity) {
+                    return message.entityId === mappedEntity;
                   }
-                } else if (message.entityId.includes('occupancy')) {
-                  // Main presence occupancy (not zone-specific)
+                  // Only use fallback patterns for legacy rooms without mappings
+                  if (!mappings) {
+                    return fallbackPatterns.some(pattern => message.entityId.includes(pattern));
+                  }
+                  return false;
+                };
+
+                // Helper to check zone occupancy entities from mappings
+                const checkZoneOccupancy = (): { matched: boolean; zoneNum?: number } => {
+                  // Check mapped zone occupancy entities first
+                  if (mappings?.trackingTargets) {
+                    // Zone occupancy entities aren't in trackingTargets, check settingsEntities or dedicated zone mappings
+                  }
+                  // For now, check each zone individually - these would be in a zoneOccupancyEntities mapping
+                  // Fall back to pattern matching for legacy rooms
+                  if (!mappings) {
+                    const match = message.entityId.match(/zone_(\d+)_(occupancy|presence)/);
+                    if (match) {
+                      return { matched: true, zoneNum: parseInt(match[1], 10) };
+                    }
+                  }
+                  return { matched: false };
+                };
+
+                // Helper to check target tracking entities from mappings
+                const checkTargetEntity = (): { matched: boolean; targetId?: number; field?: string } => {
+                  if (mappings?.trackingTargets) {
+                    const targets = mappings.trackingTargets;
+                    for (const [key, targetSet] of Object.entries(targets)) {
+                      if (!targetSet) continue;
+                      const targetNum = parseInt(key.replace('target', ''), 10);
+                      if (targetSet.x && message.entityId === targetSet.x) return { matched: true, targetId: targetNum, field: 'x' };
+                      if (targetSet.y && message.entityId === targetSet.y) return { matched: true, targetId: targetNum, field: 'y' };
+                      if (targetSet.speed && message.entityId === targetSet.speed) return { matched: true, targetId: targetNum, field: 'speed' };
+                      if (targetSet.distance && message.entityId === targetSet.distance) return { matched: true, targetId: targetNum, field: 'distance' };
+                      if (targetSet.angle && message.entityId === targetSet.angle) return { matched: true, targetId: targetNum, field: 'angle' };
+                      if (targetSet.resolution && message.entityId === targetSet.resolution) return { matched: true, targetId: targetNum, field: 'resolution' };
+                      if (targetSet.active && message.entityId === targetSet.active) return { matched: true, targetId: targetNum, field: 'active' };
+                    }
+                  }
+                  // Fallback to pattern matching for legacy rooms
+                  if (!mappings) {
+                    const match = message.entityId.match(/target_(\d+)_(x|y|distance|speed|angle|resolution|active)/);
+                    if (match) {
+                      return { matched: true, targetId: parseInt(match[1], 10), field: match[2] };
+                    }
+                  }
+                  return { matched: false };
+                };
+
+                // Map entity_id to state field using entity mappings
+                const zoneCheck = checkZoneOccupancy();
+                if (zoneCheck.matched && zoneCheck.zoneNum) {
+                  if (!updated.zoneOccupancy) {
+                    updated.zoneOccupancy = {};
+                  }
+                  const key = `zone${zoneCheck.zoneNum}` as 'zone1' | 'zone2' | 'zone3' | 'zone4';
+                  updated.zoneOccupancy[key] = message.state === 'on';
+                } else if (matchesEntity(mappings?.presenceEntity, 'occupancy')) {
                   setAvailability('presence');
                   if (!isUnavailable) {
                     updated.presence = message.state === 'on';
                   }
-                } else if (message.entityId.includes('target_distance') || message.entityId.includes('mmwave_target_distance')) {
+                } else if (matchesEntity(mappings?.distanceEntity, 'target_distance', 'mmwave_target_distance')) {
                   setAvailability('distance');
                   updated.distance = parseNumberValue();
-                } else if (message.entityId.includes('target_speed') || message.entityId.includes('mmwave_target_speed')) {
+                } else if (matchesEntity(mappings?.speedEntity, 'target_speed', 'mmwave_target_speed')) {
                   setAvailability('speed');
                   updated.speed = parseNumberValue();
-                } else if (message.entityId.includes('target_energy') || message.entityId.includes('mmwave_target_energy')) {
+                } else if (matchesEntity(mappings?.energyEntity, 'target_energy', 'mmwave_target_energy')) {
                   setAvailability('energy');
                   updated.energy = parseIntValue();
-                } else if (message.entityId.includes('target_count')) {
+                } else if (matchesEntity(mappings?.targetCountEntity, 'target_count')) {
                   setAvailability('targetCount');
                   updated.targetCount = parseIntValue() ?? 0;
-                } else if (message.entityId.includes('_mmwave') && !message.entityId.includes('_target') && !message.entityId.includes('_mode') && !message.entityId.includes('_distance') && !message.entityId.includes('_sensitivity') && !message.entityId.includes('_latency') && !message.entityId.includes('_threshold')) {
-                  setAvailability('mmwave');
-                  if (!isUnavailable) {
-                    updated.mmwave = message.state === 'on';
+                } else if (matchesEntity(mappings?.mmwaveEntity, '_mmwave')) {
+                  // mmWave binary sensor - only match if it's actually the mmwave sensor entity
+                  if (!mappings?.mmwaveEntity || message.entityId === mappings.mmwaveEntity) {
+                    setAvailability('mmwave');
+                    if (!isUnavailable) {
+                      updated.mmwave = message.state === 'on';
+                    }
                   }
-                } else if (message.entityId.includes('_pir')) {
+                } else if (matchesEntity(mappings?.pirEntity, '_pir')) {
                   setAvailability('pir');
                   if (!isUnavailable) {
                     updated.pir = message.state === 'on';
                   }
-                } else if (message.entityId.includes('_temperature')) {
+                } else if (matchesEntity(mappings?.temperatureEntity, '_temperature')) {
                   setAvailability('temperature');
                   updated.temperature = parseNumberValue();
-                } else if (message.entityId.includes('_humidity')) {
+                } else if (matchesEntity(mappings?.humidityEntity, '_humidity')) {
                   setAvailability('humidity');
                   updated.humidity = parseNumberValue();
-                } else if (message.entityId.includes('_illuminance')) {
+                } else if (matchesEntity(mappings?.illuminanceEntity, '_illuminance')) {
                   setAvailability('illuminance');
                   updated.illuminance = parseNumberValue();
-                } else if (message.entityId.endsWith('_co2')) {
+                } else if (matchesEntity(mappings?.co2Entity, '_co2')) {
                   setAvailability('co2');
                   updated.co2 = parseNumberValue();
                 }
 
-                // Handle EP1 config entities
-                else if (message.entityId.includes('mmwave_mode')) {
+                // Handle config entities
+                else if (matchesEntity(mappings?.modeEntity, 'mmwave_mode')) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('mode');
                   if (!isUnavailable) {
-                    updated.config.mode = message.state as any;
+                    updated.config!.mode = message.state as any;
                   }
-                } else if (message.entityId.includes('distance_min')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('distanceMin');
-                  updated.config.distanceMin = parseNumberValue();
-                } else if (message.entityId.includes('max_distance')) {
+                } else if (matchesEntity(mappings?.maxDistanceEntity, 'max_distance', 'tracking_detection_range')) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('distanceMax');
-                  updated.config.distanceMax = parseNumberValue();
-                } else if (message.entityId.includes('trigger_distance')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('triggerDistance');
-                  updated.config.triggerDistance = parseNumberValue();
-                }
-                // Handle EPL max distance entity (number.${name}_distance)
-                else if (message.entityId.match(/number\.\w+_distance$/) && !message.entityId.includes('target') && !message.entityId.includes('trigger')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('distanceMax');
-                  updated.config.distanceMax = parseNumberValue();
-                } else if (message.entityId.includes('sustain_sensitivity')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('sensitivity');
-                  updated.config.sensitivity = parseIntValue();
-                } else if (message.entityId.includes('trigger_sensitivity')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('triggerSensitivity');
-                  updated.config.triggerSensitivity = parseIntValue();
-                } else if (message.entityId.includes('off_latency')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('offLatency');
-                  updated.config.offLatency = parseIntValue();
-                } else if (message.entityId.includes('on_latency')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('onLatency');
-                  updated.config.onLatency = parseIntValue();
-                } else if (message.entityId.includes('threshold_factor')) {
-                  if (!updated.config) updated.config = {} as any;
-                  setAvailability('thresholdFactor');
-                  updated.config.thresholdFactor = parseIntValue();
-                } else if (
-                  // Check against the mapped entity ID first (from room entityMappings)
-                  (selectedRoom.entityMappings?.installationAngleEntity && message.entityId === selectedRoom.entityMappings.installationAngleEntity) ||
-                  // Fallback to pattern matching for legacy rooms without explicit mapping
-                  (!selectedRoom.entityMappings?.installationAngleEntity && (message.entityId.includes('installation_angle') || message.entityId.includes('tracking_sensor_angle')))
-                ) {
+                  updated.config!.distanceMax = parseNumberValue();
+                } else if (matchesEntity(mappings?.installationAngleEntity, 'installation_angle', 'tracking_sensor_angle')) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('installationAngle');
-                  updated.config.installationAngle = parseNumberValue();
-                } else if (message.entityId.includes('micro_motion')) {
+                  updated.config!.installationAngle = parseNumberValue() ?? undefined;
+                }
+                // Settings entities that may not have dedicated mappings yet - use settingsEntities
+                else if (matchesEntity(mappings?.settingsEntities?.mmwaveDistanceMin, 'distance_min', 'mmwave_minimum_distance')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('distanceMin');
+                  updated.config!.distanceMin = parseNumberValue();
+                } else if (matchesEntity(mappings?.settingsEntities?.mmwaveTriggerDistance, 'trigger_distance')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('triggerDistance');
+                  updated.config!.triggerDistance = parseNumberValue();
+                } else if (matchesEntity(mappings?.settingsEntities?.mmwaveSensitivity, 'sustain_sensitivity')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('sensitivity');
+                  updated.config!.sensitivity = parseIntValue();
+                } else if (matchesEntity(mappings?.settingsEntities?.mmwaveTriggerSensitivity, 'trigger_sensitivity')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('triggerSensitivity');
+                  updated.config!.triggerSensitivity = parseIntValue();
+                } else if (matchesEntity(mappings?.settingsEntities?.mmwaveOffLatency, 'off_latency')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('offLatency');
+                  updated.config!.offLatency = parseIntValue();
+                } else if (matchesEntity(mappings?.settingsEntities?.mmwaveOnLatency, 'on_latency')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('onLatency');
+                  updated.config!.onLatency = parseIntValue();
+                } else if (matchesEntity(mappings?.settingsEntities?.mmwaveThresholdFactor, 'threshold_factor')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('thresholdFactor');
+                  updated.config!.thresholdFactor = parseIntValue();
+                } else if (matchesEntity(mappings?.settingsEntities?.microMotion, 'micro_motion')) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('microMotion');
                   if (!isUnavailable) {
-                    updated.config.microMotionEnabled = message.state === 'on';
+                    updated.config!.microMotionEnabled = message.state === 'on';
                   }
-                } else if (message.entityId.includes('update_rate')) {
+                } else if (matchesEntity(mappings?.settingsEntities?.updateRate, 'update_rate')) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('updateRate');
                   if (!isUnavailable) {
-                    updated.config.updateRate = message.state || null;
+                    updated.config!.updateRate = message.state || null;
                   }
                 }
 
-                // Handle EPL target tracking entities
-                else if (message.entityId.match(/target_(\d+)_(x|y|distance|speed|angle|resolution)/)) {
-                  // Parse target position entities (e.g., sensor.ep1_target_1_x)
-                  const match = message.entityId.match(/target_(\d+)_(x|y|distance|speed|angle|resolution)/);
-                  if (match) {
-                    const targetId = parseInt(match[1], 10);
-                    const field = match[2] as 'x' | 'y' | 'distance' | 'speed' | 'angle' | 'resolution';
+                // Handle target tracking entities using mappings
+                else {
+                  const targetCheck = checkTargetEntity();
+                  if (targetCheck.matched && targetCheck.targetId && targetCheck.field) {
+                    const { targetId, field } = targetCheck;
 
-                    // Initialize targets array if needed
-                    if (!updated.targets) {
-                      updated.targets = [];
-                    }
-
-                    // Find or create target
-                    let target = updated.targets.find(t => t.id === targetId);
-                    if (!target) {
-                      target = { id: targetId, x: null, y: null };
-                      updated.targets.push(target);
-                    }
-
-                    // Update field with unit conversion for coordinates/distances
-                    let value = parseFloat(message.state);
-                    if (!isNaN(value)) {
-                      // Convert imperial units to mm if needed (for x, y, distance fields)
-                      if ((field === 'x' || field === 'y' || field === 'distance') && message.attributes?.unit_of_measurement) {
-                        const unit = message.attributes.unit_of_measurement as string;
-                        const unitLower = unit.toLowerCase();
-                        // Convert inches to mm (1 inch = 25.4 mm)
-                        if (unitLower === 'in' || unitLower === 'inch' || unitLower === 'inches' || unitLower === '"') {
-                          value = value * 25.4;
-                        }
-                        // Convert feet to mm (1 foot = 304.8 mm)
-                        else if (unitLower === 'ft' || unitLower === 'foot' || unitLower === 'feet' || unitLower === "'") {
-                          value = value * 304.8;
-                        }
-                        // Convert cm to mm
-                        else if (unitLower === 'cm') {
-                          value = value * 10;
-                        }
-                        // Convert m to mm
-                        else if (unitLower === 'm') {
-                          value = value * 1000;
-                        }
+                    if (field === 'active') {
+                      if (!updated.targets) {
+                        updated.targets = [];
                       }
-                      target[field] = value;
+                      let target = updated.targets.find(t => t.id === targetId);
+                      if (!target) {
+                        target = { id: targetId, x: null, y: null };
+                        updated.targets.push(target);
+                      }
+                      target.active = message.state === 'on';
                     } else {
-                      target[field] = null;
+                      // Initialize targets array if needed
+                      if (!updated.targets) {
+                        updated.targets = [];
+                      }
+
+                      // Find or create target
+                      let target = updated.targets.find(t => t.id === targetId);
+                      if (!target) {
+                        target = { id: targetId, x: null, y: null };
+                        updated.targets.push(target);
+                      }
+
+                      // Update field with unit conversion for coordinates/distances
+                      let value = parseFloat(message.state);
+                      if (!isNaN(value)) {
+                        // Convert imperial units to mm if needed (for x, y, distance fields)
+                        if ((field === 'x' || field === 'y' || field === 'distance') && message.attributes?.unit_of_measurement) {
+                          const unit = message.attributes.unit_of_measurement as string;
+                          const unitLower = unit.toLowerCase();
+                          // Convert inches to mm (1 inch = 25.4 mm)
+                          if (unitLower === 'in' || unitLower === 'inch' || unitLower === 'inches' || unitLower === '"') {
+                            value = value * 25.4;
+                          }
+                          // Convert feet to mm (1 foot = 304.8 mm)
+                          else if (unitLower === 'ft' || unitLower === 'foot' || unitLower === 'feet' || unitLower === "'") {
+                            value = value * 304.8;
+                          }
+                          // Convert cm to mm
+                          else if (unitLower === 'cm') {
+                            value = value * 10;
+                          }
+                          // Convert m to mm
+                          else if (unitLower === 'm') {
+                            value = value * 1000;
+                          }
+                        }
+                        (target as any)[field] = value;
+                      } else {
+                        (target as any)[field] = null;
+                      }
                     }
                   }
-                }
-
-                // Handle EPL target active status (binary_sensor.${name}_target_${i}_active)
-                else if (message.entityId.match(/target_(\d+)_active/)) {
-                  const match = message.entityId.match(/target_(\d+)_active/);
-                  if (match) {
-                    const targetId = parseInt(match[1], 10);
-
-                    if (!updated.targets) {
-                      updated.targets = [];
-                    }
-
-                    let target = updated.targets.find(t => t.id === targetId);
-                    if (!target) {
-                      target = { id: targetId, x: null, y: null };
-                      updated.targets.push(target);
-                    }
-
-                    target.active = message.state === 'on';
+                  // Handle assumed presence status (entry/exit feature)
+                  else if (matchesEntity(mappings?.assumedPresentRemainingEntity, 'assumed_present_remaining')) {
+                    const value = parseFloat(message.state);
+                    updated.assumedPresentRemaining = !isNaN(value) ? value : undefined;
+                  } else if (matchesEntity(mappings?.assumedPresentEntity, 'assumed_present')) {
+                    updated.assumedPresent = message.state === 'on';
                   }
-                }
-
-                // Handle assumed presence status (entry/exit feature)
-                else if (message.entityId.includes('assumed_present_remaining')) {
-                  const value = parseFloat(message.state);
-                  updated.assumedPresentRemaining = !isNaN(value) ? value : undefined;
-                } else if (message.entityId.includes('assumed_present')) {
-                  updated.assumedPresent = message.state === 'on';
                 }
 
                 return updated;

@@ -172,15 +172,22 @@ export function createLiveWebSocketServer(
             });
           }
 
-          // Zone target counts (EP Lite) - use EntityResolver for these
+          // Zone target counts and occupancy - use device profile templates (supports EPL and EPP)
           const capabilities = profile.capabilities as any;
-          if (capabilities?.zones) {
+          const entities = profile.entities as Record<string, { template?: string }> | undefined;
+          if (capabilities?.zones && entities) {
             for (let i = 1; i <= 4; i++) {
-              // Try to resolve from mappings first, fall back to template
-              const zoneTargetCountKey = `zoneTargetCount${i}Entity`;
-              const zoneOccupancyKey = `zoneOccupancy${i}Entity`;
-              addEntity(zoneTargetCountKey, `sensor.\${name}_zone_${i}_target_count`);
-              addEntity(zoneOccupancyKey, `binary_sensor.\${name}_zone_${i}_occupancy`);
+              // Use device profile templates for correct entity patterns per device type
+              const zoneTargetCountKey = `zone${i}TargetCount`;
+              const zoneOccupancyKey = `zone${i}Occupancy`;
+              const targetCountTemplate = entities[zoneTargetCountKey]?.template;
+              const occupancyTemplate = entities[zoneOccupancyKey]?.template;
+              if (targetCountTemplate) {
+                addEntity(zoneTargetCountKey, targetCountTemplate);
+              }
+              if (occupancyTemplate) {
+                addEntity(zoneOccupancyKey, occupancyTemplate);
+              }
             }
           }
 
@@ -212,9 +219,13 @@ export function createLiveWebSocketServer(
             }
           }
 
-          // Subscribe to assumed presence entities (entry/exit feature)
-          addEntity('assumedPresentEntity', `binary_sensor.\${name}_assumed_present`);
-          addEntity('assumedPresentRemainingEntity', `sensor.\${name}_assumed_present_remaining`);
+          // Subscribe to assumed presence entities (entry/exit feature) - use profile templates
+          if (entities?.assumedPresent?.template) {
+            addEntity('assumedPresent', entities.assumedPresent.template);
+          }
+          if (entities?.assumedPresentRemaining?.template) {
+            addEntity('assumedPresentRemaining', entities.assumedPresentRemaining.template);
+          }
 
           // Store subscription
           const subscriptionId = `${deviceId}-${Date.now()}`;

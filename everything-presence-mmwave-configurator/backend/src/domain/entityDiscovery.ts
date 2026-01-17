@@ -828,7 +828,7 @@ export class EntityDiscoveryService {
       'humidityEntity', 'illuminanceEntity', 'co2Entity', 'distanceEntity',
       'speedEntity', 'energyEntity', 'targetCountEntity', 'modeEntity',
       'maxDistanceEntity', 'installationAngleEntity', 'polygonZonesEnabledEntity',
-      'trackingTargetCountEntity',
+      'trackingTargetCountEntity', 'assumedPresentEntity', 'assumedPresentRemainingEntity',
     ];
 
     for (const key of flatKeys) {
@@ -1040,6 +1040,10 @@ export class EntityDiscoveryService {
     if (em.installationAngleEntity) mappings['installationAngle'] = em.installationAngleEntity;
     if (em.polygonZonesEnabledEntity) mappings['polygonZonesEnabled'] = em.polygonZonesEnabledEntity;
     if (em.trackingTargetCountEntity) mappings['trackingTargetCount'] = em.trackingTargetCountEntity;
+
+    // Entry/Exit feature entities
+    if (em.assumedPresentEntity) mappings['assumedPresent'] = em.assumedPresentEntity;
+    if (em.assumedPresentRemainingEntity) mappings['assumedPresentRemaining'] = em.assumedPresentRemainingEntity;
 
     // Zone config entities (rectangular)
     this.flattenZoneEntitiesToFlat(mappings, em.zoneConfigEntities, 'zone');

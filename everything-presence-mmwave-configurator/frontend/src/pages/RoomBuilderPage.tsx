@@ -9,7 +9,6 @@ import { FurnitureEditor } from '../components/FurnitureEditor';
 import { DoorEditor } from '../components/DoorEditor';
 import { FLOOR_MATERIALS } from '../components/FloorMaterials';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
-import { getEffectiveEntityPrefix } from '../utils/entityUtils';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
@@ -147,12 +146,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const mappingEntity = selectedRoom.entityMappings?.installationAngleEntity;
     if (mappingEntity) return mappingEntity;
 
-    // Last resort: hardcoded pattern (EPL only)
-    const devicePrefix = selectedRoom.entityNamePrefix ?? selectedDevice?.entityNamePrefix;
-    const prefix = getEffectiveEntityPrefix(selectedRoom.entityMappings, devicePrefix);
-    if (!prefix) return null;
-    return `number.${prefix}_installation_angle`;
-  }, [selectedRoom, selectedDevice, getEntityId]);
+    // No mapping found - return null (user should run entity discovery)
+    return null;
+  }, [selectedRoom, getEntityId]);
 
   const handleRotationSuggestion = useCallback(
     (rotationDeg: number) => {
