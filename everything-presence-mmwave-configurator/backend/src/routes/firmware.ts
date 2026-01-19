@@ -212,7 +212,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         return res.status(404).json({ error: 'Firmware cache entry not found' });
       }
 
-      const updateService = deviceEntityService.getService(deviceId, 'setUpdateManifest');
+      const updateService = await firmwareService.resolveService(deviceId, 'setUpdateManifest');
       if (!updateService) {
         return res.status(409).json({
           error: 'Firmware update service not mapped. Run entity discovery to sync device entities.',

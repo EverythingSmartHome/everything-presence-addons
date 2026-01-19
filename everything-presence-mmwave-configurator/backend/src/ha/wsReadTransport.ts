@@ -9,6 +9,7 @@ import {
   DeviceRegistryEntry,
   AreaRegistryEntry,
   StateChangeCallback,
+  HaTarget,
 } from './readTransport';
 
 interface PendingRequest {
@@ -226,6 +227,21 @@ export class WsReadTransport implements IHaReadTransport {
     }
 
     logger.warn({ response }, 'WsReadTransport: Unexpected response when listing areas');
+    return [];
+  }
+
+  async getServicesForTarget(target: HaTarget, expandGroup: boolean = true): Promise<string[]> {
+    const response = (await this.call({
+      type: 'get_services_for_target',
+      target,
+      expand_group: expandGroup,
+    })) as HaWsMessage & { result?: string[] };
+
+    if (response.type === 'result' && (response as any).success) {
+      return (response as any).result ?? [];
+    }
+
+    logger.warn({ response }, 'WsReadTransport: Unexpected response when listing services for target');
     return [];
   }
 

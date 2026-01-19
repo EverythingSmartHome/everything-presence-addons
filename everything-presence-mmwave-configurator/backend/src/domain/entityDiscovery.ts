@@ -1,5 +1,6 @@
 import type { IHaReadTransport } from '../ha/readTransport';
 import type { EntityRegistryEntry } from '../ha/types';
+import type { DeviceRegistryEntry } from '../ha/readTransport';
 import type { DeviceProfileLoader } from './deviceProfiles';
 import type { EntityMappings, ZoneEntitySet, TargetEntitySet } from './types';
 import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../config/deviceMappingStorage';
@@ -903,6 +904,15 @@ export class EntityDiscoveryService {
     // Convert suggestedMappings (nested EntityMappings) to flat format
     const flatMappings = normalizeMappingKeys(this.convertToFlatMappings(discovery.suggestedMappings));
 
+    const entityOriginalObjectIds = this.mapOriginalObjectIds(
+      flatMappings,
+      discovery.deviceEntities
+    );
+    const entityUniqueIds = this.mapUniqueIds(
+      flatMappings,
+      discovery.deviceEntities
+    );
+
     // Fetch unit_of_measurement for tracking entities (x/y coordinates)
     const entityUnits = await this.fetchEntityUnits(flatMappings);
 
@@ -910,6 +920,7 @@ export class EntityDiscoveryService {
     let rawSwVersion: string | undefined;
     let firmwareVersion: string | undefined;
     let esphomeVersion: string | undefined;
+    let esphomeNodeName: string | undefined;
     try {
       const devices = await this.readTransport.listDevices();
       const device = devices.find(d => d.id === deviceId);
@@ -920,6 +931,9 @@ export class EntityDiscoveryService {
         esphomeVersion = parsed.esphomeVersion;
       logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Parsed firmware version');
       }
+      if (device) {
+        esphomeNodeName = this.extractEsphomeNodeName(device);
+      }
     } catch (err) {
       logger.warn({ err, deviceId }, 'Failed to fetch device firmware version, continuing without it');
     }
@@ -929,6 +943,7 @@ export class EntityDiscoveryService {
       deviceId,
       profileId,
       deviceName,
+      esphomeNodeName,
       discoveredAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
       confirmedByUser: false, // Not yet confirmed by user
@@ -938,6 +953,8 @@ export class EntityDiscoveryService {
       unmappedEntities: discovery.results
         .filter(r => r.matchedEntityId === null && !r.isOptional)
         .map(r => r.templateKey),
+      entityOriginalObjectIds: Object.keys(entityOriginalObjectIds).length > 0 ? entityOriginalObjectIds : undefined,
+      entityUniqueIds: Object.keys(entityUniqueIds).length > 0 ? entityUniqueIds : undefined,
       entityUnits,
       firmwareVersion,
       esphomeVersion,
@@ -1008,6 +1025,62 @@ export class EntityDiscoveryService {
     }
 
     return entityUnits;
+  }
+
+  private mapOriginalObjectIds(
+    flatMappings: Record<string, string>,
+    deviceEntities: EntityRegistryEntry[]
+  ): Record<string, string> {
+    const originalObjectIds: Record<string, string> = {};
+    const registryById = new Map(deviceEntities.map((entity) => [entity.entity_id, entity]));
+
+    for (const entityId of Object.values(flatMappings)) {
+      if (!entityId) continue;
+      const entry = registryById.get(entityId);
+      const originalObjectId = entry?.original_object_id;
+      if (originalObjectId) {
+        originalObjectIds[entityId] = originalObjectId;
+      }
+    }
+
+    return originalObjectIds;
+  }
+
+  private mapUniqueIds(
+    flatMappings: Record<string, string>,
+    deviceEntities: EntityRegistryEntry[]
+  ): Record<string, string> {
+    const uniqueIds: Record<string, string> = {};
+    const registryById = new Map(deviceEntities.map((entity) => [entity.entity_id, entity]));
+
+    for (const entityId of Object.values(flatMappings)) {
+      if (!entityId) continue;
+      const entry = registryById.get(entityId);
+      const uniqueId = entry?.unique_id;
+      if (uniqueId) {
+        uniqueIds[entityId] = uniqueId;
+      }
+    }
+
+    return uniqueIds;
+  }
+
+  private extractEsphomeNodeName(device: DeviceRegistryEntry): string | undefined {
+    for (const [domain, identifier] of device.identifiers ?? []) {
+      if (typeof domain === 'string' && typeof identifier === 'string' && domain.toLowerCase() === 'esphome') {
+        return identifier;
+      }
+    }
+    return this.slugifyDeviceName(device.name);
+  }
+
+  private slugifyDeviceName(name: string | null | undefined): string | undefined {
+    if (!name) return undefined;
+    const slug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return slug || undefined;
   }
 
   /**

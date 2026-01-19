@@ -29,4 +29,7 @@ export interface EntityRegistryEntry {
   device_id: string | null;
   disabled_by: 'user' | 'integration' | 'config_entry' | null;
   hidden_by: string | null;
+  original_object_id?: string | null;
+  original_name?: string | null;
+  unique_id?: string | null;
 }

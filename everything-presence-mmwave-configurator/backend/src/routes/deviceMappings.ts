@@ -3,7 +3,8 @@ import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../co
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { migrationService } from '../domain/migrationService';
 import { logger } from '../logger';
-import type { IHaReadTransport } from '../ha/readTransport';
+import type { IHaReadTransport, DeviceRegistryEntry } from '../ha/readTransport';
+import type { EntityRegistryEntry } from '../ha/types';
 import { normalizeMappingKeys } from '../domain/mappingUtils';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
 
@@ -87,22 +88,31 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
 
       // Fetch entity units if readTransport is available and mappings are provided
       let entityUnits: Record<string, string> = mappingData.entityUnits ?? existing?.entityUnits ?? {};
+      let entityOriginalObjectIds: Record<string, string> =
+        mappingData.entityOriginalObjectIds ?? existing?.entityOriginalObjectIds ?? {};
+      let entityUniqueIds: Record<string, string> =
+        mappingData.entityUniqueIds ?? existing?.entityUniqueIds ?? {};
 
       // If we have new mappings and readTransport is available, fetch/refresh units
       // Always refetch during resync to capture any newly added keys
       if (mappingData.mappings && readTransport) {
         const freshUnits = await fetchEntityUnits(normalizedMappings, readTransport);
+        const freshOriginals = await fetchEntityOriginalObjectIds(normalizedMappings, readTransport);
+        const freshUniqueIds = await fetchEntityUniqueIds(normalizedMappings, readTransport);
         // Merge fresh units with existing, preferring fresh values
         entityUnits = { ...entityUnits, ...freshUnits };
+        entityOriginalObjectIds = { ...entityOriginalObjectIds, ...freshOriginals };
+        entityUniqueIds = { ...entityUniqueIds, ...freshUniqueIds };
       }
 
       // Fetch firmware version if not provided and not already stored
       let firmwareVersion = mappingData.firmwareVersion ?? existing?.firmwareVersion;
       let esphomeVersion = mappingData.esphomeVersion ?? existing?.esphomeVersion;
       let rawSwVersion = mappingData.rawSwVersion ?? existing?.rawSwVersion;
+      let esphomeNodeName = mappingData.esphomeNodeName ?? existing?.esphomeNodeName;
 
       // If we don't have firmware info yet and readTransport is available, fetch it
-      if (!firmwareVersion && !rawSwVersion && readTransport) {
+      if ((!firmwareVersion && !rawSwVersion && readTransport) || (!esphomeNodeName && readTransport)) {
         try {
           const devices = await readTransport.listDevices();
           const device = devices.find(d => d.id === deviceId);
@@ -112,6 +122,9 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
             firmwareVersion = parsed.firmwareVersion;
             esphomeVersion = parsed.esphomeVersion;
             logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Fetched firmware version during PUT');
+          }
+          if (device && !esphomeNodeName) {
+            esphomeNodeName = extractEsphomeNodeName(device);
           }
         } catch (err) {
           logger.warn({ err, deviceId }, 'Failed to fetch device firmware version during PUT, continuing without it');
@@ -133,6 +146,7 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         deviceId,
         profileId: mappingData.profileId ?? existing?.profileId ?? 'unknown',
         deviceName: mappingData.deviceName ?? existing?.deviceName ?? 'Unknown Device',
+        esphomeNodeName,
         discoveredAt: existing?.discoveredAt ?? new Date().toISOString(),
         lastUpdated: new Date().toISOString(),
         confirmedByUser: mappingData.confirmedByUser ?? existing?.confirmedByUser ?? true,
@@ -140,6 +154,8 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         manuallyMappedCount: mappingData.manuallyMappedCount ?? existing?.manuallyMappedCount ?? 0,
         mappings: normalizedMappings,
         unmappedEntities: mappingData.unmappedEntities ?? existing?.unmappedEntities ?? [],
+        entityOriginalObjectIds,
+        entityUniqueIds,
         entityUnits,
         firmwareVersion,
         esphomeVersion,
@@ -495,4 +511,90 @@ async function fetchEntityUnits(
   }
 
   return entityUnits;
+}
+
+async function fetchEntityOriginalObjectIds(
+  flatMappings: Record<string, string>,
+  readTransport: IHaReadTransport
+): Promise<Record<string, string>> {
+  const originalObjectIds: Record<string, string> = {};
+
+  const entityIds = Array.from(new Set(Object.values(flatMappings).filter(Boolean)));
+  if (entityIds.length === 0) {
+    return originalObjectIds;
+  }
+
+  try {
+    const registry = await readTransport.listEntityRegistry();
+    const registryById = new Map(registry.map((entry: EntityRegistryEntry) => [entry.entity_id, entry]));
+
+    for (const entityId of entityIds) {
+      const entry = registryById.get(entityId);
+      const originalObjectId = entry?.original_object_id;
+      if (originalObjectId) {
+        originalObjectIds[entityId] = originalObjectId;
+      }
+    }
+
+    logger.info(
+      { count: Object.keys(originalObjectIds).length, total: entityIds.length },
+      'Fetched entity original object ids'
+    );
+  } catch (err) {
+    logger.warn({ err }, 'Failed to fetch entity original object ids - proceeding without metadata');
+  }
+
+  return originalObjectIds;
+}
+
+async function fetchEntityUniqueIds(
+  flatMappings: Record<string, string>,
+  readTransport: IHaReadTransport
+): Promise<Record<string, string>> {
+  const uniqueIds: Record<string, string> = {};
+
+  const entityIds = Array.from(new Set(Object.values(flatMappings).filter(Boolean)));
+  if (entityIds.length === 0) {
+    return uniqueIds;
+  }
+
+  try {
+    const registry = await readTransport.listEntityRegistry();
+    const registryById = new Map(registry.map((entry: EntityRegistryEntry) => [entry.entity_id, entry]));
+
+    for (const entityId of entityIds) {
+      const entry = registryById.get(entityId);
+      const uniqueId = entry?.unique_id;
+      if (uniqueId) {
+        uniqueIds[entityId] = uniqueId;
+      }
+    }
+
+    logger.info(
+      { count: Object.keys(uniqueIds).length, total: entityIds.length },
+      'Fetched entity unique ids'
+    );
+  } catch (err) {
+    logger.warn({ err }, 'Failed to fetch entity unique ids - proceeding without metadata');
+  }
+
+  return uniqueIds;
+}
+
+function extractEsphomeNodeName(device: DeviceRegistryEntry): string | undefined {
+  for (const [domain, identifier] of device.identifiers ?? []) {
+    if (typeof domain === 'string' && typeof identifier === 'string' && domain.toLowerCase() === 'esphome') {
+      return identifier;
+    }
+  }
+  return slugifyDeviceName(device.name);
+}
+
+function slugifyDeviceName(name: string | null | undefined): string | undefined {
+  if (!name) return undefined;
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return slug || undefined;
 }

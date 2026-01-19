@@ -8,6 +8,7 @@ import {
   DeviceRegistryEntry,
   AreaRegistryEntry,
   StateChangeCallback,
+  HaTarget,
 } from './readTransport';
 
 interface Subscription {
@@ -261,6 +262,11 @@ export class RestReadTransport implements IHaReadTransport {
       logger.error({ err }, 'RestReadTransport: Failed to list area registry');
       return [];
     }
+  }
+
+  async getServicesForTarget(_target: HaTarget, _expandGroup: boolean = true): Promise<string[]> {
+    logger.debug('RestReadTransport: getServicesForTarget not supported, returning empty list');
+    return [];
   }
 
   /**
