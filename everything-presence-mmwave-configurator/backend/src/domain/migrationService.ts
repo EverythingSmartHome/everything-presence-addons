@@ -67,6 +67,7 @@ class MigrationServiceImpl {
     if (em.installationAngleEntity) mappings['installationAngle'] = em.installationAngleEntity;
     if (em.polygonZonesEnabledEntity) mappings['polygonZonesEnabled'] = em.polygonZonesEnabledEntity;
     if (em.trackingTargetCountEntity) mappings['trackingTargetCount'] = em.trackingTargetCountEntity;
+    if (em.firmwareUpdateEntity) mappings['firmwareUpdate'] = em.firmwareUpdateEntity;
 
     // Zone config entities (rectangular)
     this.flattenZoneEntities(mappings, em.zoneConfigEntities, 'zone');

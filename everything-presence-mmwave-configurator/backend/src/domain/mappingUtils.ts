@@ -27,6 +27,7 @@ export const canonicalKeyPairs: Array<[string, string]> = [
   ['mmwaveThresholdFactor', 'thresholdFactorEntity'],
   ['microMotion', 'microMotionEntity'],
   ['updateRate', 'updateRateEntity'],
+  ['firmwareUpdate', 'firmwareUpdateEntity'],
   ['installationAngle', 'installationAngleEntity'],
   ['polygonZonesEnabled', 'polygonZonesEnabledEntity'],
 ];

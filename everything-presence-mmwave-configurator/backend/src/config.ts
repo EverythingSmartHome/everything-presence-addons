@@ -12,14 +12,26 @@ export interface HaConfig {
   supervisorApiUrl?: string;
 }
 
+export interface FirmwareConfig {
+  lanPort: number;
+  lanIpOverride?: string;
+  cacheDir: string;
+  maxVersionsPerDevice: number;
+}
+
 export interface AppConfig {
   port: number;
   ha: HaConfig;
   frontendDist: string | null;
+  firmware: FirmwareConfig;
 }
 
 const DEFAULT_PORT = 3000;
+const DEFAULT_FIRMWARE_LAN_PORT = 38080;
+const DEFAULT_MAX_VERSIONS_PER_DEVICE = 3;
 const DEFAULT_FRONTEND_DIST = path.resolve(__dirname, '../../frontend/dist');
+const DEFAULT_DATA_DIR = '/config/everything-presence-zone-configurator';
+const DEFAULT_FIRMWARE_CACHE_DIR = path.join(process.env.DATA_DIR ?? DEFAULT_DATA_DIR, 'fw_cache');
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 
@@ -76,6 +88,15 @@ const detectHaConfig = (): HaConfig => {
   );
 };
 
+const loadFirmwareConfig = (): FirmwareConfig => {
+  return {
+    lanPort: parsePort(process.env.FIRMWARE_LAN_PORT) || DEFAULT_FIRMWARE_LAN_PORT,
+    lanIpOverride: process.env.FIRMWARE_LAN_IP || undefined,
+    cacheDir: process.env.FIRMWARE_CACHE_DIR ?? DEFAULT_FIRMWARE_CACHE_DIR,
+    maxVersionsPerDevice: Number(process.env.FIRMWARE_MAX_VERSIONS) || DEFAULT_MAX_VERSIONS_PER_DEVICE,
+  };
+};
+
 export const loadConfig = (): AppConfig => {
   const ha = detectHaConfig();
 
@@ -85,6 +106,7 @@ export const loadConfig = (): AppConfig => {
     frontendDist: process.env.FRONTEND_DIST
       ? path.resolve(process.env.FRONTEND_DIST)
       : DEFAULT_FRONTEND_DIST,
+    firmware: loadFirmwareConfig(),
   };
 };
 

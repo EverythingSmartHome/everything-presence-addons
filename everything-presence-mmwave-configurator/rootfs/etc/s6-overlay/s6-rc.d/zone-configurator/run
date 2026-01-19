@@ -5,7 +5,14 @@ set -euo pipefail
 cd /app
 export NODE_ENV="${NODE_ENV:-production}"
 export PORT="${PORT:-3000}"
+FIRMWARE_LAN_PORT_CONFIG="$(bashio::config 'firmware_lan_port')"
+if [ -n "${FIRMWARE_LAN_PORT_CONFIG}" ] && [ "${FIRMWARE_LAN_PORT_CONFIG}" != "null" ]; then
+  export FIRMWARE_LAN_PORT="${FIRMWARE_LAN_PORT_CONFIG}"
+else
+  export FIRMWARE_LAN_PORT="${FIRMWARE_LAN_PORT:-38080}"
+fi
 
 bashio::log.info "Starting Zone Configurator backend on port ${PORT}"
+bashio::log.info "LAN Firmware Server will start on port ${FIRMWARE_LAN_PORT}"
 
 exec node backend/dist/index.js

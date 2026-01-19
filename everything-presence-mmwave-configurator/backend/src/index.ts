@@ -7,6 +7,7 @@ import { HaWriteClient } from './ha/writeClient';
 import { createReadTransport, TransportFactoryResult } from './ha/transportFactory';
 import { DeviceProfileLoader } from './domain/deviceProfiles';
 import { createLiveWebSocketServer } from './routes/liveWs';
+import { createLanFirmwareServer } from './lanFirmwareServer';
 
 const start = async () => {
   try {
@@ -81,11 +82,15 @@ const start = async () => {
     // 6. Attach WebSocket server for live tracking (frontend connections)
     createLiveWebSocketServer(httpServer, readTransport, profileLoader);
 
-    // 7. Start listening
+    // 7. Start LAN Firmware Server (separate port for device firmware downloads)
+    createLanFirmwareServer(config.firmware.lanPort);
+
+    // 8. Start main server listening
     httpServer.listen(config.port, () => {
       logger.info(
         {
           port: config.port,
+          firmwareLanPort: config.firmware.lanPort,
           ha: redactedHaConfig(config.ha),
           readTransport: activeTransport,
           writeTransport: 'rest',

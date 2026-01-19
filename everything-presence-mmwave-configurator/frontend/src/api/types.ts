@@ -17,6 +17,11 @@ export interface DeviceProfileLimits {
   fieldOfViewDegrees?: number;
 }
 
+export interface ServiceDefinition {
+  domain: string;
+  template: string;
+}
+
 /**
  * Entity category for classification and dynamic loading.
  */
@@ -66,6 +71,8 @@ export interface DeviceProfile {
   limits: DeviceProfileLimits;
   /** New categorized entity definitions */
   entities?: Record<string, EntityDefinition>;
+  /** Service definitions for device actions */
+  services?: Record<string, ServiceDefinition>;
   /** Legacy entity map (for backward compatibility) */
   entityMap: Record<string, unknown>;
   iconUrl?: string;
@@ -195,6 +202,7 @@ export interface EntityMappings {
   installationAngleEntity?: string;
   polygonZonesEnabledEntity?: string;
   trackingTargetCountEntity?: string;
+  firmwareUpdateEntity?: string;
 
   zoneConfigEntities?: {
     zone1?: ZoneEntitySet;
@@ -454,4 +462,195 @@ export interface HeatmapResponse {
   zoneStats?: HeatmapZoneStat[];
   hourlyBreakdown?: HourlyBreakdown[];
   averagePosition?: AveragePosition;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Firmware Update Types
+// ─────────────────────────────────────────────────────────────────
+
+export interface FirmwareSettings {
+  lanIpOverride?: string;
+  firmwareBaseUrl?: string;
+  firmwareIndexUrls?: string[];
+  cacheKeepCount?: number;
+}
+
+export interface FirmwareSettingsResponse {
+  settings: FirmwareSettings;
+  autoDetectedIp: string;
+  lanPort: number;
+  firmwareServerUrl: string;
+  defaultIndexUrls?: Record<string, string>;
+}
+
+export interface CachedFirmwareEntry {
+  deviceId: string;
+  token: string;
+  version: string;
+  originalManifestUrl: string;
+  cachedAt: number;
+  binaryCount: number;
+}
+
+export interface PreparedFirmwareResponse {
+  success: boolean;
+  deviceId: string;
+  token: string;
+  version: string;
+  localManifestUrl: string;
+  releaseSummary?: string;
+  releaseUrl?: string;
+}
+
+export interface FirmwareUpdateResponse {
+  success: boolean;
+  deviceId: string;
+  localManifestUrl: string;
+  version: string;
+}
+
+export interface FirmwareUpdateEntityStatus {
+  entityId: string;
+  name: string | null;
+  state: string;
+  attributes: Record<string, unknown>;
+  lastChanged: string;
+  lastUpdated: string;
+}
+
+export interface FirmwareUpdateStatusResponse extends FirmwareUpdateEntityStatus {}
+
+export type FirmwareUpdateStatus =
+  | 'idle'
+  | 'preparing'
+  | 'downloading'
+  | 'ready'
+  | 'updating'
+  | 'complete'
+  | 'error'
+  | 'checking';
+
+// ─────────────────────────────────────────────────────────────────
+// Auto-Update System Types
+// ─────────────────────────────────────────────────────────────────
+
+export type DeviceModel =
+  | 'everything-presence-one'
+  | 'everything-presence-lite'
+  | 'everything-presence-pro';
+
+export type FirmwareChannel = 'stable' | 'beta' | 'smartthings';
+
+/** How the device configuration was determined */
+export type ConfigSource = 'entities' | 'inferred';
+
+export interface DeviceConfig {
+  model: DeviceModel;
+  ethernet_enabled: boolean;
+  co2_enabled: boolean;
+  bluetooth_enabled: boolean;
+  board_revision: string;
+  sensor_variant: string;
+  firmware_channel: FirmwareChannel;
+  /** How the config was determined - 'entities' means read from device, 'inferred' means guessed */
+  configSource: ConfigSource;
+}
+
+export interface FirmwareRequirements {
+  model: string;
+  ethernet_enabled: boolean;
+  co2_enabled: boolean;
+  bluetooth_enabled: boolean;
+  board_revision: string;
+  sensor_variant: string;
+  firmware_channel: string;
+}
+
+export interface FirmwareVariant {
+  id: string;
+  manifestUrl: string;
+  requirements: FirmwareRequirements;
+}
+
+export interface FirmwareRelease {
+  version: string;
+  channel: 'stable' | 'beta';
+  releaseDate: string;
+  releaseNotes: string;
+  minPreviousVersion?: string;
+  variants: FirmwareVariant[];
+}
+
+export interface FirmwareMigration {
+  id: string;
+  fromVersion: string;
+  toVersion: string;
+  description: string;
+  backupRequired: boolean;
+  handler: string;
+}
+
+export interface FirmwareProduct {
+  id: string;
+  displayName: string;
+  latestVersion: string;
+}
+
+export interface FirmwareIndex {
+  schemaVersion: string;
+  generatedAt: string;
+  product: FirmwareProduct;
+  firmwares: FirmwareRelease[];
+  migrations: FirmwareMigration[];
+}
+
+export interface ValidationIssue {
+  field: string;
+  deviceValue: unknown;
+  firmwareValue: unknown;
+  message: string;
+  severity: 'hard_block' | 'warning';
+}
+
+export interface FirmwareValidation {
+  valid: boolean;
+  hardBlocks: ValidationIssue[];
+  warnings: ValidationIssue[];
+}
+
+export interface AvailableUpdate {
+  currentVersion: string;
+  newVersion: string;
+  channel: string;
+  releaseNotes: string;
+  variant: FirmwareVariant;
+  migration?: FirmwareMigration;
+}
+
+export interface FirmwareIndexResponse {
+  indexes: FirmwareIndex[];
+  count: number;
+  fetchedAt: string;
+}
+
+export interface DeviceConfigResponse {
+  config: DeviceConfig;
+}
+
+export interface AvailableUpdatesResponse {
+  updates: AvailableUpdate[];
+  hasUpdates: boolean;
+}
+
+export interface FirmwareValidationResponse {
+  validation: FirmwareValidation;
+}
+
+export interface AutoPrepareResponse {
+  success: boolean;
+  deviceConfig: DeviceConfig;
+  matchingVariant: FirmwareVariant;
+  validation: FirmwareValidation;
+  prepared: PreparedFirmwareResponse;
+  newVersion: string;
 }

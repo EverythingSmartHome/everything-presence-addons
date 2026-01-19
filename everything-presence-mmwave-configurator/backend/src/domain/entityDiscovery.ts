@@ -828,7 +828,7 @@ export class EntityDiscoveryService {
       'humidityEntity', 'illuminanceEntity', 'co2Entity', 'distanceEntity',
       'speedEntity', 'energyEntity', 'targetCountEntity', 'modeEntity',
       'maxDistanceEntity', 'installationAngleEntity', 'polygonZonesEnabledEntity',
-      'trackingTargetCountEntity', 'assumedPresentEntity', 'assumedPresentRemainingEntity',
+      'trackingTargetCountEntity', 'firmwareUpdateEntity', 'assumedPresentEntity', 'assumedPresentRemainingEntity',
     ];
 
     for (const key of flatKeys) {
@@ -1040,6 +1040,7 @@ export class EntityDiscoveryService {
     if (em.installationAngleEntity) mappings['installationAngle'] = em.installationAngleEntity;
     if (em.polygonZonesEnabledEntity) mappings['polygonZonesEnabled'] = em.polygonZonesEnabledEntity;
     if (em.trackingTargetCountEntity) mappings['trackingTargetCount'] = em.trackingTargetCountEntity;
+    if (em.firmwareUpdateEntity) mappings['firmwareUpdate'] = em.firmwareUpdateEntity;
 
     // Entry/Exit feature entities
     if (em.assumedPresentEntity) mappings['assumedPresent'] = em.assumedPresentEntity;
