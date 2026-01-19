@@ -14,6 +14,7 @@ import { createLiveRouter } from './routes/live';
 import { createCustomAssetsRouter } from './routes/customAssets';
 import { createHeatmapRouter } from './routes/heatmap';
 import { createDeviceMappingsRouter } from './routes/deviceMappings';
+import { createFirmwareRouter } from './routes/firmware';
 import type { IHaReadTransport } from './ha/readTransport';
 import type { IHaWriteClient } from './ha/writeClient';
 import type { DeviceProfileLoader } from './domain/deviceProfiles';
@@ -78,6 +79,13 @@ export const createServer = (config: AppConfig, deps?: ServerDependencies): expr
       profileLoader: deps.profileLoader,
     }));
     app.use('/api/live', createLiveRouter(deps.readTransport, deps.writeClient, deps.profileLoader));
+
+    // Firmware update routes
+    app.use('/api/firmware', createFirmwareRouter({
+      config: config.firmware,
+      writeClient: deps.writeClient,
+      readTransport: deps.readTransport,
+    }));
   }
 
   app.use('/api/health', (_req, res) => {

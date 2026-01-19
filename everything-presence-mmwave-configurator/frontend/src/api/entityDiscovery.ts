@@ -202,7 +202,7 @@ export const groupMatchResultsByCategory = (
       groups['Polygon Zones'].push(result);
     } else if (key.includes('trackingTargets')) {
       groups['Tracking Targets'].push(result);
-    } else if (key.includes('max') || key.includes('installation') || key.includes('mode') || key.includes('Enabled')) {
+    } else if (key.includes('max') || key.includes('installation') || key.includes('mode') || key.includes('Enabled') || key.includes('firmwareUpdate')) {
       groups['Configuration'].push(result);
     } else {
       groups['Other'].push(result);
@@ -244,6 +244,7 @@ export const getTemplateKeyLabel = (templateKey: string): string => {
     installationAngleEntity: 'Installation Angle',
     polygonZonesEnabledEntity: 'Polygon Zones Switch',
     trackingTargetCountEntity: 'Tracking Target Count',
+    firmwareUpdateEntity: 'Firmware Update',
     beginX: 'Begin X',
     endX: 'End X',
     beginY: 'Begin Y',

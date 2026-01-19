@@ -8,8 +8,14 @@ import { HaAuthConfig } from './types';
 export interface IHaWriteClient {
   /**
    * Call a Home Assistant service
+   * Returns the response body if the service returns data (e.g., ESPHome api.respond)
    */
-  callService(domain: string, service: string, data: Record<string, unknown>): Promise<void>;
+  callService(
+    domain: string,
+    service: string,
+    data: Record<string, unknown>,
+    options?: { returnResponse?: boolean }
+  ): Promise<unknown>;
 
   /**
    * Set a number entity value
@@ -63,8 +69,14 @@ export class HaWriteClient implements IHaWriteClient {
     return `${this.baseUrl}${normalized}`;
   }
 
-  async callService(domain: string, service: string, data: Record<string, unknown>): Promise<void> {
-    const url = this.buildUrl(`/services/${domain}/${service}`);
+  async callService(
+    domain: string,
+    service: string,
+    data: Record<string, unknown>,
+    options?: { returnResponse?: boolean }
+  ): Promise<unknown> {
+    const query = options?.returnResponse ? '?return_response=true' : '';
+    const url = this.buildUrl(`/services/${domain}/${service}${query}`);
 
     logger.debug({ domain, service, entityId: data.entity_id }, 'Calling HA service');
 
@@ -81,7 +93,22 @@ export class HaWriteClient implements IHaWriteClient {
       throw new Error(error);
     }
 
+    // Always try to parse the response body as JSON
+    // HA service calls can return response data (e.g., ESPHome api.respond)
+    try {
+      const text = await res.text();
+      if (text && text.trim()) {
+        const responseData = JSON.parse(text);
+        logger.debug({ domain, service, responseData }, 'Service call successful with response');
+        return responseData;
+      }
+    } catch {
+      // JSON parse failed, return undefined
+      logger.debug({ domain, service }, 'Service call successful (no parseable response)');
+    }
+
     logger.debug({ domain, service }, 'Service call successful');
+    return undefined;
   }
 
   async setNumberEntity(entityId: string, value: number): Promise<void> {

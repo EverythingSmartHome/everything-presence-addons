@@ -1,5 +1,5 @@
 import { deviceMappingStorage, DeviceMapping } from '../config/deviceMappingStorage';
-import { DeviceProfileLoader, DeviceProfile, EntityDefinition, EntityCategory } from './deviceProfiles';
+import { DeviceProfileLoader, DeviceProfile, EntityDefinition, EntityCategory, ServiceDefinition } from './deviceProfiles';
 import { ZoneEntitySet, TargetEntitySet } from './types';
 import { logger } from '../logger';
 
@@ -31,6 +31,13 @@ export interface SettingEntity {
 export interface SettingsGroup {
   group: string;
   settings: SettingEntity[];
+}
+
+export interface ResolvedService {
+  key: string;
+  domain: string;
+  service: string;
+  definition?: ServiceDefinition;
 }
 
 /**
@@ -65,6 +72,67 @@ class DeviceEntityServiceImpl {
       return mapping.mappings[entityKey];
     }
     return null;
+  }
+
+  /**
+   * Resolve a service name for a device using the profile template.
+   */
+  getService(deviceId: string, serviceKey: string): ResolvedService | null {
+    const mapping = deviceMappingStorage.getMapping(deviceId);
+    if (!mapping) return null;
+
+    const profile = this.getProfile(mapping.profileId);
+    if (!profile?.services?.[serviceKey]) return null;
+
+    const namePrefix = this.getDeviceNamePrefix(deviceId);
+    if (!namePrefix) {
+      logger.warn({ deviceId, serviceKey }, 'Unable to resolve device name prefix for service');
+      return null;
+    }
+
+    const def = profile.services[serviceKey];
+    const service = def.template.replace('${name}', namePrefix);
+    return {
+      key: serviceKey,
+      domain: def.domain,
+      service,
+      definition: def,
+    };
+  }
+
+  /**
+   * Resolve the device name prefix (used in profile templates) from mapped entities.
+   */
+  getDeviceNamePrefix(deviceId: string): string | null {
+    const mapping = deviceMappingStorage.getMapping(deviceId);
+    if (!mapping) return null;
+
+    const profile = this.getProfile(mapping.profileId);
+    if (!profile?.entities) return null;
+
+    const entities = profile.entities as Record<string, EntityDefinition>;
+    const counts = new Map<string, number>();
+
+    for (const [key, entityId] of Object.entries(mapping.mappings)) {
+      const def = entities[key];
+      if (!def?.template) continue;
+      const candidate = this.extractNamePrefix(def.template, entityId);
+      if (!candidate) continue;
+      counts.set(candidate, (counts.get(candidate) ?? 0) + 1);
+    }
+
+    if (counts.size === 0) {
+      return null;
+    }
+
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 1) {
+      logger.warn(
+        { deviceId, candidates: sorted.map(([name, count]) => ({ name, count })) },
+        'Multiple name prefixes detected; using most common'
+      );
+    }
+    return sorted[0][0];
   }
 
   /**
@@ -144,6 +212,28 @@ class DeviceEntityServiceImpl {
     }
 
     return null;
+  }
+
+  /**
+   * Extract the name portion from a template like "sensor.${name}_temperature".
+   */
+  private extractNamePrefix(template: string, entityId: string): string | null {
+    const match = template.match(/^([a-z_]+)\.\$\{name\}(.*)$/);
+    if (!match) return null;
+
+    const domain = match[1];
+    const suffix = match[2] ?? '';
+
+    if (!entityId.startsWith(`${domain}.`)) {
+      return null;
+    }
+
+    const nameAndSuffix = entityId.slice(domain.length + 1);
+    if (!nameAndSuffix.endsWith(suffix)) {
+      return null;
+    }
+
+    return nameAndSuffix.slice(0, nameAndSuffix.length - suffix.length);
   }
 
   /**

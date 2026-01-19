@@ -1,6 +1,6 @@
 {
   "id": "everything_presence_one",
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "label": "Everything Presence One",
   "model": "Everything Presence One",
   "manufacturer": "EverythingSmartTechnology",
@@ -24,6 +24,16 @@
     "maxZones": 0,
     "maxRangeMeters": 25,
     "fieldOfViewDegrees": 120
+  },
+  "services": {
+    "getBuildFlags": {
+      "domain": "esphome",
+      "template": "${name}_get_build_flags"
+    },
+    "setUpdateManifest": {
+      "domain": "esphome",
+      "template": "${name}_set_update_manifest"
+    }
   },
   "entities": {
     "presence": {
@@ -73,6 +83,13 @@
       "category": "sensor",
       "subcategory": "environment",
       "label": "CO2",
+      "required": false
+    },
+    "firmwareUpdate": {
+      "template": "update.${name}_everything_presence_one_firmware",
+      "category": "sensor",
+      "subcategory": "firmware",
+      "label": "Firmware Update",
       "required": false
     },
     "distance": {
@@ -294,6 +311,26 @@
       "group": "Advanced",
       "label": "Update Rate",
       "controlType": "select",
+      "required": false
+    },
+    "firmwareBle": {
+      "template": "select.${name}_bluetooth_proxy",
+      "category": "setting",
+      "group": "Firmware Info",
+      "label": "Bluetooth Proxy",
+      "controlType": "select",
+      "options": ["Disabled", "Enabled"],
+      "description": "Indicates if Bluetooth proxy is enabled in firmware build",
+      "required": false
+    },
+    "firmwareCo2": {
+      "template": "select.${name}_co2_sensor",
+      "category": "setting",
+      "group": "Firmware Info",
+      "label": "CO2 Sensor",
+      "controlType": "select",
+      "options": ["Disabled", "Enabled"],
+      "description": "Indicates if CO2 sensor is enabled in firmware build",
       "required": false
     }
   },

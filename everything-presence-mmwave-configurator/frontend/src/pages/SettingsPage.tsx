@@ -11,6 +11,7 @@ import {
 } from '../api/client';
 import { RoomConfig, CustomFloorMaterial, CustomFurnitureType, EntityMappings } from '../api/types';
 import { EntityDiscovery } from '../components/EntityDiscovery';
+import { FirmwareUpdateSection } from '../components/FirmwareUpdateSection';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 
 interface SettingsPageProps {
@@ -19,7 +20,10 @@ interface SettingsPageProps {
   onRoomUpdated?: (room: RoomConfig) => void;
 }
 
+type SettingsTab = 'general' | 'firmware';
+
 export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDeleted, onRoomUpdated }) => {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [rooms, setRooms] = useState<RoomConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -509,6 +513,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
           <div className="w-20" /> {/* Spacer for alignment */}
         </div>
 
+        {/* Tab Navigation */}
+        <div className="mb-6 flex gap-2 border-b border-slate-700/50 pb-2">
+          <button
+            onClick={() => setActiveTab('general')}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+              activeTab === 'general'
+                ? 'bg-cyan-600 text-white'
+                : 'bg-slate-800/50 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            General
+          </button>
+          <button
+            onClick={() => setActiveTab('firmware')}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+              activeTab === 'firmware'
+                ? 'bg-cyan-600 text-white'
+                : 'bg-slate-800/50 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            Firmware Updates
+          </button>
+        </div>
+
         {/* Error Toast */}
         {error && (
           <div className="mb-6 rounded-xl border border-rose-500/50 bg-rose-500/10 px-6 py-3 text-rose-100">
@@ -532,8 +560,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
             <div className="text-sm text-slate-400">Loading rooms and custom assets…</div>
           </div>
         ) : (
-          <div className="space-y-6">
-            {/* Room Management Section */}
+          <>
+            {/* General Tab */}
+            {activeTab === 'general' && (
+              <div className="space-y-6">
+                {/* Room Management Section */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-white">Room Management</h2>
@@ -696,9 +727,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                 ))}
               </div>
             )}
-          </div>
+              </div>
 
-            {/* Custom Floor Materials Section */}
+                {/* Custom Floor Materials Section */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-white">Custom Floor Materials</h2>
@@ -976,8 +1007,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                 </div>
               )}
             </div>
-        </div>
-      )}
+              </div>
+            )}
+
+            {/* Firmware Tab */}
+            {activeTab === 'firmware' && (
+              <div className="space-y-6">
+                <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
+                  <h2 className="mb-4 text-lg font-semibold text-white">Firmware Updates</h2>
+                  <p className="mb-4 text-sm text-slate-400">
+                    Update your Everything Presence devices with firmware downloaded through this local proxy.
+                    This helps ESP devices that have trouble with HTTPS due to memory constraints.
+                  </p>
+                  <FirmwareUpdateSection
+                    onError={(err) => setError(err)}
+                    onSuccess={(msg) => {
+                      setSuccess(msg);
+                      setTimeout(() => setSuccess(null), 5000);
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Entity Re-sync Modal */}

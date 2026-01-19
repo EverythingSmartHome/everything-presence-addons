@@ -16,18 +16,24 @@ panel_title: Zone Configurator
 watchdog: "http://[HOST]:[PORT:3000]/api/health"
 ports:
   3000/tcp: null
+  38080/tcp: 38080
 ports_description:
   3000/tcp: Optional direct access (ingress preferred)
+  38080/tcp: LAN firmware server for device OTA updates (configurable in add-on settings)
 homeassistant_api: true
 auth_api: true
 hassio_api: true
+host_network: true
 stdin: true
 stdin_open: true
 init: false
 environment:
   PORT: "3000"
+  FIRMWARE_LAN_PORT: "38080"
 map:
   - config:rw
   - share:rw
-options: {}
-schema: {}
+options:
+  firmware_lan_port: 38080
+schema:
+  firmware_lan_port: port

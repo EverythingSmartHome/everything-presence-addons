@@ -131,6 +131,7 @@ export interface EntityMappings {
   thresholdFactorEntity?: string;
   microMotionEntity?: string;
   updateRateEntity?: string;
+  firmwareUpdateEntity?: string;
   installationAngleEntity?: string;
   polygonZonesEnabledEntity?: string;
 

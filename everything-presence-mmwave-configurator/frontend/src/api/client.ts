@@ -1,4 +1,24 @@
-import { DiscoveredDevice, DeviceProfile, ZoneAvailabilityResponse, CustomFloorMaterial, CustomFurnitureType, HeatmapResponse, EntityMappings } from './types';
+import {
+  DiscoveredDevice,
+  DeviceProfile,
+  ZoneAvailabilityResponse,
+  CustomFloorMaterial,
+  CustomFurnitureType,
+  HeatmapResponse,
+  EntityMappings,
+  FirmwareSettingsResponse,
+  FirmwareSettings,
+  PreparedFirmwareResponse,
+  FirmwareUpdateResponse,
+  CachedFirmwareEntry,
+  FirmwareIndexResponse,
+  DeviceConfigResponse,
+  AvailableUpdatesResponse,
+  FirmwareValidationResponse,
+  AutoPrepareResponse,
+  DeviceConfig,
+  FirmwareUpdateEntityStatus,
+} from './types';
 import { AppSettings } from './types';
 
 const handle = async <T>(res: Response): Promise<T> => {
@@ -148,4 +168,147 @@ export const fetchHeatmap = async (
   }
   const res = await fetch(ingressAware(`api/devices/${deviceId}/heatmap?${params}`));
   return handle<HeatmapResponse>(res);
+};
+
+// ==================== FIRMWARE UPDATE ====================
+
+export const fetchFirmwareSettings = async (): Promise<FirmwareSettingsResponse> => {
+  const res = await fetch(ingressAware('api/firmware/settings'));
+  return handle<FirmwareSettingsResponse>(res);
+};
+
+export const updateFirmwareSettings = async (
+  settings: Partial<FirmwareSettings>
+): Promise<FirmwareSettingsResponse> => {
+  const res = await fetch(ingressAware('api/firmware/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  return handle<FirmwareSettingsResponse>(res);
+};
+
+export const prepareFirmware = async (
+  deviceId: string,
+  manifestUrl: string,
+  deviceInfo: { deviceModel: string; firmwareVersion: string }
+): Promise<PreparedFirmwareResponse> => {
+  const res = await fetch(ingressAware('api/firmware/prepare'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      deviceId,
+      manifestUrl,
+      deviceModel: deviceInfo.deviceModel,
+      firmwareVersion: deviceInfo.firmwareVersion,
+    }),
+  });
+  return handle<PreparedFirmwareResponse>(res);
+};
+
+export const triggerFirmwareUpdate = async (
+  deviceId: string,
+  token: string
+): Promise<FirmwareUpdateResponse> => {
+  const res = await fetch(ingressAware(`api/firmware/update/${deviceId}`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  return handle<FirmwareUpdateResponse>(res);
+};
+
+export const fetchFirmwareCache = async (): Promise<{ entries: CachedFirmwareEntry[] }> => {
+  const res = await fetch(ingressAware('api/firmware/cache'));
+  return handle<{ entries: CachedFirmwareEntry[] }>(res);
+};
+
+export const fetchDeviceFirmwareCache = async (
+  deviceId: string
+): Promise<{ deviceId: string; entries: CachedFirmwareEntry[] }> => {
+  const res = await fetch(ingressAware(`api/firmware/cache/${deviceId}`));
+  return handle<{ deviceId: string; entries: CachedFirmwareEntry[] }>(res);
+};
+
+export const deleteFirmwareCacheEntry = async (
+  deviceId: string,
+  token: string
+): Promise<{ success: boolean }> => {
+  const res = await fetch(ingressAware(`api/firmware/cache/${deviceId}/${token}`), {
+    method: 'DELETE',
+  });
+  return handle<{ success: boolean }>(res);
+};
+
+export const fetchFirmwareUpdateStatus = async (
+  deviceId: string
+): Promise<FirmwareUpdateEntityStatus> => {
+  const res = await fetch(ingressAware(`api/firmware/update-status/${deviceId}`));
+  return handle<FirmwareUpdateEntityStatus>(res);
+};
+
+// ==================== AUTO-UPDATE SYSTEM ====================
+
+export const fetchFirmwareIndex = async (): Promise<FirmwareIndexResponse> => {
+  const res = await fetch(ingressAware('api/firmware/index'));
+  return handle<FirmwareIndexResponse>(res);
+};
+
+export const refreshFirmwareIndex = async (): Promise<FirmwareIndexResponse> => {
+  const res = await fetch(ingressAware('api/firmware/index/refresh'), {
+    method: 'POST',
+  });
+  return handle<FirmwareIndexResponse>(res);
+};
+
+export const getDeviceConfig = async (
+  deviceModel: string,
+  firmwareVersion: string,
+  deviceId: string
+): Promise<DeviceConfigResponse> => {
+  const res = await fetch(ingressAware('api/firmware/device-config'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceModel, firmwareVersion, deviceId }),
+  });
+  return handle<DeviceConfigResponse>(res);
+};
+
+export const getAvailableUpdates = async (
+  deviceModel: string,
+  currentVersion: string,
+  deviceId: string
+): Promise<AvailableUpdatesResponse> => {
+  const res = await fetch(ingressAware('api/firmware/available'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceModel, currentVersion, deviceId }),
+  });
+  return handle<AvailableUpdatesResponse>(res);
+};
+
+export const validateFirmware = async (
+  deviceConfig: DeviceConfig,
+  firmwareVariantId: string,
+  productId: string
+): Promise<FirmwareValidationResponse> => {
+  const res = await fetch(ingressAware('api/firmware/validate'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceConfig, firmwareVariantId, productId }),
+  });
+  return handle<FirmwareValidationResponse>(res);
+};
+
+export const autoPrepare = async (
+  deviceModel: string,
+  currentVersion: string,
+  deviceId: string
+): Promise<AutoPrepareResponse> => {
+  const res = await fetch(ingressAware('api/firmware/auto-prepare'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deviceModel, currentVersion, deviceId }),
+  });
+  return handle<AutoPrepareResponse>(res);
 };

@@ -54,12 +54,21 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+      - "38080:38080"
     environment:
       HA_BASE_URL: "http://homeassistant.local:8123"
       HA_LONG_LIVED_TOKEN: "REPLACE_WITH_LONG_LIVED_TOKEN"
+      FIRMWARE_LAN_PORT: "38080"
     volumes:
       - ./config:/config
 ```
+
+### LAN Firmware Port
+
+Firmware updates are served over a local HTTP port for ESP devices. By default this uses port `38080`.
+
+- Home Assistant add-on: configure `firmware_lan_port` in the add-on Configuration tab.
+- Standalone Docker: set `FIRMWARE_LAN_PORT` and map the same host port.
 
 ### Documentation
 

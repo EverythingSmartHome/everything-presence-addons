@@ -5,8 +5,10 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+      - "38080:38080"
     environment:
       HA_BASE_URL: "http://homeassistant.local:8123"
       HA_LONG_LIVED_TOKEN: "REPLACE_WITH_LONG_LIVED_TOKEN"
+      FIRMWARE_LAN_PORT: "38080"
     volumes:
       - ./config:/config

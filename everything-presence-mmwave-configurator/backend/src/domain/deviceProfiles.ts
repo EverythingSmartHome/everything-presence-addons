@@ -26,6 +26,11 @@ export type ZoneType = 'regular' | 'exclusion' | 'entry' | 'polygon' | 'polygonE
  */
 export type ControlType = 'number' | 'switch' | 'select' | 'light' | 'text';
 
+export interface ServiceDefinition {
+  domain: string;
+  template: string;
+}
+
 /**
  * Entity definition in the device profile.
  * Provides full metadata for each entity type.
@@ -87,6 +92,8 @@ export interface DeviceProfile {
   limits: DeviceProfileLimits;
   /** New categorized entity definitions */
   entities?: Record<string, EntityDefinition>;
+  /** Service definitions for device actions */
+  services?: Record<string, ServiceDefinition>;
   /** Legacy entity map (for backward compatibility) */
   entityMap: Record<string, unknown>;
   iconUrl?: string;
