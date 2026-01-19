@@ -101,25 +101,107 @@ class DeviceEntityServiceImpl {
   }
 
   /**
+   * Resolve a service name from a list of available services for a device target.
+   */
+  resolveServiceFromList(
+    deviceId: string,
+    serviceKey: string,
+    availableServices: string[]
+  ): ResolvedService | null {
+    const mapping = deviceMappingStorage.getMapping(deviceId);
+    if (!mapping) return null;
+
+    const profile = this.getProfile(mapping.profileId);
+    const def = profile?.services?.[serviceKey];
+    if (!def) return null;
+
+    const matches: string[] = [];
+    for (const full of availableServices) {
+      const dotIndex = full.indexOf('.');
+      if (dotIndex <= 0) continue;
+      const domain = full.slice(0, dotIndex);
+      const service = full.slice(dotIndex + 1);
+      if (domain !== def.domain) continue;
+      if (!this.serviceMatchesTemplate(def.template, service)) continue;
+      matches.push(service);
+    }
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    matches.sort();
+    if (matches.length > 1) {
+      logger.warn(
+        { deviceId, serviceKey, matches },
+        'Multiple services matched; using first sorted match'
+      );
+    }
+
+    return {
+      key: serviceKey,
+      domain: def.domain,
+      service: matches[0],
+      definition: def,
+    };
+  }
+
+  /**
    * Resolve the device name prefix (used in profile templates) from mapped entities.
    */
   getDeviceNamePrefix(deviceId: string): string | null {
     const mapping = deviceMappingStorage.getMapping(deviceId);
     if (!mapping) return null;
 
+    if (mapping.esphomeNodeName) {
+      return mapping.esphomeNodeName;
+    }
+
     const profile = this.getProfile(mapping.profileId);
     if (!profile?.entities) return null;
 
     const entities = profile.entities as Record<string, EntityDefinition>;
-    const counts = new Map<string, number>();
+    const countsFromOriginal = new Map<string, number>();
+    const countsFromUnique = new Map<string, number>();
+    const countsFromEntityId = new Map<string, number>();
 
     for (const [key, entityId] of Object.entries(mapping.mappings)) {
       const def = entities[key];
       if (!def?.template) continue;
-      const candidate = this.extractNamePrefix(def.template, entityId);
-      if (!candidate) continue;
-      counts.set(candidate, (counts.get(candidate) ?? 0) + 1);
+      const originalObjectId = mapping.entityOriginalObjectIds?.[entityId];
+      if (originalObjectId) {
+        const candidate = this.extractNamePrefixFromObjectId(def.template, originalObjectId);
+        if (candidate) {
+          countsFromOriginal.set(candidate, (countsFromOriginal.get(candidate) ?? 0) + 1);
+          continue;
+        }
+      }
+      const uniqueId = mapping.entityUniqueIds?.[entityId];
+      if (uniqueId) {
+        const candidate = this.extractNamePrefixFromObjectId(def.template, uniqueId);
+        if (candidate) {
+          countsFromUnique.set(candidate, (countsFromUnique.get(candidate) ?? 0) + 1);
+          continue;
+        }
+      }
+      const fallbackCandidate = this.extractNamePrefix(def.template, entityId);
+      if (!fallbackCandidate) continue;
+      countsFromEntityId.set(
+        fallbackCandidate,
+        (countsFromEntityId.get(fallbackCandidate) ?? 0) + 1
+      );
     }
+
+    const counts = countsFromOriginal.size > 0
+      ? countsFromOriginal
+      : countsFromUnique.size > 0
+        ? countsFromUnique
+        : countsFromEntityId;
+    const source = counts === countsFromOriginal
+      ? 'original_object_id'
+      : counts === countsFromUnique
+        ? 'unique_id'
+        : 'entity_id';
 
     if (counts.size === 0) {
       return null;
@@ -128,7 +210,7 @@ class DeviceEntityServiceImpl {
     const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
     if (sorted.length > 1) {
       logger.warn(
-        { deviceId, candidates: sorted.map(([name, count]) => ({ name, count })) },
+        { deviceId, source, candidates: sorted.map(([name, count]) => ({ name, count })) },
         'Multiple name prefixes detected; using most common'
       );
     }
@@ -212,6 +294,35 @@ class DeviceEntityServiceImpl {
     }
 
     return null;
+  }
+
+  private extractNamePrefixFromObjectId(template: string, objectId: string): string | null {
+    const match = template.match(/^[a-z_]+\.\$\{name\}(.*)$/);
+    if (!match) return null;
+    const suffix = match[1] ?? '';
+    if (!objectId.endsWith(suffix)) {
+      return null;
+    }
+    const prefix = objectId.slice(0, objectId.length - suffix.length);
+    return prefix || null;
+  }
+
+  private serviceMatchesTemplate(template: string, service: string): boolean {
+    const parts = template.split('${name}');
+    if (parts.length === 1) {
+      return service === template;
+    }
+    if (parts.length !== 2) {
+      return false;
+    }
+    const [prefix, suffix] = parts;
+    if (!service.startsWith(prefix)) {
+      return false;
+    }
+    if (!service.endsWith(suffix)) {
+      return false;
+    }
+    return service.length >= prefix.length + suffix.length;
   }
 
   /**

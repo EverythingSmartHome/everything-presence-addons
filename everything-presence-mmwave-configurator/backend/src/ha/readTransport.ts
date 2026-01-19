@@ -43,6 +43,16 @@ export interface DeviceRegistryEntry {
 }
 
 /**
+ * Target selector for triggers/conditions/services
+ */
+export interface HaTarget {
+  entity_id?: string[];
+  device_id?: string[];
+  area_id?: string[];
+  label_id?: string[];
+}
+
+/**
  * Callback for state change events
  */
 export type StateChangeCallback = (
@@ -84,6 +94,11 @@ export interface IHaReadTransport {
    * List all areas from the area registry
    */
   listAreaRegistry(): Promise<AreaRegistryEntry[]>;
+
+  /**
+   * List services applicable to a target (WebSocket only in HA).
+   */
+  getServicesForTarget(target: HaTarget, expandGroup?: boolean): Promise<string[]>;
 
   // ─────────────────────────────────────────────────────────────────
   // State Queries

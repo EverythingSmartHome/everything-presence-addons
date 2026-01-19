@@ -14,6 +14,8 @@ export interface DeviceMapping {
   profileId: string;
   /** Human-readable device name */
   deviceName: string;
+  /** ESPHome node name (service prefix), if available */
+  esphomeNodeName?: string;
   /** ISO timestamp when entities were discovered */
   discoveredAt: string;
   /** ISO timestamp when mapping was last updated */
@@ -28,6 +30,10 @@ export interface DeviceMapping {
   mappings: Record<string, string>;
   /** Entity IDs that exist on device but weren't matched to profile */
   unmappedEntities: string[];
+  /** Entity original object ids keyed by entity ID */
+  entityOriginalObjectIds?: Record<string, string>;
+  /** Entity unique ids keyed by entity ID */
+  entityUniqueIds?: Record<string, string>;
   /** Unit of measurement for specific entities (e.g., "target1X" -> "in" or "mm") */
   entityUnits?: Record<string, string>;
   /** Zone labels keyed by zone ID (e.g., "Zone 1" -> "Bed", "Exclusion 2" -> "Window") */

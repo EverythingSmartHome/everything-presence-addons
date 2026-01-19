@@ -3,10 +3,12 @@ import path from 'path';
 import os from 'os';
 import { logger } from '../logger';
 import { firmwareStorage, CachedFirmwareEntry } from '../config/firmwareStorage';
+import { deviceMappingStorage } from '../config/deviceMappingStorage';
 import { FirmwareConfig } from '../config';
 import type { IHaWriteClient } from '../ha/writeClient';
 import type { IHaReadTransport, EntityState } from '../ha/readTransport';
 import { deviceEntityService } from './deviceEntityService';
+import type { ResolvedService } from './deviceEntityService';
 import {
   DeviceConfig,
   FirmwareIndex,
@@ -122,6 +124,135 @@ export class FirmwareService {
     this.config = deps.config;
     this.writeClient = deps.writeClient;
     this.readTransport = deps.readTransport;
+  }
+
+  async resolveService(deviceId: string, serviceKey: string): Promise<ResolvedService | null> {
+    if (!this.readTransport) {
+      return deviceEntityService.getService(deviceId, serviceKey);
+    }
+
+    try {
+      const services = await this.readTransport.getServicesForTarget({ device_id: [deviceId] });
+      if (services.length > 0) {
+        const resolved = deviceEntityService.resolveServiceFromList(deviceId, serviceKey, services);
+        if (resolved) {
+          return resolved;
+        }
+      }
+    } catch (error) {
+      logger.warn(
+        { deviceId, serviceKey, error: error instanceof Error ? error.message : 'Unknown error' },
+        'Failed to resolve service via target services'
+      );
+    }
+
+    await this.ensureDeviceNodeName(deviceId);
+    await this.ensureOriginalObjectIds(deviceId);
+    return deviceEntityService.getService(deviceId, serviceKey);
+  }
+
+  private async ensureDeviceNodeName(deviceId: string): Promise<void> {
+    if (!this.readTransport) return;
+
+    const mapping = deviceEntityService.getMapping(deviceId);
+    if (!mapping || mapping.esphomeNodeName) return;
+
+    try {
+      const devices = await this.readTransport.listDevices();
+      const device = devices.find((entry) => entry.id === deviceId);
+      if (!device) return;
+
+      let esphomeNodeName: string | undefined;
+      for (const [domain, identifier] of device.identifiers ?? []) {
+        if (typeof domain === 'string' && typeof identifier === 'string' && domain.toLowerCase() === 'esphome') {
+          esphomeNodeName = identifier;
+          break;
+        }
+      }
+
+      if (!esphomeNodeName) {
+        esphomeNodeName = this.slugifyDeviceName(device.name);
+      }
+
+      if (!esphomeNodeName) {
+        logger.warn(
+          { deviceId, name: device.name, nameByUser: device.name_by_user, identifiers: device.identifiers },
+          'ESPHome node name not found in device identifiers'
+        );
+        return;
+      }
+
+      mapping.esphomeNodeName = esphomeNodeName;
+      await deviceMappingStorage.saveMapping(mapping);
+      logger.info({ deviceId, esphomeNodeName }, 'Stored ESPHome node name for service resolution');
+    } catch (error) {
+      logger.warn(
+        { deviceId, error: error instanceof Error ? error.message : 'Unknown error' },
+        'Failed to store ESPHome node name'
+      );
+    }
+  }
+
+  private slugifyDeviceName(name: string | null | undefined): string | undefined {
+    if (!name) return undefined;
+    const slug = name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return slug || undefined;
+  }
+
+  private async ensureOriginalObjectIds(deviceId: string): Promise<void> {
+    if (!this.readTransport) return;
+
+    const mapping = deviceEntityService.getMapping(deviceId);
+    if (!mapping) return;
+
+    if (mapping.entityOriginalObjectIds && Object.keys(mapping.entityOriginalObjectIds).length > 0 &&
+      mapping.entityUniqueIds && Object.keys(mapping.entityUniqueIds).length > 0) {
+      return;
+    }
+
+    try {
+      const registry = await this.readTransport.listEntityRegistry();
+      const registryById = new Map(registry.map((entry) => [entry.entity_id, entry]));
+      const originalObjectIds: Record<string, string> = {};
+      const uniqueIds: Record<string, string> = {};
+
+      for (const entityId of Object.values(mapping.mappings)) {
+        if (!entityId) continue;
+        const entry = registryById.get(entityId);
+        const originalObjectId = entry?.original_object_id;
+        if (originalObjectId) {
+          originalObjectIds[entityId] = originalObjectId;
+        }
+        const uniqueId = entry?.unique_id;
+        if (uniqueId) {
+          uniqueIds[entityId] = uniqueId;
+        }
+      }
+
+      if (Object.keys(originalObjectIds).length === 0 && Object.keys(uniqueIds).length === 0) {
+        return;
+      }
+
+      if (Object.keys(originalObjectIds).length > 0) {
+        mapping.entityOriginalObjectIds = originalObjectIds;
+      }
+      if (Object.keys(uniqueIds).length > 0) {
+        mapping.entityUniqueIds = uniqueIds;
+      }
+      await deviceMappingStorage.saveMapping(mapping);
+      logger.info(
+        { deviceId, originalCount: Object.keys(originalObjectIds).length, uniqueCount: Object.keys(uniqueIds).length },
+        'Stored entity registry ids for service resolution'
+      );
+    } catch (error) {
+      logger.warn(
+        { deviceId, error: error instanceof Error ? error.message : 'Unknown error' },
+        'Failed to store entity registry ids'
+      );
+    }
   }
 
   /**
@@ -342,7 +473,7 @@ export class FirmwareService {
       throw new Error('Write client not available');
     }
 
-    const service = deviceEntityService.getService(deviceId, 'setUpdateManifest');
+    const service = await this.resolveService(deviceId, 'setUpdateManifest');
     if (!service) {
       throw new Error('Update manifest service not mapped');
     }
@@ -439,7 +570,7 @@ export class FirmwareService {
       throw new Error('Write client not available');
     }
 
-    const service = deviceEntityService.getService(deviceId, 'getBuildFlags');
+    const service = await this.resolveService(deviceId, 'getBuildFlags');
     const namePrefix = deviceEntityService.getDeviceNamePrefix(deviceId) ?? '';
     logger.info({ deviceId, deviceModel }, 'Getting device config via get_build_flags service');
 
