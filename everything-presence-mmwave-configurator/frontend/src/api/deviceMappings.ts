@@ -261,7 +261,8 @@ export const discoverAndSaveMapping = async (
   deviceName: string
 ): Promise<{ mapping: DeviceMapping; discovery: unknown } | null> => {
   try {
-    const res = await fetch(ingressAware(`api/devices/${deviceId}/discover-and-save`), {
+    const url = ingressAware(`api/devices/${deviceId}/discover-and-save`);
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profileId, deviceName }),

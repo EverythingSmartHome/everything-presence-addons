@@ -18,6 +18,10 @@ import {
   AutoPrepareResponse,
   DeviceConfig,
   FirmwareUpdateEntityStatus,
+  ZoneBackup,
+  FirmwareMigrationPhase,
+  FirmwareMigrationStateResponse,
+  DeviceReadinessResponse,
 } from './types';
 import { AppSettings } from './types';
 
@@ -81,6 +85,72 @@ export const fetchZoneAvailability = async (
   }
   const res = await fetch(ingressAware(`api/devices/${deviceId}/zone-availability?${params}`));
   return handle<ZoneAvailabilityResponse>(res);
+};
+
+// ==================== ZONE BACKUPS ====================
+
+export const fetchZoneBackups = async (
+  deviceId?: string
+): Promise<{ backups: ZoneBackup[] }> => {
+  const query = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : '';
+  const res = await fetch(ingressAware(`api/zone-backups${query}`));
+  return handle<{ backups: ZoneBackup[] }>(res);
+};
+
+export const fetchZoneBackup = async (backupId: string): Promise<{ backup: ZoneBackup }> => {
+  const res = await fetch(ingressAware(`api/zone-backups/${backupId}`));
+  return handle<{ backup: ZoneBackup }>(res);
+};
+
+export const createZoneBackup = async (payload: {
+  deviceId: string;
+  profileId: string;
+  entityNamePrefix?: string;
+  entityMappings?: EntityMappings;
+}): Promise<{ backup: ZoneBackup }> => {
+  const res = await fetch(ingressAware('api/zone-backups'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ backup: ZoneBackup }>(res);
+};
+
+export const restoreZoneBackup = async (
+  backupId: string,
+  payload: {
+    deviceId?: string;
+    profileId?: string;
+    entityNamePrefix?: string;
+    entityMappings?: EntityMappings;
+  }
+): Promise<{ ok: boolean; warnings?: Array<{ entityId?: string; description: string; error: string }> }> => {
+  const res = await fetch(ingressAware(`api/zone-backups/${backupId}/restore`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ ok: boolean; warnings?: Array<{ entityId?: string; description: string; error: string }> }>(res);
+};
+
+export const deleteZoneBackup = async (
+  backupId: string
+): Promise<{ deleted: boolean }> => {
+  const res = await fetch(ingressAware(`api/zone-backups/${backupId}`), {
+    method: 'DELETE',
+  });
+  return handle<{ deleted: boolean }>(res);
+};
+
+export const importZoneBackups = async (
+  payload: unknown
+): Promise<{ backups: ZoneBackup[]; imported: number }> => {
+  const res = await fetch(ingressAware('api/zone-backups/import'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handle<{ backups: ZoneBackup[]; imported: number }>(res);
 };
 
 // ==================== CUSTOM FLOOR MATERIALS ====================
@@ -245,6 +315,61 @@ export const fetchFirmwareUpdateStatus = async (
 ): Promise<FirmwareUpdateEntityStatus> => {
   const res = await fetch(ingressAware(`api/firmware/update-status/${deviceId}`));
   return handle<FirmwareUpdateEntityStatus>(res);
+};
+
+export const fetchFirmwareMigrationState = async (deviceId: string): Promise<FirmwareMigrationStateResponse> => {
+  const res = await fetch(ingressAware(`api/firmware/migration/${deviceId}`));
+  return handle<FirmwareMigrationStateResponse>(res);
+};
+
+export const saveFirmwareMigrationState = async (
+  deviceId: string,
+  payload: {
+    phase: FirmwareMigrationPhase;
+    backupId?: string | null;
+    preparedVersion?: string | null;
+    lastError?: string | null;
+  },
+): Promise<FirmwareMigrationStateResponse> => {
+  const res = await fetch(ingressAware(`api/firmware/migration/${deviceId}`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handle<FirmwareMigrationStateResponse>(res);
+};
+
+export const clearFirmwareMigrationState = async (deviceId: string): Promise<{ ok: boolean }> => {
+  const res = await fetch(ingressAware(`api/firmware/migration/${deviceId}`), {
+    method: 'DELETE',
+  });
+  return handle<{ ok: boolean }>(res);
+};
+
+export const fetchDeviceReadiness = async (
+  deviceId: string,
+  params: {
+    require?: 'discover' | 'polygon';
+    profileId?: string;
+    entityNamePrefix?: string;
+    regularCount?: number;
+    exclusionCount?: number;
+    entryCount?: number;
+  } = {},
+): Promise<DeviceReadinessResponse> => {
+  const query = new URLSearchParams();
+  if (params.require) query.set('require', params.require);
+  if (params.profileId) query.set('profileId', params.profileId);
+  if (params.entityNamePrefix) query.set('entityNamePrefix', params.entityNamePrefix);
+  if (typeof params.regularCount === 'number') query.set('regularCount', String(params.regularCount));
+  if (typeof params.exclusionCount === 'number') query.set('exclusionCount', String(params.exclusionCount));
+  if (typeof params.entryCount === 'number') query.set('entryCount', String(params.entryCount));
+  if (typeof window !== 'undefined' && window.localStorage?.getItem('ep_debug_migration') === '1') {
+    query.set('debug', '1');
+  }
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  const res = await fetch(ingressAware(`api/devices/${deviceId}/readiness${suffix}`));
+  return handle<DeviceReadinessResponse>(res);
 };
 
 // ==================== AUTO-UPDATE SYSTEM ====================

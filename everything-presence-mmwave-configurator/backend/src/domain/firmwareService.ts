@@ -860,6 +860,33 @@ export class FirmwareService {
   }
 
   /**
+   * Check if a version satisfies a simple comparator range (e.g., "<1.5.0", ">=1.2.0").
+   */
+  private matchesVersionRange(version: string, range: string): boolean {
+    if (!version || !range) return false;
+    const trimmed = range.trim();
+    const match = trimmed.match(/^(<=|>=|<|>|=)?\s*v?(\d+(?:\.\d+){0,2})/);
+    if (!match) return false;
+
+    const op = match[1] || '=';
+    const target = match[2];
+    const comparison = this.compareVersions(version, target);
+
+    switch (op) {
+      case '<':
+        return comparison < 0;
+      case '<=':
+        return comparison <= 0;
+      case '>':
+        return comparison > 0;
+      case '>=':
+        return comparison >= 0;
+      default:
+        return comparison === 0;
+    }
+  }
+
+  /**
    * Validate firmware compatibility with device config
    */
   validateFirmwareCompatibility(
@@ -989,10 +1016,9 @@ export class FirmwareService {
       if (variant) {
         // Check for migrations
         const migration = productIndex.migrations.find((m) => {
-          // Simple version range check (could be improved with semver library)
-          return this.compareVersions(currentVersion, '2.0.0') < 0 &&
-                 this.compareVersions(firmware.version, '2.0.0') >= 0 &&
-                 m.id === 'rectangular-to-polygon-zones';
+          if (m.id !== 'rectangular-to-polygon-zones') return false;
+          return this.matchesVersionRange(currentVersion, m.fromVersion) &&
+            this.matchesVersionRange(firmware.version, m.toVersion);
         });
 
         updates.push({
