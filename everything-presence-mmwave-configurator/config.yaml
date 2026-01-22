@@ -18,7 +18,7 @@ ports:
   3000/tcp: null
   38080/tcp: 38080
 ports_description:
-  3000/tcp: Optional direct access (ingress preferred)
+  3000/tcp: Optional direct access (ingress preferred, configurable in add-on settings)
   38080/tcp: LAN firmware server for device OTA updates (configurable in add-on settings)
 homeassistant_api: true
 auth_api: true
@@ -34,6 +34,8 @@ map:
   - config:rw
   - share:rw
 options:
+  port: 3000
   firmware_lan_port: 38080
 schema:
+  port: port
   firmware_lan_port: port
