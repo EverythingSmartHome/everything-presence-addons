@@ -245,6 +245,28 @@ export class WsReadTransport implements IHaReadTransport {
     return [];
   }
 
+  async getServicesByDomain(domain: string): Promise<string[]> {
+    const response = (await this.call({
+      type: 'get_services',
+    })) as HaWsMessage & { result?: Record<string, Record<string, unknown>> };
+
+    if (response.type === 'result' && (response as any).success) {
+      const allServices = (response as any).result ?? {};
+      const domainServices: string[] = [];
+
+      if (allServices[domain]) {
+        for (const serviceName of Object.keys(allServices[domain])) {
+          domainServices.push(`${domain}.${serviceName}`);
+        }
+      }
+
+      return domainServices.sort();
+    }
+
+    logger.warn({ response, domain }, 'WsReadTransport: Unexpected response when listing services');
+    return [];
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // State Queries
   // ─────────────────────────────────────────────────────────────────

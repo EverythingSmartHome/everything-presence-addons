@@ -46,6 +46,10 @@ export interface DeviceMapping {
   rawSwVersion?: string;
   /** Schema version from device profile at time of last sync (e.g., "1.0") */
   profileSchemaVersion?: string;
+  /** Manually mapped ESPHome service names (e.g., "getBuildFlags" -> "esphome.device_name_get_build_flags") */
+  serviceMappings?: Record<string, string>;
+  /** Whether service mappings were confirmed by user (don't overwrite during re-sync) */
+  serviceConfirmedByUser?: boolean;
 }
 
 /**

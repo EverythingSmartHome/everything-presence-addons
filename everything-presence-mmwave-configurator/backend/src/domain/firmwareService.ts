@@ -6,7 +6,6 @@ import { firmwareStorage, CachedFirmwareEntry } from '../config/firmwareStorage'
 import { deviceMappingStorage } from '../config/deviceMappingStorage';
 import { FirmwareConfig } from '../config';
 import type { IHaWriteClient } from '../ha/writeClient';
-import type { IHaReadTransport, EntityState } from '../ha/readTransport';
 import { deviceEntityService } from './deviceEntityService';
 import type { ResolvedService } from './deviceEntityService';
 import {
@@ -56,7 +55,6 @@ export interface PreparedFirmware {
 export interface FirmwareServiceDependencies {
   config: FirmwareConfig;
   writeClient?: IHaWriteClient;
-  readTransport?: IHaReadTransport;
 }
 
 /**
@@ -117,142 +115,47 @@ const getLocalIpAddress = (): string | null => {
 export class FirmwareService {
   private readonly config: FirmwareConfig;
   private readonly writeClient?: IHaWriteClient;
-  private readonly readTransport?: IHaReadTransport;
   private indexCache: Map<string, CachedIndex> = new Map();
 
   constructor(deps: FirmwareServiceDependencies) {
     this.config = deps.config;
     this.writeClient = deps.writeClient;
-    this.readTransport = deps.readTransport;
   }
 
+  /**
+   * Resolve a service from stored device mappings.
+   * Returns null if no mapping exists - caller should prompt user to sync.
+   */
   async resolveService(deviceId: string, serviceKey: string): Promise<ResolvedService | null> {
-    if (!this.readTransport) {
-      return deviceEntityService.getService(deviceId, serviceKey);
+    const storedMapping = deviceMappingStorage.getMapping(deviceId);
+
+    // No device mapping exists - user needs to sync
+    if (!storedMapping) {
+      logger.warn({ deviceId, serviceKey }, 'No device mapping found - user should run entity sync');
+      return null;
     }
 
-    try {
-      const services = await this.readTransport.getServicesForTarget({ device_id: [deviceId] });
-      if (services.length > 0) {
-        const resolved = deviceEntityService.resolveServiceFromList(deviceId, serviceKey, services);
-        if (resolved) {
-          return resolved;
-        }
-      }
-    } catch (error) {
+    // Check for stored service mapping
+    const fullService = storedMapping.serviceMappings?.[serviceKey];
+    if (!fullService) {
       logger.warn(
-        { deviceId, serviceKey, error: error instanceof Error ? error.message : 'Unknown error' },
-        'Failed to resolve service via target services'
+        { deviceId, serviceKey },
+        'Service mapping not found - user should run entity sync or manually configure'
       );
+      return null;
     }
 
-    await this.ensureDeviceNodeName(deviceId);
-    await this.ensureOriginalObjectIds(deviceId);
-    return deviceEntityService.getService(deviceId, serviceKey);
-  }
-
-  private async ensureDeviceNodeName(deviceId: string): Promise<void> {
-    if (!this.readTransport) return;
-
-    const mapping = deviceEntityService.getMapping(deviceId);
-    if (!mapping || mapping.esphomeNodeName) return;
-
-    try {
-      const devices = await this.readTransport.listDevices();
-      const device = devices.find((entry) => entry.id === deviceId);
-      if (!device) return;
-
-      let esphomeNodeName: string | undefined;
-      for (const [domain, identifier] of device.identifiers ?? []) {
-        if (typeof domain === 'string' && typeof identifier === 'string' && domain.toLowerCase() === 'esphome') {
-          esphomeNodeName = identifier;
-          break;
-        }
-      }
-
-      if (!esphomeNodeName) {
-        esphomeNodeName = this.slugifyDeviceName(device.name);
-      }
-
-      if (!esphomeNodeName) {
-        logger.warn(
-          { deviceId, name: device.name, nameByUser: device.name_by_user, identifiers: device.identifiers },
-          'ESPHome node name not found in device identifiers'
-        );
-        return;
-      }
-
-      mapping.esphomeNodeName = esphomeNodeName;
-      await deviceMappingStorage.saveMapping(mapping);
-      logger.info({ deviceId, esphomeNodeName }, 'Stored ESPHome node name for service resolution');
-    } catch (error) {
-      logger.warn(
-        { deviceId, error: error instanceof Error ? error.message : 'Unknown error' },
-        'Failed to store ESPHome node name'
-      );
-    }
-  }
-
-  private slugifyDeviceName(name: string | null | undefined): string | undefined {
-    if (!name) return undefined;
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-    return slug || undefined;
-  }
-
-  private async ensureOriginalObjectIds(deviceId: string): Promise<void> {
-    if (!this.readTransport) return;
-
-    const mapping = deviceEntityService.getMapping(deviceId);
-    if (!mapping) return;
-
-    if (mapping.entityOriginalObjectIds && Object.keys(mapping.entityOriginalObjectIds).length > 0 &&
-      mapping.entityUniqueIds && Object.keys(mapping.entityUniqueIds).length > 0) {
-      return;
+    // Parse the fully qualified service name (e.g., "esphome.device_get_build_flags")
+    const dotIndex = fullService.indexOf('.');
+    if (dotIndex <= 0) {
+      logger.error({ deviceId, serviceKey, fullService }, 'Invalid service mapping format');
+      return null;
     }
 
-    try {
-      const registry = await this.readTransport.listEntityRegistry();
-      const registryById = new Map(registry.map((entry) => [entry.entity_id, entry]));
-      const originalObjectIds: Record<string, string> = {};
-      const uniqueIds: Record<string, string> = {};
-
-      for (const entityId of Object.values(mapping.mappings)) {
-        if (!entityId) continue;
-        const entry = registryById.get(entityId);
-        const originalObjectId = entry?.original_object_id;
-        if (originalObjectId) {
-          originalObjectIds[entityId] = originalObjectId;
-        }
-        const uniqueId = entry?.unique_id;
-        if (uniqueId) {
-          uniqueIds[entityId] = uniqueId;
-        }
-      }
-
-      if (Object.keys(originalObjectIds).length === 0 && Object.keys(uniqueIds).length === 0) {
-        return;
-      }
-
-      if (Object.keys(originalObjectIds).length > 0) {
-        mapping.entityOriginalObjectIds = originalObjectIds;
-      }
-      if (Object.keys(uniqueIds).length > 0) {
-        mapping.entityUniqueIds = uniqueIds;
-      }
-      await deviceMappingStorage.saveMapping(mapping);
-      logger.info(
-        { deviceId, originalCount: Object.keys(originalObjectIds).length, uniqueCount: Object.keys(uniqueIds).length },
-        'Stored entity registry ids for service resolution'
-      );
-    } catch (error) {
-      logger.warn(
-        { deviceId, error: error instanceof Error ? error.message : 'Unknown error' },
-        'Failed to store entity registry ids'
-      );
-    }
+    const domain = fullService.slice(0, dotIndex);
+    const service = fullService.slice(dotIndex + 1);
+    logger.debug({ deviceId, serviceKey, service: fullService }, 'Using stored service mapping');
+    return { key: serviceKey, domain, service };
   }
 
   /**

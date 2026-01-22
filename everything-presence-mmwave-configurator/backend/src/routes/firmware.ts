@@ -20,7 +20,6 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
   const firmwareService = new FirmwareService({
     config: deps.config,
     writeClient: deps.writeClient,
-    readTransport: deps.readTransport,
   });
 
   /**

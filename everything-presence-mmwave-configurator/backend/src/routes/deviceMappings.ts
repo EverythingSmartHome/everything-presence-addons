@@ -37,6 +37,44 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
   });
 
   /**
+   * GET /api/device-mappings/services
+   * List all services, optionally filtered by domain and/or pattern.
+   * Query params:
+   *   - domain: filter by service domain (e.g., "esphome", "light", "switch"). Defaults to "esphome".
+   *   - pattern: glob pattern to filter service names (e.g., "*_get_build_flags")
+   * NOTE: This route MUST be defined before /:deviceId routes to avoid being matched as a deviceId
+   */
+  router.get('/services', async (req, res) => {
+    const { domain = 'esphome', pattern } = req.query;
+
+    if (!readTransport || typeof readTransport.getServicesByDomain !== 'function') {
+      return res.status(501).json({
+        message: 'Service listing requires WebSocket transport',
+        services: [],
+      });
+    }
+
+    try {
+      const domainStr = typeof domain === 'string' ? domain : 'esphome';
+      let services = await readTransport.getServicesByDomain(domainStr);
+
+      // Filter by pattern if provided (e.g., "*_get_build_flags")
+      if (pattern && typeof pattern === 'string') {
+        const regex = new RegExp(
+          '^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$',
+          'i'
+        );
+        services = services.filter((s: string) => regex.test(s));
+      }
+
+      return res.json({ services, domain: domainStr });
+    } catch (error) {
+      logger.error({ error, domain }, 'Failed to list services');
+      return res.status(500).json({ message: 'Failed to list services', services: [] });
+    }
+  });
+
+  /**
    * GET /api/device-mappings/:deviceId
    * Get a specific device's entity mappings.
    */
@@ -141,6 +179,73 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         }
       }
 
+      // Preserve service mappings if user has confirmed them (don't overwrite during re-sync)
+      let serviceMappings = existing?.serviceMappings;
+      let serviceConfirmedByUser = existing?.serviceConfirmedByUser ?? false;
+
+      // Only update service mappings if explicitly provided AND not user-confirmed
+      if (mappingData.serviceMappings !== undefined) {
+        if (!existing?.serviceConfirmedByUser) {
+          serviceMappings = mappingData.serviceMappings;
+          serviceConfirmedByUser = mappingData.serviceConfirmedByUser ?? false;
+        } else {
+          logger.debug(
+            { deviceId },
+            'Skipping service mapping update - user has confirmed existing mappings'
+          );
+        }
+      }
+
+      // Auto-discover service mappings if not user-confirmed and missing services
+      // Note: Primary service discovery happens in entityDiscovery.discoverAndSave
+      // This is a fallback for PUT requests that don't go through that path
+      if (readTransport && !serviceConfirmedByUser) {
+        let buildFlagsService: string | undefined;
+        let updateManifestService: string | undefined;
+
+        // Method 1: Try getServicesForTarget
+        try {
+          const services = await readTransport.getServicesForTarget({ device_id: [deviceId] });
+          buildFlagsService = services.find((s) => s.endsWith('_get_build_flags'));
+          updateManifestService = services.find((s) => s.endsWith('_set_update_manifest'));
+        } catch (err) {
+          logger.debug({ err, deviceId }, 'getServicesForTarget failed in PUT handler');
+        }
+
+        // Method 2: Construct from esphomeNodeName
+        if ((!(buildFlagsService && updateManifestService)) && esphomeNodeName) {
+          try {
+            const expectedBuildFlags = `esphome.${esphomeNodeName}_get_build_flags`;
+            const expectedUpdateManifest = `esphome.${esphomeNodeName}_set_update_manifest`;
+            const allEsphomeServices = await readTransport.getServicesByDomain('esphome');
+            if (!buildFlagsService && allEsphomeServices.includes(expectedBuildFlags)) {
+              buildFlagsService = expectedBuildFlags;
+            }
+            if (!updateManifestService && allEsphomeServices.includes(expectedUpdateManifest)) {
+              updateManifestService = expectedUpdateManifest;
+            }
+          } catch (err) {
+            logger.debug({ err, deviceId }, 'getServicesByDomain failed in PUT handler');
+          }
+        }
+
+        if (buildFlagsService || updateManifestService) {
+          serviceMappings = {
+            ...serviceMappings,
+            ...(buildFlagsService ? { getBuildFlags: buildFlagsService } : {}),
+            ...(updateManifestService ? { setUpdateManifest: updateManifestService } : {}),
+          };
+          logger.info(
+            {
+              deviceId,
+              buildFlagsService,
+              updateManifestService,
+            },
+            'Auto-discovered services in PUT handler'
+          );
+        }
+      }
+
       // Build the mapping object
       const mapping: DeviceMapping = {
         deviceId,
@@ -161,6 +266,8 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
         esphomeVersion,
         rawSwVersion,
         profileSchemaVersion,
+        serviceMappings,
+        serviceConfirmedByUser,
       };
 
       await deviceMappingStorage.saveMapping(mapping);
@@ -460,6 +567,41 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
     } catch (error) {
       logger.error({ error }, 'Failed to run migration dry-run');
       return res.status(500).json({ message: 'Failed to run migration dry-run' });
+    }
+  });
+
+  /**
+   * PUT /api/device-mappings/:deviceId/service-mappings
+   * Update service mappings for a device.
+   * Body: { serviceMappings: Record<string, string>, confirmed?: boolean }
+   */
+  router.put('/:deviceId/service-mappings', async (req, res) => {
+    const { deviceId } = req.params;
+    const { serviceMappings, confirmed } = req.body as {
+      serviceMappings?: Record<string, string>;
+      confirmed?: boolean;
+    };
+
+    try {
+      const existing = deviceMappingStorage.getMapping(deviceId);
+      if (!existing) {
+        return res.status(404).json({ message: 'Device mapping not found' });
+      }
+
+      const updated: DeviceMapping = {
+        ...existing,
+        serviceMappings: serviceMappings ?? existing.serviceMappings,
+        serviceConfirmedByUser: confirmed ?? existing.serviceConfirmedByUser ?? false,
+        lastUpdated: new Date().toISOString(),
+      };
+
+      await deviceMappingStorage.saveMapping(updated);
+      logger.info({ deviceId, serviceMappings, confirmed }, 'Service mappings updated');
+
+      return res.json({ mapping: updated });
+    } catch (error) {
+      logger.error({ error, deviceId }, 'Failed to update service mappings');
+      return res.status(500).json({ message: 'Failed to update service mappings' });
     }
   });
 
