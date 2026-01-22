@@ -4,7 +4,12 @@ set -euo pipefail
 
 cd /app
 export NODE_ENV="${NODE_ENV:-production}"
-export PORT="${PORT:-3000}"
+APP_PORT_CONFIG="$(bashio::config 'port')"
+if [ -n "${APP_PORT_CONFIG}" ] && [ "${APP_PORT_CONFIG}" != "null" ]; then
+  export PORT="${APP_PORT_CONFIG}"
+else
+  export PORT="${PORT:-3000}"
+fi
 FIRMWARE_LAN_PORT_CONFIG="$(bashio::config 'firmware_lan_port')"
 if [ -n "${FIRMWARE_LAN_PORT_CONFIG}" ] && [ "${FIRMWARE_LAN_PORT_CONFIG}" != "null" ]; then
   export FIRMWARE_LAN_PORT="${FIRMWARE_LAN_PORT_CONFIG}"
@@ -13,6 +18,9 @@ else
 fi
 
 bashio::log.info "Starting Zone Configurator backend on port ${PORT}"
+if [ "${PORT}" != "3000" ]; then
+  bashio::log.warning "Ingress is configured for port 3000. Changing the app port may disable ingress access."
+fi
 bashio::log.info "LAN Firmware Server will start on port ${FIRMWARE_LAN_PORT}"
 
 exec node backend/dist/index.js
