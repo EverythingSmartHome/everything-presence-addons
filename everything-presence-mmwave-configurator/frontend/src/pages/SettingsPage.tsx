@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { fetchRooms, deleteRoom, updateRoom, createRoom } from '../api/rooms';
-import { fetchSettings, updateSettings } from '../api/client';
+import {
+  fetchSettings,
+  updateSettings,
+  fetchDevices,
+  fetchProfiles,
+  fetchZoneBackups,
+  createZoneBackup,
+  restoreZoneBackup,
+  deleteZoneBackup,
+  importZoneBackups,
+} from '../api/client';
 import {
   fetchCustomFloors,
   createCustomFloor,
@@ -9,10 +19,19 @@ import {
   createCustomFurniture,
   deleteCustomFurniture,
 } from '../api/client';
-import { RoomConfig, CustomFloorMaterial, CustomFurnitureType, EntityMappings } from '../api/types';
+import {
+  RoomConfig,
+  CustomFloorMaterial,
+  CustomFurnitureType,
+  EntityMappings,
+  DiscoveredDevice,
+  DeviceProfile,
+  ZoneBackup,
+} from '../api/types';
 import { EntityDiscovery } from '../components/EntityDiscovery';
 import { FirmwareUpdateSection } from '../components/FirmwareUpdateSection';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { getDeviceMapping, DeviceMapping } from '../api/deviceMappings';
 
 interface SettingsPageProps {
   onBack?: () => void;
@@ -37,6 +56,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [renamingRoomId, setRenamingRoomId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [unlinkingDeviceRoomId, setUnlinkingDeviceRoomId] = useState<string | null>(null);
+  const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
+  const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
+
+  // Zone backups state
+  const [selectedBackupDeviceId, setSelectedBackupDeviceId] = useState('');
+  const [zoneBackups, setZoneBackups] = useState<ZoneBackup[]>([]);
+  const [backupMapping, setBackupMapping] = useState<DeviceMapping | null>(null);
+  const [loadingBackups, setLoadingBackups] = useState(false);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
+  const [deletingBackupId, setDeletingBackupId] = useState<string | null>(null);
+  const [importingBackups, setImportingBackups] = useState(false);
 
   // Device mappings context - used to refresh cache after resync
   const { refreshMapping } = useDeviceMappings();
@@ -66,16 +97,28 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   useEffect(() => {
     const load = async () => {
       try {
-        const [roomsRes, floorsRes, furnitureRes, settingsRes] = await Promise.all([
+        const [roomsRes, floorsRes, furnitureRes, settingsRes, devicesRes, profilesRes] = await Promise.all([
           fetchRooms(),
           fetchCustomFloors(),
           fetchCustomFurniture(),
           fetchSettings(),
+          fetchDevices(),
+          fetchProfiles(),
         ]);
         setRooms(roomsRes.rooms);
         setCustomFloors(floorsRes.floors);
         setCustomFurniture(furnitureRes.furniture);
         setDefaultRoomId(typeof settingsRes.settings.defaultRoomId === 'string' ? settingsRes.settings.defaultRoomId : null);
+        const epDevices = devicesRes.devices.filter(
+          (device) =>
+            device.manufacturer?.toLowerCase().includes('everything') ||
+            device.model?.toLowerCase().includes('presence')
+        );
+        setDevices(epDevices);
+        setProfiles(profilesRes.profiles ?? []);
+        if (!selectedBackupDeviceId && epDevices.length > 0) {
+          setSelectedBackupDeviceId(epDevices[0].id);
+        }
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -85,6 +128,32 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
     };
     load();
   }, []);
+
+  useEffect(() => {
+    const loadBackups = async () => {
+      if (!selectedBackupDeviceId) {
+        setZoneBackups([]);
+        setBackupMapping(null);
+        return;
+      }
+
+      setLoadingBackups(true);
+      try {
+        const [backupsRes, mapping] = await Promise.all([
+          fetchZoneBackups(selectedBackupDeviceId),
+          getDeviceMapping(selectedBackupDeviceId),
+        ]);
+        setZoneBackups(backupsRes.backups ?? []);
+        setBackupMapping(mapping);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load zone backups');
+      } finally {
+        setLoadingBackups(false);
+      }
+    };
+
+    loadBackups();
+  }, [selectedBackupDeviceId]);
 
   const handleDeleteRoom = async (roomId: string, roomName: string) => {
     if (!confirm(`Are you sure you want to delete the room "${roomName}"? This action cannot be undone.`)) {
@@ -398,6 +467,200 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
 
       } catch (err) {
         setError(`Failed to import room: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
+    };
+
+    input.click();
+  };
+
+  // ==================== Zone Backup Handlers ====================
+  const selectedBackupDevice = devices.find((device) => device.id === selectedBackupDeviceId) ?? null;
+  const selectedBackupRoom = rooms.find((room) => room.deviceId === selectedBackupDeviceId) ?? null;
+  const selectedBackupProfileId = backupMapping?.profileId ?? selectedBackupRoom?.profileId ?? '';
+  const selectedBackupProfile =
+    profiles.find((profile) => profile.id === selectedBackupProfileId) ?? null;
+  const backupEntityNamePrefix =
+    selectedBackupRoom?.entityNamePrefix || selectedBackupDevice?.entityNamePrefix || undefined;
+  const backupEntityMappings = backupMapping ? undefined : selectedBackupRoom?.entityMappings;
+
+  const summarizeZones = (zones: ZoneBackup['zones']) => {
+    return zones.reduce(
+      (acc, zone) => {
+        if (zone.type === 'exclusion') {
+          acc.exclusion += 1;
+        } else if (zone.type === 'entry') {
+          acc.entry += 1;
+        } else {
+          acc.regular += 1;
+        }
+        return acc;
+      },
+      { regular: 0, exclusion: 0, entry: 0 }
+    );
+  };
+
+  const reloadZoneBackups = async (deviceId: string) => {
+    try {
+      const backupsRes = await fetchZoneBackups(deviceId);
+      setZoneBackups(backupsRes.backups ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh zone backups');
+    }
+  };
+
+  const handleCreateZoneBackup = async () => {
+    if (!selectedBackupDeviceId) {
+      setError('Select a device to back up zones.');
+      return;
+    }
+
+    if (!selectedBackupProfileId) {
+      setError('Device profile not found. Run entity discovery to sync the device.');
+      return;
+    }
+
+    if (!backupEntityNamePrefix && !backupMapping) {
+      setError('Entity name prefix is missing. Link the device to a room or re-sync entities.');
+      return;
+    }
+
+    setCreatingBackup(true);
+    try {
+      await createZoneBackup({
+        deviceId: selectedBackupDeviceId,
+        profileId: selectedBackupProfileId,
+        entityNamePrefix: backupEntityNamePrefix,
+        entityMappings: backupEntityMappings,
+      });
+      await reloadZoneBackups(selectedBackupDeviceId);
+      setSuccess('Zone backup created.');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create zone backup');
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
+  const handleRestoreZoneBackup = async (backup: ZoneBackup) => {
+    if (!selectedBackupDeviceId) {
+      setError('Select a device before restoring.');
+      return;
+    }
+
+    if (!selectedBackupProfileId) {
+      setError('Device profile not found. Run entity discovery to sync the device.');
+      return;
+    }
+
+    if (!backupEntityNamePrefix && !backupMapping) {
+      setError('Entity name prefix is missing. Link the device to a room or re-sync entities.');
+      return;
+    }
+
+    setRestoringBackupId(backup.id);
+    try {
+      const result = await restoreZoneBackup(backup.id, {
+        deviceId: selectedBackupDeviceId,
+        profileId: selectedBackupProfileId,
+        entityNamePrefix: backupEntityNamePrefix,
+        entityMappings: backupEntityMappings,
+      });
+
+      if (!result.ok) {
+        setError('Restore completed with errors. Check warnings and try again.');
+      } else if (result.warnings && result.warnings.length > 0) {
+        setSuccess(`Restore completed with ${result.warnings.length} warning(s).`);
+        setTimeout(() => setSuccess(null), 4000);
+      } else {
+        setSuccess('Backup restored as polygon zones.');
+        setTimeout(() => setSuccess(null), 3000);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to restore zone backup');
+    } finally {
+      setRestoringBackupId(null);
+    }
+  };
+
+  const handleDeleteZoneBackup = async (backupId: string) => {
+    if (!confirm('Delete this zone backup?')) return;
+    setDeletingBackupId(backupId);
+    try {
+      await deleteZoneBackup(backupId);
+      setZoneBackups((prev) => prev.filter((entry) => entry.id !== backupId));
+      setSuccess('Zone backup deleted.');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete zone backup');
+    } finally {
+      setDeletingBackupId(null);
+    }
+  };
+
+  const downloadJson = (filename: string, data: unknown) => {
+    const jsonString = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadBackup = (backup: ZoneBackup) => {
+    const timestamp = new Date(backup.createdAt)
+      .toISOString()
+      .replace(/T/, '_')
+      .replace(/\..+/, '')
+      .replace(/:/g, '')
+      .slice(0, 17);
+    const labelBase =
+      backup.deviceName ||
+      selectedBackupDevice?.name ||
+      backup.deviceId;
+    const sanitized = labelBase.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    downloadJson(`zone_backup_${sanitized}_${timestamp}.json`, backup);
+  };
+
+  const handleDownloadAllBackups = () => {
+    if (zoneBackups.length === 0) {
+      setError('No backups available to download.');
+      return;
+    }
+    const timestamp = new Date().toISOString()
+      .replace(/T/, '_')
+      .replace(/\..+/, '')
+      .replace(/:/g, '')
+      .slice(0, 17);
+    downloadJson(`zone_backups_${timestamp}.json`, { backups: zoneBackups });
+  };
+
+  const handleImportBackups = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      setImportingBackups(true);
+      try {
+        const text = await file.text();
+        const payload = JSON.parse(text);
+        const result = await importZoneBackups(payload);
+        if (selectedBackupDeviceId) {
+          await reloadZoneBackups(selectedBackupDeviceId);
+        }
+        setSuccess(`Imported ${result.imported} backup(s).`);
+        setTimeout(() => setSuccess(null), 4000);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to import zone backups');
+      } finally {
+        setImportingBackups(false);
       }
     };
 
@@ -728,6 +991,170 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
               </div>
             )}
               </div>
+
+                {/* Zone Backups Section */}
+            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-white">Zone Backups</h2>
+                  <p className="text-sm text-slate-400">
+                    Back up rectangular zones and restore them as polygons after firmware updates.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleImportBackups}
+                    disabled={importingBackups}
+                    className="rounded-lg border border-blue-600/50 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-100 transition-all hover:bg-blue-600/20 disabled:opacity-50"
+                    title="Import zone backups from JSON file"
+                  >
+                    {importingBackups ? 'Importing...' : 'Import'}
+                  </button>
+                  <button
+                    onClick={handleDownloadAllBackups}
+                    disabled={zoneBackups.length === 0}
+                    className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Download all backups for the selected device"
+                  >
+                    Download All
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-300">Device</label>
+                  <select
+                    value={selectedBackupDeviceId}
+                    onChange={(e) => setSelectedBackupDeviceId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  >
+                    <option value="">Select a device</option>
+                    {devices.map((device) => (
+                      <option key={device.id} value={device.id}>
+                        {device.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">Only Everything Presence devices are listed.</p>
+                </div>
+                <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 p-3 text-xs text-slate-300">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Profile</span>
+                    <span>{selectedBackupProfile?.label ?? 'Unknown'}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-slate-500">Firmware</span>
+                    <span>{backupMapping?.firmwareVersion ?? selectedBackupDevice?.firmwareVersion ?? 'Unknown'}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-slate-500">Entity mappings</span>
+                    <span className={backupMapping ? 'text-emerald-300' : 'text-amber-300'}>
+                      {backupMapping ? 'Synced' : 'Missing'}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[11px] text-slate-500">
+                    Backups read rectangular zones from the device. Restores convert them to polygons.
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={handleCreateZoneBackup}
+                  disabled={creatingBackup || !selectedBackupDeviceId}
+                  className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {creatingBackup ? 'Backing up...' : 'Create Backup'}
+                </button>
+                <button
+                  onClick={() => selectedBackupDeviceId && reloadZoneBackups(selectedBackupDeviceId)}
+                  disabled={!selectedBackupDeviceId || loadingBackups}
+                  className="rounded-lg border border-slate-600/70 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingBackups ? 'Refreshing...' : 'Refresh'}
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {!selectedBackupDeviceId && (
+                  <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 p-4 text-sm text-slate-400">
+                    Select a device to view available backups.
+                  </div>
+                )}
+
+                {selectedBackupDeviceId && loadingBackups && (
+                  <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 p-4 text-sm text-slate-400">
+                    Loading backups...
+                  </div>
+                )}
+
+                {selectedBackupDeviceId && !loadingBackups && zoneBackups.length === 0 && (
+                  <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 p-4 text-sm text-slate-400">
+                    No backups yet. Create one before updating firmware.
+                  </div>
+                )}
+
+                {selectedBackupDeviceId && !loadingBackups && zoneBackups.length > 0 && (
+                  <div className="space-y-3">
+                    {zoneBackups.map((backup) => {
+                      const counts = summarizeZones(backup.zones);
+                      const labelCount = Object.keys(backup.zoneLabels ?? {}).length;
+                      return (
+                        <div
+                          key={backup.id}
+                          className="rounded-lg border border-slate-700/50 bg-slate-800/50 p-4"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-100">
+                                {new Date(backup.createdAt).toLocaleString()}
+                              </div>
+                              <div className="text-xs text-slate-400">
+                                Source: {backup.source}{backup.firmwareVersion ? ` · v${backup.firmwareVersion}` : ''}
+                              </div>
+                            </div>
+                            {labelCount > 0 && (
+                              <span className="rounded-full border border-slate-600/60 bg-slate-700/50 px-2 py-0.5 text-[10px] text-slate-200">
+                                {labelCount} label{labelCount === 1 ? '' : 's'}
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-400">
+                            <span>{counts.regular} zone{counts.regular === 1 ? '' : 's'}</span>
+                            <span>· {counts.exclusion} exclusion</span>
+                            <span>· {counts.entry} entry</span>
+                            <span>· {backup.zones.length} total</span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => handleRestoreZoneBackup(backup)}
+                              disabled={restoringBackupId === backup.id}
+                              className="rounded-lg bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-600/30 disabled:opacity-50"
+                            >
+                              {restoringBackupId === backup.id ? 'Restoring...' : 'Restore as Polygon'}
+                            </button>
+                            <button
+                              onClick={() => handleDownloadBackup(backup)}
+                              className="rounded-lg border border-slate-600/70 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:bg-slate-700"
+                            >
+                              Download
+                            </button>
+                            <button
+                              onClick={() => handleDeleteZoneBackup(backup.id)}
+                              disabled={deletingBackupId === backup.id}
+                              className="rounded-lg border border-rose-600/50 bg-rose-600/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/20 disabled:opacity-50"
+                            >
+                              {deletingBackupId === backup.id ? 'Deleting...' : 'Delete'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
 
                 {/* Custom Floor Materials Section */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">

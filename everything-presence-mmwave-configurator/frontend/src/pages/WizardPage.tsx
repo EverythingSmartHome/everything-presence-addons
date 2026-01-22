@@ -274,7 +274,11 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [polygonZonesAvailable, setPolygonZonesAvailable] = useState<boolean | null>(null);
 
   // Polygon mode state
-  const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({ supported: false, enabled: false });
+  const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({
+    supported: false,
+    enabled: false,
+    controllable: false,
+  });
   const [polygonZones, setPolygonZones] = useState<ZonePolygon[]>([]);
   const [showPolygonPrompt, setShowPolygonPrompt] = useState(false);
   const [togglingPolygonMode, setTogglingPolygonMode] = useState(false);
@@ -283,7 +287,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Reset polygon mode state when room/device changes
   useEffect(() => {
-    setPolygonModeStatus({ supported: false, enabled: false });
+    setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
     setPolygonZones([]);
     setShowPolygonPrompt(false);
     // Clear the prompt shown tracking so it can show again for the new room
@@ -858,7 +862,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       }
 
       if (!entityNamePrefix) {
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
         return;
       }
 
@@ -896,7 +900,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         // entities do exist.
       } catch (err) {
         console.error('Failed to fetch polygon mode status:', err);
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
       }
     };
 
@@ -1210,7 +1214,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       }
 
       // Update local state
-      setPolygonModeStatus({ supported: true, enabled: true });
+      setPolygonModeStatus({ supported: true, enabled: true, controllable: true });
       setPolygonZones(convertedZones);
       setShowPolygonPrompt(false);
     } catch (err) {

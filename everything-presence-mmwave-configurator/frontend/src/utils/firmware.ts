@@ -5,6 +5,20 @@
 // Minimum firmware version required for advanced features (entry zones, assumed presence, polygon zones)
 export const MIN_FIRMWARE_FOR_ADVANCED_FEATURES = '1.3.2';
 
+// Firmware versions where rectangular zones are removed per device model
+export const ZONE_MIGRATION_VERSION_BY_MODEL: Record<string, string> = {
+  'everything-presence-lite': '1.5.0',
+  'everything-presence-pro': '1.2.0',
+};
+
+const normalizeModelName = (model?: string | null): string => {
+  const value = model?.toLowerCase() ?? '';
+  if (value.includes('lite')) return 'everything-presence-lite';
+  if (value.includes('pro')) return 'everything-presence-pro';
+  if (value.includes('one')) return 'everything-presence-one';
+  return value;
+};
+
 /**
  * Parse a semantic version string into its components
  * @param version Version string like "1.3.2" or "1.3.1-beta"
@@ -16,8 +30,8 @@ export function parseVersion(version: string | undefined | null): { major: numbe
   // Remove any prefix like "v", "V", "version " etc.
   let cleanVersion = version.trim().replace(/^[vV](?:ersion\s*)?/, '');
 
-  // Remove any suffix like "-beta", "-rc1", etc.
-  cleanVersion = cleanVersion.split('-')[0].trim();
+  // Remove any suffix like "-beta", "-rc1", or trailing build info
+  cleanVersion = cleanVersion.split('-')[0].split(' ')[0].split('(')[0].trim();
 
   // Match semantic version pattern (with optional minor/patch for formats like "1.3")
   const match = cleanVersion.match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
@@ -47,6 +61,31 @@ export function compareVersions(version1: string | undefined | null, version2: s
   if (v1.patch !== v2.patch) return v1.patch > v2.patch ? 1 : -1;
 
   return 0;
+}
+
+/**
+ * Get the firmware version where rectangular zones are removed for a device model.
+ */
+export function getZoneMigrationThreshold(model?: string | null): string | null {
+  const normalized = normalizeModelName(model);
+  return ZONE_MIGRATION_VERSION_BY_MODEL[normalized] ?? null;
+}
+
+/**
+ * Check if a firmware update crosses the rectangular -> polygon-only threshold.
+ * Returns null if versions are unknown or invalid.
+ */
+export function requiresZoneMigration(
+  currentVersion: string | undefined | null,
+  targetVersion: string | undefined | null,
+  model?: string | null
+): boolean | null {
+  const threshold = getZoneMigrationThreshold(model);
+  if (!threshold) return false;
+  const currentCompare = compareVersions(currentVersion, threshold);
+  const targetCompare = compareVersions(targetVersion, threshold);
+  if (currentCompare === null || targetCompare === null) return null;
+  return currentCompare < 0 && targetCompare >= 0;
 }
 
 /**

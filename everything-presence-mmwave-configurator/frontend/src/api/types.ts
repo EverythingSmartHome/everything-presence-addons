@@ -115,6 +115,25 @@ export function isZoneRect(zone: Zone): zone is ZoneRect {
   return 'width' in zone && 'height' in zone;
 }
 
+export interface ZoneBackup {
+  id: string;
+  schemaVersion: number;
+  createdAt: string;
+  source: 'device' | 'import';
+  deviceId: string;
+  deviceName?: string;
+  profileId: string;
+  firmwareVersion?: string;
+  zones: ZoneRect[];
+  zoneLabels?: Record<string, string>;
+  metadata?: {
+    model?: string;
+    entityNamePrefix?: string;
+    notes?: string;
+  };
+  importedAt?: string;
+}
+
 export interface RoomShell {
   points: Array<{ x: number; y: number }>;
 }
@@ -529,6 +548,68 @@ export type FirmwareUpdateStatus =
   | 'complete'
   | 'error'
   | 'checking';
+
+export type FirmwareMigrationPhase =
+  | 'idle'
+  | 'backing_up'
+  | 'installing'
+  | 'resync_wait'
+  | 'resyncing'
+  | 'restoring'
+  | 'verifying'
+  | 'complete'
+  | 'error';
+
+export interface FirmwareMigrationState {
+  deviceId: string;
+  phase: FirmwareMigrationPhase;
+  backupId: string | null;
+  preparedVersion: string | null;
+  startedAt: string;
+  updatedAt: string;
+  lastError: string | null;
+}
+
+export interface FirmwareMigrationStateResponse {
+  state: FirmwareMigrationState | null;
+}
+
+export interface DeviceReadinessResponse {
+  ready: boolean;
+  require: 'discover' | 'polygon' | string;
+  deviceEntityCount: number;
+  enabledEntityCount: number;
+  requiredEntityIds?: string[];
+  checkedEntityIds: string[];
+  availableEntityCount: number;
+  unavailableEntityIds: string[];
+  missingEntityIds: string[];
+  disabledEntityIds?: string[];
+  missingRegistryEntityIds?: string[];
+  missingStateEntityIds?: string[];
+  requireState?: boolean;
+  message?: string;
+  debugInfo?: {
+    activeTransport: string | null;
+    shouldFetchStates: boolean;
+    statesReturned: number;
+    registryPrefixPolygonCandidates?: string[];
+    devicePolygonCandidates?: string[];
+    registryObjectIdMatches?: Array<{ objectId: string; entityIds: string[] }>;
+    hasDeviceMapping?: boolean;
+    mappingProfileId?: string | null;
+    perEntity: Array<{
+      entityId: string;
+      inRegistry: boolean;
+      registryDeviceId: string | null;
+      disabledBy: string | null;
+      inStates: boolean;
+      stateStatus?: 'missing' | 'unavailable' | 'unknown' | 'available';
+      state?: string | null;
+      statePreview?: string | null;
+    }>;
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────
 // Auto-Update System Types

@@ -67,7 +67,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [showSettings, setShowSettings] = useState(false);
   const [showNavMenu, setShowNavMenu] = useState(false);
   // Polygon mode state
-  const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({ supported: false, enabled: false });
+  const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({
+    supported: false,
+    enabled: false,
+    controllable: false,
+  });
   const [polygonZones, setPolygonZones] = useState<ZonePolygon[]>([]);
   const [togglingPolygonMode, setTogglingPolygonMode] = useState(false);
   const [showModeChangeConfirm, setShowModeChangeConfirm] = useState(false);
@@ -211,6 +215,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     const availability = polygonAvailability[zoneId];
     return availability?.status ?? 'unknown';
   };
+
+  const polygonModeControllable = polygonModeStatus.controllable !== false;
 
   useEffect(() => {
     if (!warning) return;
@@ -400,7 +406,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   useEffect(() => {
     const loadPolygonModeStatus = async () => {
       if (!selectedRoom?.deviceId || !selectedRoom?.profileId) {
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
         return;
       }
 
@@ -411,7 +417,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
 
       if (!entityNamePrefix) {
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
         return;
       }
 
@@ -426,7 +432,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         );
         setPolygonModeStatus(status);
       } catch (err) {
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
       }
     };
 
@@ -1012,7 +1018,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       )}
 
       {/* Floating Action Button (top right) */}
-      <div className="absolute top-6 right-6 z-40">
+      <div className="absolute top-6 right-6 z-40 flex flex-col items-end gap-2">
         <button
           onClick={handleSaveZones}
           disabled={saving}
@@ -1023,6 +1029,14 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           )}
           {saving ? 'Saving Zones...' : 'Save Zones'}
         </button>
+        {onNavigate && (
+          <button
+            onClick={() => onNavigate('settings')}
+            className="rounded-xl border border-slate-700/60 bg-slate-900/90 px-4 py-2 text-xs font-semibold text-slate-200 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 active:scale-95"
+          >
+            Zone Backups
+          </button>
+        )}
       </div>
 
       {/* Canvas Content - Full Page */}
@@ -1202,7 +1216,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             </button>
 
             {/* Polygon Mode Toggle (only show if supported by profile AND device has the entities) */}
-            {polygonModeStatus.supported && (
+            {polygonModeStatus.supported && polygonModeControllable && (
               <button
                 className={`rounded-xl border backdrop-blur px-6 py-3 text-sm font-semibold shadow-lg transition-all hover:shadow-xl active:scale-95 ${
                   polygonModeStatus.enabled
@@ -1228,6 +1242,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                   </>
                 )}
               </button>
+            )}
+            {polygonModeStatus.supported && !polygonModeControllable && (
+              <div className="rounded-xl border border-violet-500/40 bg-violet-600/10 px-6 py-3 text-sm font-semibold text-violet-100 shadow-lg">
+                Polygon mode active
+              </div>
             )}
 
           </div>

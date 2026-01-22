@@ -88,7 +88,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(false);
   // Polygon mode state
-  const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({ supported: false, enabled: false });
+  const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({
+    supported: false,
+    enabled: false,
+    controllable: false,
+  });
   const [polygonZones, setPolygonZones] = useState<ZonePolygon[]>([]);
   // Display settings (persisted to localStorage) - includes heatmap settings
   const {
@@ -388,19 +392,21 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   }, [propTargetPositions, smoothTracking, showLiveOverlays]);
 
   // Fetch existing zones from device when room is loaded
-  // Using refs to prevent re-fetching when entityMappings changes (which happens after zone sync)
+  // Using ref to prevent re-fetching for the same room
   const lastZonesFetchedRoomId = React.useRef<string | null>(null);
-  const lastZonesFetchedMappingsReady = React.useRef<boolean>(false);
   useEffect(() => {
     const loadZonesFromDevice = async () => {
       if (!selectedRoom || !selectedRoom.deviceId || !selectedRoom.profileId) {
         return;
       }
 
-      // Only fetch once per room, or when mappings become ready for the first time
-      const mappingsReady = !mappingLoading;
-      if (selectedRoom.id === lastZonesFetchedRoomId.current &&
-          lastZonesFetchedMappingsReady.current === mappingsReady) {
+      // Wait for mappings to be ready before fetching
+      if (mappingLoading) {
+        return;
+      }
+
+      // Only fetch once per room
+      if (selectedRoom.id === lastZonesFetchedRoomId.current) {
         return;
       }
 
@@ -417,7 +423,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
       // Mark as fetched before the async call to prevent duplicate requests
       lastZonesFetchedRoomId.current = selectedRoom.id;
-      lastZonesFetchedMappingsReady.current = mappingsReady;
 
       try {
         // Skip entityMappings if device has valid mappings stored
@@ -454,7 +459,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   useEffect(() => {
     const loadPolygonModeStatus = async () => {
       if (!selectedRoom?.deviceId || !selectedRoom?.profileId) {
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
         return;
       }
 
@@ -472,7 +477,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       }
 
       if (!entityNamePrefix) {
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
         return;
       }
 
@@ -491,7 +496,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         );
         setPolygonModeStatus(status);
       } catch (err) {
-        setPolygonModeStatus({ supported: false, enabled: false });
+        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
       }
     };
 

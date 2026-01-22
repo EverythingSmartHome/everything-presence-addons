@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   fetchDevices,
   fetchFirmwareSettings,
@@ -12,7 +12,14 @@ import {
   getAvailableUpdates,
   autoPrepare,
   fetchFirmwareUpdateStatus,
+  fetchFirmwareMigrationState,
+  saveFirmwareMigrationState,
+  clearFirmwareMigrationState,
+  fetchDeviceReadiness,
   ingressAware,
+  fetchZoneBackups,
+  createZoneBackup,
+  restoreZoneBackup,
 } from '../api/client';
 import {
   DiscoveredDevice,
@@ -23,8 +30,15 @@ import {
   FirmwareValidation,
   FirmwareUpdateEntityStatus,
   DeviceProfile,
+  ZoneBackup,
+  ZoneRect,
+  ZonePolygon,
 } from '../api/types';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { DeviceMapping, discoverAndSaveMapping } from '../api/deviceMappings';
+import { fetchPolygonZonesFromDevice } from '../api/zones';
+import { compareVersions, getZoneMigrationThreshold, requiresZoneMigration } from '../utils/firmware';
+import polygonMigrationGraphic from '../assets/polygon-migration.png';
 
 interface FirmwareUpdateSectionProps {
   onError: (error: string) => void;
@@ -38,14 +52,44 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const buildConfigUnavailableMessage =
     'Device build config not available. Firmware updates are disabled to prevent mismatched installs.';
   const onErrorRef = useRef(onError);
+  const onSuccessRef = useRef(onSuccess);
   useEffect(() => {
     onErrorRef.current = onError;
-  }, [onError]);
+    onSuccessRef.current = onSuccess;
+  }, [onError, onSuccess]);
+
+  const migrationDebugEnabled =
+    typeof window !== 'undefined' && window.localStorage.getItem('ep_debug_migration') === '1';
+  const debugMigration = useCallback(
+    (message: string, payload?: unknown) => {
+      if (!migrationDebugEnabled) return;
+      // eslint-disable-next-line no-console
+      console.log(`[EP migration] ${message}`, payload ?? '');
+    },
+    [migrationDebugEnabled],
+  );
 
   // Devices state
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
+
+  // Zone backup state (for migration flow)
+  const [zoneBackups, setZoneBackups] = useState<ZoneBackup[]>([]);
+  const [backupMapping, setBackupMapping] = useState<DeviceMapping | null>(null);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoringBackup, setRestoringBackup] = useState(false);
+  const [restoreWarnings, setRestoreWarnings] = useState<Array<{ entityId?: string; description: string; error: string }> | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [lastBackupId, setLastBackupId] = useState<string | null>(null);
+  const [migrationPhase, setMigrationPhase] = useState<'idle' | 'prompt' | 'backing_up' | 'installing' | 'resync_wait' | 'resyncing' | 'restoring' | 'verifying' | 'complete' | 'error'>('idle');
+  const [migrationBackupId, setMigrationBackupId] = useState<string | null>(null);
+  const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [migrationErrorStep, setMigrationErrorStep] = useState<'backup' | 'install' | 'resync' | 'restore' | 'verify' | null>(null);
+  const [migrationVerificationStatus, setMigrationVerificationStatus] = useState<'idle' | 'running' | 'success' | 'warning' | 'error'>('idle');
+  const [migrationVerificationMessage, setMigrationVerificationMessage] = useState<string | null>(null);
+  const [resyncStepMessage, setResyncStepMessage] = useState<string | null>(null);
+  const migrationStepStartRef = useRef<Record<string, number>>({});
 
   // Settings state
   const [lanIpOverride, setLanIpOverride] = useState('');
@@ -80,8 +124,48 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     seenRebootUp: false,
     rebootStartAt: null as number | null,
   });
+  const isMountedRef = useRef(true);
+  const migrationDeviceIdRef = useRef<string>('');
+  const resyncInFlightRef = useRef(false);
+  const resyncWaitResolveRef = useRef<(() => void) | null>(null);
+  const resyncWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startResyncFlowRef = useRef<(() => Promise<void>) | null>(null);
 
-  const { getMapping } = useDeviceMappings();
+  const { getMapping, refreshMapping } = useDeviceMappings();
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const MIN_STEP_MS = 1200;
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const markStepStart = (key: string) => {
+    migrationStepStartRef.current[key] = Date.now();
+  };
+  const ensureMinStepDuration = async (key: string, minMs: number = MIN_STEP_MS) => {
+    const start = migrationStepStartRef.current[key];
+    if (!start) return;
+    const elapsed = Date.now() - start;
+    if (elapsed < minMs) {
+      await sleep(minMs - elapsed);
+    }
+  };
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  };
 
   // Manual mode state
   const [showManualMode, setShowManualMode] = useState(false);
@@ -139,8 +223,42 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     load();
   }, []);
 
+  useEffect(() => {
+    if (!selectedDeviceId) {
+      setZoneBackups([]);
+      setBackupMapping(null);
+      setLastBackupId(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadBackups = async () => {
+      try {
+        const [backupsRes, mapping] = await Promise.all([
+          fetchZoneBackups(selectedDeviceId),
+          getMapping(selectedDeviceId),
+        ]);
+        if (cancelled) return;
+        setZoneBackups(backupsRes.backups ?? []);
+        setBackupMapping(mapping);
+      } catch (err) {
+        if (cancelled) return;
+        onErrorRef.current(
+          err instanceof Error ? err.message : 'Failed to load zone backups'
+        );
+      }
+    };
+
+    loadBackups();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDeviceId, getMapping]);
+
   // Reset state when device changes
   const handleDeviceChange = (deviceId: string) => {
+    debugMigration('handleDeviceChange', { deviceId });
     setSelectedDeviceId(deviceId);
     setDeviceConfig(null);
     setAvailableUpdates([]);
@@ -158,6 +276,19 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     setRebootConfirmed(false);
     setUpdateModalOpen(false);
     setShowBuildDetails(false);
+    setZoneBackups([]);
+    setBackupMapping(null);
+    setCreatingBackup(false);
+    setRestoringBackup(false);
+    setRestoreWarnings(null);
+    setRestoreError(null);
+    setLastBackupId(null);
+    setMigrationPhase('idle');
+    setMigrationBackupId(null);
+    setMigrationError(null);
+    setMigrationErrorStep(null);
+    setMigrationVerificationStatus('idle');
+    setMigrationVerificationMessage(null);
     updateMonitorRef.current = {
       attempts: 0,
       seenStart: false,
@@ -166,7 +297,72 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       seenRebootUp: false,
       rebootStartAt: null,
     };
+    migrationDeviceIdRef.current = deviceId;
+    try {
+      window.sessionStorage.setItem('ep_migration_device_id', deviceId);
+    } catch {
+      // ignore
+    }
   };
+
+  const isPersistableMigrationPhase = (
+    phase: typeof migrationPhase,
+  ): phase is Exclude<typeof migrationPhase, 'idle' | 'prompt'> => phase !== 'idle' && phase !== 'prompt';
+
+  // Resume an in-progress migration after a UI reload.
+  useEffect(() => {
+    if (!selectedDeviceId) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchFirmwareMigrationState(selectedDeviceId)
+      .then(({ state }) => {
+        if (cancelled || !state) return;
+        if (migrationPhase !== 'idle') return;
+        if (!['backing_up', 'installing', 'resync_wait', 'resyncing', 'restoring', 'verifying'].includes(state.phase)) {
+          return;
+        }
+
+        migrationDeviceIdRef.current = state.deviceId;
+        if (state.backupId) {
+          setMigrationBackupId(state.backupId);
+        }
+        if (state.preparedVersion) {
+          setPreparedVersion((prev) => prev ?? state.preparedVersion);
+        }
+
+        setUpdateModalOpen(true);
+        setMigrationPhase(state.phase);
+        if (state.phase === 'installing') {
+          setUpdateStatus((prev) => (prev === 'idle' ? 'updating' : prev));
+          setMonitoringUpdate(true);
+        }
+      })
+      .catch(() => null);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDeviceId, migrationPhase]);
+
+  // Persist migration progress to backend so the flow survives reloads.
+  useEffect(() => {
+    const deviceId = migrationDeviceIdRef.current || selectedDeviceId;
+    if (!deviceId) return;
+
+    if (!isPersistableMigrationPhase(migrationPhase)) {
+      clearFirmwareMigrationState(deviceId).catch(() => null);
+      return;
+    }
+
+    saveFirmwareMigrationState(deviceId, {
+      phase: migrationPhase,
+      backupId: migrationBackupId ?? null,
+      preparedVersion: preparedVersion ?? null,
+      lastError: migrationError ?? null,
+    }).catch(() => null);
+  }, [migrationPhase, migrationBackupId, migrationError, preparedVersion, selectedDeviceId]);
 
   const handleSaveSettings = async () => {
     setSavingSettings(true);
@@ -240,6 +436,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleManualPrepare = async () => {
+    resetMigrationFlow();
     if (!selectedDeviceId) {
       onError('Please select a device');
       return;
@@ -383,6 +580,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleAutoInstall = async () => {
+    resetMigrationFlow();
     const device = devices.find((d) => d.id === selectedDeviceId);
     if (!device || !device.model || !device.firmwareVersion) {
       onError('Device information incomplete');
@@ -416,6 +614,17 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       const cacheRes = await fetchFirmwareCache();
       setCachedEntries(cacheRes.entries);
 
+      const migrationInfo = getZoneMigrationInfo(
+        device.firmwareVersion,
+        res.newVersion,
+        device.model,
+        null
+      );
+      if (migrationInfo?.required) {
+        promptMigration();
+        return;
+      }
+
       await triggerUpdateOnDevice(res.prepared.token);
     } catch (err) {
       setUpdateStatus('error');
@@ -424,6 +633,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleTriggerUpdate = async () => {
+    resetMigrationFlow();
     if (!preparedToken) {
       onError('No prepared firmware available');
       return;
@@ -431,6 +641,10 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
     try {
       setUpdateModalOpen(true);
+      if (preparedMigration?.required) {
+        promptMigration();
+        return;
+      }
       await triggerUpdateOnDevice(preparedToken);
     } catch (err) {
       setUpdateStatus('error');
@@ -439,6 +653,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleInstallCachedEntry = async (entry: CachedFirmwareEntry) => {
+    resetMigrationFlow();
     if (!selectedDeviceId || selectedDeviceId !== entry.deviceId) {
       onError('Select the matching device before installing cached firmware.');
       return;
@@ -450,8 +665,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       return;
     }
 
+    let config = deviceConfig;
     try {
-      let config = deviceConfig;
       if (!config || config.configSource !== 'entities') {
         const configRes = await getDeviceConfig(
           device.model,
@@ -468,6 +683,21 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       }
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to read device build config');
+      return;
+    }
+
+    const migrationGate = getZoneMigrationInfo(
+      backupMapping?.firmwareVersion ?? backupMapping?.rawSwVersion ?? device.firmwareVersion,
+      entry.version,
+      config?.model ?? device.model,
+      null
+    );
+    if (migrationGate?.required) {
+      setPreparedToken(entry.token);
+      setPreparedVersion(entry.version);
+      setUpdateStatus('ready');
+      setUpdateModalOpen(true);
+      promptMigration();
       return;
     }
 
@@ -496,14 +726,344 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
   };
 
+  const resolveBackupContext = useCallback(async () => {
+    if (!selectedDeviceId) {
+      onErrorRef.current('Please select a device');
+      return null;
+    }
+
+    const device = devices.find((d) => d.id === selectedDeviceId);
+    if (!device) {
+      onErrorRef.current('Device not found');
+      return null;
+    }
+
+    const mapping = backupMapping ?? (await getMapping(selectedDeviceId));
+    const profileId = mapping?.profileId ?? getDeviceProfile(device)?.id ?? '';
+    const entityNamePrefix = device.entityNamePrefix || undefined;
+
+    if (!profileId) {
+      onErrorRef.current('Device profile not found. Run entity discovery to sync the device.');
+      return null;
+    }
+
+    if (!mapping && !entityNamePrefix) {
+      onErrorRef.current('Entity name prefix missing. Run entity discovery or link the device to a room.');
+      return null;
+    }
+
+    return { device, profileId, entityNamePrefix };
+  }, [selectedDeviceId, devices, backupMapping, getMapping]);
+
+  const handleCreateZoneBackup = async (): Promise<ZoneBackup | null> => {
+    const context = await resolveBackupContext();
+    if (!context) return null;
+
+    setCreatingBackup(true);
+    setRestoreWarnings(null);
+    setRestoreError(null);
+    try {
+      const result = await createZoneBackup({
+        deviceId: context.device.id,
+        profileId: context.profileId,
+        entityNamePrefix: context.entityNamePrefix,
+      });
+      setZoneBackups((prev) => {
+        const next = [result.backup, ...prev.filter((b) => b.id !== result.backup.id)];
+        next.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        return next;
+      });
+      setLastBackupId(result.backup.id);
+      onSuccess('Zone backup created.');
+      return result.backup;
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to create zone backup');
+      return null;
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
+  const handleRestoreZoneBackup = useCallback(async (backupId: string): Promise<boolean> => {
+    const context = await resolveBackupContext();
+    if (!context) return false;
+
+    setRestoringBackup(true);
+    setRestoreWarnings(null);
+    setRestoreError(null);
+    try {
+      const res = await restoreZoneBackup(backupId, {
+        deviceId: context.device.id,
+        profileId: context.profileId,
+        entityNamePrefix: context.entityNamePrefix,
+      });
+      if (res.warnings && res.warnings.length > 0) {
+        setRestoreWarnings(res.warnings);
+        onSuccessRef.current('Zones restored with warnings. Review the details below.');
+      } else {
+        onSuccessRef.current('Zones restored as polygons.');
+      }
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to restore zone backup';
+      setRestoreError(message);
+      onErrorRef.current(message);
+      return false;
+    } finally {
+      setRestoringBackup(false);
+    }
+  }, [resolveBackupContext]);
+
+  const getZoneMigrationInfo = (
+    currentVersion: string | undefined,
+    targetVersion: string | undefined,
+    model?: string | null,
+    migration?: AvailableUpdate['migration'] | null
+  ): { required: boolean; backupRequired: boolean; description: string; threshold?: string } | null => {
+    if (migration?.id === 'rectangular-to-polygon-zones') {
+      return {
+        required: true,
+        backupRequired: migration.backupRequired ?? true,
+        description: migration.description || 'Rectangular zones are replaced with polygon zones.',
+      };
+    }
+
+    const threshold = getZoneMigrationThreshold(model ?? undefined);
+    const required = requiresZoneMigration(currentVersion, targetVersion, model ?? undefined);
+    if (!threshold || required !== true) {
+      return null;
+    }
+
+    return {
+      required: true,
+      backupRequired: true,
+      description: `Rectangular zones are removed in v${threshold}.`,
+      threshold,
+    };
+  };
+
+  const parseZoneIndex = (id: string): number => {
+    const match = id.match(/(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  const sortZonesByIndex = (zones: ZoneRect[]): ZoneRect[] =>
+    [...zones].sort((a, b) => parseZoneIndex(a.id) - parseZoneIndex(b.id));
+
+  const isValidRect = (zone: ZoneRect): boolean =>
+    Number.isFinite(zone.width) && Number.isFinite(zone.height) && zone.width > 0 && zone.height > 0;
+
+  const rectToPolygon = (rect: ZoneRect): ZonePolygon => ({
+    id: rect.id,
+    type: rect.type,
+    vertices: [
+      { x: rect.x, y: rect.y },
+      { x: rect.x + rect.width, y: rect.y },
+      { x: rect.x + rect.width, y: rect.y + rect.height },
+      { x: rect.x, y: rect.y + rect.height },
+    ],
+    enabled: rect.enabled,
+    label: rect.label,
+  });
+
+  const normalizeVertices = (vertices: ZonePolygon['vertices']) =>
+    vertices.map((v) => ({ x: Math.round(v.x), y: Math.round(v.y) }));
+
+  const verticesMatch = (expected: ZonePolygon['vertices'], actual: ZonePolygon['vertices']): boolean => {
+    if (expected.length !== actual.length) return false;
+    const normalizedExpected = normalizeVertices(expected);
+    const normalizedActual = normalizeVertices(actual);
+    for (let i = 0; i < normalizedExpected.length; i += 1) {
+      if (Math.abs(normalizedExpected[i].x - normalizedActual[i].x) > 1) return false;
+      if (Math.abs(normalizedExpected[i].y - normalizedActual[i].y) > 1) return false;
+    }
+    return true;
+  };
+
+  const buildExpectedPolygons = (backup: ZoneBackup, limits: DeviceProfile['limits'] | undefined): ZonePolygon[] => {
+    const maxZones = limits?.maxZones ?? 4;
+    const maxExclusion = limits?.maxExclusionZones ?? 2;
+    const maxEntry = limits?.maxEntryZones ?? 2;
+
+    const regularZones = sortZonesByIndex(
+      backup.zones.filter((zone) => zone.type === 'regular' && isValidRect(zone))
+    ).slice(0, maxZones);
+    const exclusionZones = sortZonesByIndex(
+      backup.zones.filter((zone) => zone.type === 'exclusion' && isValidRect(zone))
+    ).slice(0, maxExclusion);
+    const entryZones = sortZonesByIndex(
+      backup.zones.filter((zone) => zone.type === 'entry' && isValidRect(zone))
+    ).slice(0, maxEntry);
+
+    return [
+      // IMPORTANT: restore writes zones sequentially into slot 1..N regardless of original slot index.
+      // If a backup has gaps (e.g. Exclusion 2 only), it will be restored into Exclusion 1.
+      // Verification must mirror that behavior to avoid false warnings.
+      ...regularZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Zone ${idx + 1}` })),
+      ...exclusionZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Exclusion ${idx + 1}` })),
+      ...entryZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Entry ${idx + 1}` })),
+    ];
+  };
+
+  function resetMigrationFlow(): void {
+    const deviceId = migrationDeviceIdRef.current || selectedDeviceId;
+    setMigrationPhase('idle');
+    setMigrationBackupId(null);
+    setMigrationError(null);
+    setMigrationErrorStep(null);
+    setMigrationVerificationStatus('idle');
+    setMigrationVerificationMessage(null);
+    setRestoreWarnings(null);
+    setRestoreError(null);
+    migrationDeviceIdRef.current = '';
+    try {
+      window.sessionStorage.removeItem('ep_migration_device_id');
+    } catch {
+      // ignore
+    }
+    if (deviceId) {
+      clearFirmwareMigrationState(deviceId).catch(() => null);
+    }
+  }
+
+  function promptMigration(): void {
+    setMigrationBackupId(null);
+    setMigrationError(null);
+    setMigrationPhase('prompt');
+  }
+
+  function cancelMigration(): void {
+    resetMigrationFlow();
+  }
+
+  const verifyPolygonRestore = useCallback(async (backupId: string): Promise<{ status: 'success' | 'warning' | 'error'; message: string }> => {
+    const backup = zoneBackups.find((item) => item.id === backupId) ?? null;
+    if (!backup) {
+      return { status: 'error', message: 'Backup not found for verification.' };
+    }
+
+    const context = await resolveBackupContext();
+    if (!context) {
+      return { status: 'error', message: 'Zone verification skipped: missing device context.' };
+    }
+
+    const profile = profiles.find((item) => item.id === context.profileId) ?? null;
+    const expectedPolygons = buildExpectedPolygons(backup, profile?.limits);
+    if (expectedPolygons.length === 0) {
+      return { status: 'success', message: 'No zones to verify.' };
+    }
+
+    try {
+      const devicePolygons = await fetchPolygonZonesFromDevice(
+        context.device.id,
+        context.profileId,
+        context.entityNamePrefix
+      );
+
+      const actualByKey = new Map<string, ZonePolygon>();
+      for (const zone of devicePolygons) {
+        actualByKey.set(`${zone.type}:${zone.id}`, zone);
+      }
+
+      let mismatches = 0;
+      for (const expected of expectedPolygons) {
+        const actual = actualByKey.get(`${expected.type}:${expected.id}`);
+        if (!actual || !verticesMatch(expected.vertices, actual.vertices)) {
+          mismatches += 1;
+        }
+      }
+
+      if (mismatches > 0) {
+        return {
+          status: 'warning',
+          message: `${mismatches} polygon zone${mismatches > 1 ? 's' : ''} did not match the backup.`,
+        };
+      }
+
+      return { status: 'success', message: 'Polygon zones verified.' };
+    } catch (error) {
+      return {
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Failed to verify polygon zones.',
+      };
+    }
+  }, [zoneBackups, resolveBackupContext, profiles]);
+
+  async function confirmMigrationAndInstall(): Promise<void> {
+    if (!preparedToken) {
+      onError('No prepared firmware available');
+      return;
+    }
+    if (!selectedDeviceId) {
+      onError('Please select a device');
+      return;
+    }
+
+    migrationDeviceIdRef.current = selectedDeviceId;
+    try {
+      window.sessionStorage.setItem('ep_migration_device_id', selectedDeviceId);
+    } catch {
+      // ignore
+    }
+    debugMigration('confirmMigrationAndInstall', {
+      selectedDeviceId,
+      preparedVersion,
+      preparedTokenPresent: Boolean(preparedToken),
+    });
+
+    setMigrationError(null);
+    setMigrationErrorStep(null);
+    setMigrationVerificationStatus('idle');
+    setMigrationVerificationMessage(null);
+    markStepStart('backup');
+    setMigrationPhase('backing_up');
+    const backup = await handleCreateZoneBackup();
+    if (!backup) {
+      setMigrationPhase('error');
+      setMigrationError('Failed to create zone backup.');
+      setMigrationErrorStep('backup');
+      return;
+    }
+
+    await ensureMinStepDuration('backup');
+    setMigrationBackupId(backup.id);
+    markStepStart('install');
+    setMigrationPhase('installing');
+    try {
+      await triggerUpdateOnDevice(preparedToken);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to trigger update';
+      setMigrationPhase('error');
+      setMigrationError(message);
+      setMigrationErrorStep('install');
+      onError(message);
+    }
+  }
+
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId);
+  const currentFirmwareVersion =
+    backupMapping?.firmwareVersion ??
+    backupMapping?.rawSwVersion ??
+    selectedDevice?.firmwareVersion ??
+    selectedUpdate?.currentVersion;
+  const sortedBackups = [...zoneBackups].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  const latestBackup = sortedBackups[0] ?? null;
   const effectiveLanIp = lanIpOverride || autoDetectedIp;
   const updatesBlocked = deviceConfig?.configSource === 'inferred';
   const updatesBlockedMessage = buildConfigUnavailableMessage;
-  const modalLocked = ['checking', 'preparing', 'downloading', 'updating'].includes(updateStatus);
-  const showFirmwareModal = updateModalOpen || updateStatus === 'updating';
+  const migrationInProgress = ['backing_up', 'installing', 'resync_wait', 'resyncing', 'restoring', 'verifying'].includes(migrationPhase);
+  const migrationPromptOpen = migrationPhase === 'prompt';
+  const modalLocked = ['checking', 'preparing', 'downloading', 'updating'].includes(updateStatus) || migrationInProgress;
+  const showFirmwareModal = updateModalOpen || updateStatus === 'updating' || migrationInProgress;
   const canInstall =
-    updateStatus === 'ready' && preparedToken && deviceConfig?.configSource === 'entities';
+    updateStatus === 'ready' &&
+    preparedToken &&
+    deviceConfig?.configSource === 'entities' &&
+    !migrationPromptOpen &&
+    !migrationInProgress &&
+    migrationPhase !== 'error';
   const configStatus = !selectedDeviceId
     ? 'No device selected'
     : deviceConfig
@@ -520,6 +1080,287 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     typeof updateEntityStatus?.attributes?.installed_version === 'string'
       ? updateEntityStatus.attributes.installed_version
       : null;
+  const latestUpdate = availableUpdates.reduce<AvailableUpdate | null>((latest, update) => {
+    if (!latest) return update;
+    const comparison = compareVersions(update.newVersion, latest.newVersion);
+    if (comparison === null) return latest;
+    return comparison > 0 ? update : latest;
+  }, null);
+  const latestUpdateMigration = latestUpdate
+    ? getZoneMigrationInfo(
+        latestUpdate.currentVersion,
+        latestUpdate.newVersion,
+        deviceConfig?.model ?? selectedDevice?.model ?? undefined,
+        latestUpdate.migration
+      )
+    : null;
+  const preparedMigration = preparedVersion
+    ? getZoneMigrationInfo(
+        currentFirmwareVersion,
+        preparedVersion,
+        deviceConfig?.model ?? selectedDevice?.model ?? undefined,
+        selectedUpdate?.migration ?? null
+      )
+    : null;
+  const restoreBackupId = migrationBackupId ?? lastBackupId ?? latestBackup?.id ?? null;
+  const migrationPromptTargetVersion =
+    preparedVersion ?? selectedUpdate?.newVersion ?? latestUpdate?.newVersion ?? null;
+  const migrationPromptText = `The version you are upgrading to${migrationPromptTargetVersion ? ` (v${migrationPromptTargetVersion})` : ''} removes rectangular zones in favour of polygon zones. During the upgrade, we will back up your current rectangular zones, update the device, and convert them to polygon zones for a seamless experience. If you are ready to proceed with this upgrade, please proceed.`;
+  const migrationStepOrder = ['backup', 'install', 'resync', 'restore', 'verify'] as const;
+  type MigrationStepKey = (typeof migrationStepOrder)[number];
+  const activeStep: MigrationStepKey | null = (() => {
+    if (migrationPhase === 'backing_up') return 'backup';
+    if (migrationPhase === 'installing') return 'install';
+    if (migrationPhase === 'resync_wait' || migrationPhase === 'resyncing') return 'resync';
+    if (migrationPhase === 'restoring') return 'restore';
+    if (migrationPhase === 'verifying') return 'verify';
+    return null;
+  })();
+  const activeStepIndex = activeStep ? migrationStepOrder.indexOf(activeStep) : -1;
+  const errorStepIndex = migrationErrorStep ? migrationStepOrder.indexOf(migrationErrorStep) : -1;
+  const getMigrationStepStatus = (step: MigrationStepKey): 'pending' | 'active' | 'done' | 'error' | 'warning' => {
+    if (migrationErrorStep === step) return 'error';
+    if (step === 'verify' && migrationVerificationStatus === 'warning') return 'warning';
+    if (activeStep === step) return 'active';
+    if (migrationPhase === 'complete') return 'done';
+    if (migrationPhase === 'error') {
+      return migrationErrorStep && migrationStepOrder.indexOf(step) < errorStepIndex ? 'done' : 'pending';
+    }
+    if (activeStepIndex >= 0 && migrationStepOrder.indexOf(step) < activeStepIndex) return 'done';
+    return 'pending';
+  };
+  const migrationSteps = [
+    { key: 'backup' as MigrationStepKey, label: 'Backup zones' },
+    { key: 'install' as MigrationStepKey, label: 'Install update' },
+    { key: 'resync' as MigrationStepKey, label: 'Re-sync entities' },
+    { key: 'restore' as MigrationStepKey, label: 'Restore zones' },
+    { key: 'verify' as MigrationStepKey, label: 'Verify zones' },
+  ].map((step) => ({
+    ...step,
+    status: getMigrationStepStatus(step.key),
+  }));
+  const showMigrationSteps = migrationPhase !== 'idle' && migrationPhase !== 'prompt';
+  const getMigrationStepDetail = (step: MigrationStepKey, status: 'pending' | 'active' | 'done' | 'error' | 'warning'): string | null => {
+    if (status === 'pending') return null;
+    if (status === 'error') return migrationError ?? 'Step failed.';
+    if (status === 'warning' && step === 'verify') {
+      return migrationVerificationMessage ?? 'Some zones did not match.';
+    }
+    if (status === 'done') {
+      if (step === 'backup') return 'Backup saved.';
+      if (step === 'install') return 'Firmware updated.';
+      if (step === 'resync') return 'Entities refreshed.';
+      if (step === 'restore') return 'Zones restored.';
+      if (step === 'verify') return migrationVerificationMessage ?? 'Verification complete.';
+    }
+    if (step === 'backup') return 'Saving current zones...';
+    if (step === 'install') return updateMonitorMessage || 'Installing firmware...';
+    if (step === 'resync') {
+      if (migrationPhase === 'resync_wait') {
+        return resyncStepMessage ?? 'Letting the device settle after reboot...';
+      }
+      return resyncStepMessage ?? 'Refreshing entity map...';
+    }
+    if (step === 'restore') return 'Applying polygon zones...';
+    if (step === 'verify') return 'Checking restored polygons...';
+    return null;
+  };
+  const migrationStepTone = {
+    pending: {
+      dot: 'bg-slate-700 border border-slate-600',
+      line: 'bg-slate-700/70',
+      text: 'text-slate-400',
+      detail: 'text-slate-500',
+    },
+    active: {
+      dot: 'bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.35)]',
+      line: 'bg-cyan-400/70 animate-pulse',
+      text: 'text-cyan-100',
+      detail: 'text-cyan-200',
+    },
+    done: {
+      dot: 'bg-emerald-400',
+      line: 'bg-emerald-400/70',
+      text: 'text-emerald-100',
+      detail: 'text-emerald-200',
+    },
+    warning: {
+      dot: 'bg-amber-400',
+      line: 'bg-amber-400/70 animate-pulse',
+      text: 'text-amber-100',
+      detail: 'text-amber-200',
+    },
+    error: {
+      dot: 'bg-rose-500',
+      line: 'bg-rose-500/70',
+      text: 'text-rose-100',
+      detail: 'text-rose-200',
+    },
+  } as const;
+  const handleForceResync = () => {
+    debugMigration('handleForceResync', {
+      selectedDeviceId,
+      migrationDeviceId: migrationDeviceIdRef.current,
+      migrationPhase,
+      updateStatus,
+    });
+    if (resyncWaitResolveRef.current) {
+      resyncWaitResolveRef.current();
+      return;
+    }
+    if (startResyncFlowRef.current) {
+      startResyncFlowRef.current();
+      return;
+    }
+    startResyncFlow();
+  };
+  const migrationStepsPanel = showMigrationSteps ? (
+    <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-4 text-xs text-slate-200">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+          Migration progress
+        </div>
+        {migrationPhase === 'complete' && (
+          <span className="text-[11px] font-semibold text-emerald-200">Complete</span>
+        )}
+      </div>
+      <div className="mt-4 space-y-3">
+        {migrationSteps.map((step, index) => {
+          const detail = getMigrationStepDetail(step.key, step.status);
+          const tone = migrationStepTone[step.status];
+          const isActive = step.status === 'active';
+          const isLast = index === migrationSteps.length - 1;
+          return (
+            <div key={step.key} className="flex items-start gap-3">
+              <div className="relative flex flex-col items-center">
+                <div className={`relative h-3 w-3 rounded-full ${tone.dot} transition-colors duration-300`}>
+                  {isActive && (
+                    <span className="absolute inset-0 rounded-full bg-cyan-400/40 animate-ping" />
+                  )}
+                </div>
+                {!isLast && (
+                  <div className={`mt-1 h-8 w-px ${tone.line} transition-colors duration-300`} />
+                )}
+              </div>
+              <div className="flex-1">
+                <div className={`text-sm font-semibold ${tone.text}`}>{step.label}</div>
+                {detail && <div className={`mt-1 text-xs ${tone.detail}`}>{detail}</div>}
+                {step.key === 'resync' && migrationPhase === 'resync_wait' && (
+                  <button
+                    type="button"
+                    onClick={handleForceResync}
+                    className="mt-2 rounded-lg border border-cyan-400/40 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 transition hover:bg-cyan-500/20"
+                  >
+                    Start re-sync now
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {migrationPhase === 'error' && (
+        <div className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-xs text-rose-100">
+          <div className="text-sm font-semibold text-rose-100">Migration paused</div>
+          <div className="mt-1 text-xs text-rose-200">
+            {migrationError || 'The migration could not finish automatically.'}
+          </div>
+          {migrationErrorStep === 'resync' && (
+            <button
+              type="button"
+              onClick={() => {
+                setMigrationError(null);
+                setMigrationErrorStep(null);
+                setMigrationVerificationStatus('idle');
+                setMigrationVerificationMessage(null);
+                setMigrationPhase('resync_wait');
+              }}
+              className="mt-3 rounded-lg bg-rose-600/20 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-600/30"
+            >
+              Retry re-sync
+            </button>
+          )}
+          {restoreBackupId && (migrationErrorStep === 'restore' || migrationErrorStep === 'verify') && (
+            <button
+              type="button"
+              onClick={async () => {
+                setMigrationError(null);
+                setMigrationErrorStep(null);
+                setMigrationVerificationStatus('idle');
+                setMigrationVerificationMessage(null);
+
+                markStepStart('restore');
+                setMigrationPhase('restoring');
+                const restored = await handleRestoreZoneBackup(restoreBackupId);
+                if (!isMountedRef.current) {
+                  return;
+                }
+                if (!restored) {
+                  setMigrationPhase('error');
+                  setMigrationError('Zone restore failed. Try restoring again from Zone Backups.');
+                  setMigrationErrorStep('restore');
+                  return;
+                }
+
+                await ensureMinStepDuration('restore');
+                if (!isMountedRef.current) {
+                  return;
+                }
+
+                markStepStart('verify');
+                setMigrationPhase('verifying');
+                setMigrationVerificationStatus('running');
+                setMigrationVerificationMessage(null);
+                const verification = await verifyPolygonRestore(restoreBackupId);
+                if (!isMountedRef.current) {
+                  return;
+                }
+
+                await ensureMinStepDuration('verify');
+                if (!isMountedRef.current) {
+                  return;
+                }
+
+                setMigrationVerificationStatus(verification.status);
+                setMigrationVerificationMessage(verification.message);
+
+                if (verification.status === 'error') {
+                  setMigrationPhase('error');
+                  setMigrationError(verification.message);
+                  setMigrationErrorStep('verify');
+                  return;
+                }
+
+                setMigrationPhase('complete');
+              }}
+              disabled={restoringBackup}
+              className="mt-3 rounded-lg bg-rose-600/20 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:bg-rose-600/30 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {restoringBackup ? 'Restoring...' : 'Try Restore Again'}
+            </button>
+          )}
+        </div>
+      )}
+      {migrationPhase === 'complete' && migrationVerificationStatus === 'warning' && (
+        <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+          <div className="text-sm font-semibold text-amber-100">Review recommended</div>
+          <div className="mt-1 text-xs text-amber-200">
+            {migrationVerificationMessage ?? 'Some zones did not match the backup.'}
+          </div>
+        </div>
+      )}
+      {restoreWarnings && restoreWarnings.length > 0 && (
+        <ul className="mt-4 space-y-1 text-[11px] text-slate-300">
+          {restoreWarnings.map((warning, index) => (
+            <li key={`${warning.error}-${index}`}>
+              {warning.description} ({warning.error})
+            </li>
+          ))}
+        </ul>
+      )}
+      {restoreError && <div className="mt-3 text-[11px] text-rose-200">{restoreError}</div>}
+    </div>
+  ) : null;
 
   const parseProgress = (attributes: Record<string, unknown>): number | null => {
     const raw =
@@ -597,7 +1438,10 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         const installedVersion = typeof attributes.installed_version === 'string'
           ? attributes.installed_version
           : null;
-        const hasStartSignal = inProgress || (progress !== null && progress > 0);
+        const installedVersionMatches =
+          !!preparedVersion && !!installedVersion && installedVersion === preparedVersion;
+        const hasStartSignal =
+          inProgress || (progress !== null && progress > 0) || installedVersionMatches;
 
         if (progress !== null) {
           setUpdateProgress(progress);
@@ -657,11 +1501,17 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                 return;
               }
               setRebootConfirmed(true);
+              setUpdateMonitorMessage('Update complete.');
               setMonitoringUpdate(false);
               setUpdateStatus('complete');
               onSuccess(
                 `Firmware updated${installedVersion ? ` to v${installedVersion}` : ''}. Device rebooted and is back online.`
               );
+              debugMigration('install complete -> resync_wait', {
+                selectedDeviceId,
+                migrationDeviceId: migrationDeviceIdRef.current,
+              });
+              setMigrationPhase((prev) => (prev === 'installing' ? 'resync_wait' : prev));
               return;
             }
           } else if (installCompleteSignal) {
@@ -672,11 +1522,17 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
               return;
             }
             setRebootConfirmed(false);
+            setUpdateMonitorMessage('Update complete.');
             setMonitoringUpdate(false);
             setUpdateStatus('complete');
             onSuccess(
               `Firmware updated${installedVersion ? ` to v${installedVersion}` : ''}. Device may reboot briefly.`
             );
+            debugMigration('install complete -> resync_wait', {
+              selectedDeviceId,
+              migrationDeviceId: migrationDeviceIdRef.current,
+            });
+            setMigrationPhase((prev) => (prev === 'installing' ? 'resync_wait' : prev));
             return;
           }
         }
@@ -726,7 +1582,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       cancelled = true;
       clearInterval(interval);
     };
-  }, [monitoringUpdate, selectedDeviceId, preparedVersion, availabilityEntityId, onError, onSuccess]);
+  }, [monitoringUpdate, selectedDeviceId, preparedVersion, availabilityEntityId, onError, onSuccess, debugMigration]);
 
   // Format device config for display
   const formatDeviceConfig = (config: DeviceConfig) => {
@@ -765,6 +1621,332 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
     return null;
   };
+
+  const startResyncFlow = useCallback(async () => {
+    if (resyncInFlightRef.current) {
+      return;
+    }
+    resyncInFlightRef.current = true;
+    try {
+      let storedDeviceId: string | null = null;
+      try {
+        storedDeviceId = window.sessionStorage.getItem('ep_migration_device_id');
+      } catch {
+        storedDeviceId = null;
+      }
+      const deviceId = migrationDeviceIdRef.current || selectedDeviceId || storedDeviceId || '';
+      if (!migrationDeviceIdRef.current && deviceId) {
+        migrationDeviceIdRef.current = deviceId;
+      }
+
+      if (!isMountedRef.current) {
+        return;
+      }
+      if (!deviceId) {
+        setMigrationPhase('error');
+        setMigrationError('No device selected for entity re-sync.');
+        setMigrationErrorStep('resync');
+        return;
+      }
+
+      const device = devices.find((d) => d.id === deviceId);
+      if (!device) {
+        setMigrationPhase('error');
+        setMigrationError('Device not found after update.');
+        setMigrationErrorStep('resync');
+        return;
+      }
+
+      const profileId = backupMapping?.profileId ?? getDeviceProfile(device)?.id ?? '';
+      const deviceName =
+        backupMapping?.deviceName ??
+        device.name ??
+        device.entityNamePrefix ??
+        device.model ??
+        'Device';
+
+      if (!profileId) {
+        setMigrationPhase('error');
+        setMigrationError('Entity re-sync skipped: device profile not found.');
+        setMigrationErrorStep('resync');
+        return;
+      }
+
+      markStepStart('resync');
+      setMigrationPhase('resyncing');
+      debugMigration('startResyncFlow: calling discoverAndSaveMapping', {
+        deviceId,
+        profileId,
+        deviceName,
+      });
+      const result = await withTimeout(
+        discoverAndSaveMapping(deviceId, profileId, deviceName),
+        45000,
+        'Entity re-sync timed out. Make sure the device is online and try again.'
+      );
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      if (!result?.mapping) {
+        setMigrationPhase('error');
+        setMigrationError('Entity re-sync failed. Run entity discovery to update mappings.');
+        setMigrationErrorStep('resync');
+        return;
+      }
+
+      setBackupMapping(result.mapping);
+      await refreshMapping(deviceId);
+      await ensureMinStepDuration('resync');
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      // Before restoring zones, wait for polygon entities to become available after the update.
+      const entityNamePrefix =
+        device.entityNamePrefix ?? result.mapping?.esphomeNodeName ?? backupMapping?.esphomeNodeName ?? null;
+      if (entityNamePrefix) {
+        const backupId = migrationBackupId ?? lastBackupId ?? latestBackup?.id ?? null;
+        const backup = backupId ? zoneBackups.find((item) => item.id === backupId) ?? null : null;
+        const profile = profiles.find((item) => item.id === profileId) ?? null;
+        const expected = backup ? buildExpectedPolygons(backup, profile?.limits) : [];
+        const regularCount = expected.filter((zone) => zone.type === 'regular').length;
+        const exclusionCount = expected.filter((zone) => zone.type === 'exclusion').length;
+        const entryCount = expected.filter((zone) => zone.type === 'entry').length;
+        const waitStart = Date.now();
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          if (!isMountedRef.current) {
+            return;
+          }
+          const elapsed = Date.now() - waitStart;
+          if (elapsed > 90_000) {
+            setMigrationPhase('error');
+            setMigrationError('Timed out waiting for polygon zone entities to become available after reboot.');
+            setMigrationErrorStep('restore');
+            return;
+          }
+
+          try {
+            const readiness = await fetchDeviceReadiness(deviceId, {
+              require: 'polygon',
+              profileId,
+              entityNamePrefix,
+              regularCount,
+              exclusionCount,
+              entryCount,
+            });
+            if (!isMountedRef.current) {
+              return;
+            }
+            const checked = readiness.checkedEntityIds?.length ?? 0;
+            const available = readiness.availableEntityCount ?? 0;
+            if (readiness.ready) {
+              setResyncStepMessage(null);
+              break;
+            }
+            setResyncStepMessage(`Waiting for polygon entities (${available}/${checked})...`);
+          } catch (error) {
+            setResyncStepMessage('Waiting for polygon entities...');
+          }
+
+          await sleep(1500);
+        }
+      }
+
+      const backupId = migrationBackupId ?? lastBackupId ?? latestBackup?.id ?? null;
+      if (!backupId) {
+        setMigrationPhase('error');
+        setMigrationError('Zone backup not found. Create a new backup and restore manually.');
+        setMigrationErrorStep('restore');
+        return;
+      }
+
+      markStepStart('restore');
+      setMigrationPhase('restoring');
+      const restored = await handleRestoreZoneBackup(backupId);
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      if (!restored) {
+        setMigrationPhase('error');
+        setMigrationError('Zone restore failed. Try restoring again from Zone Backups.');
+        setMigrationErrorStep('restore');
+        return;
+      }
+
+      await ensureMinStepDuration('restore');
+
+      markStepStart('verify');
+      setMigrationPhase('verifying');
+      setMigrationVerificationStatus('running');
+      setMigrationVerificationMessage(null);
+      const verification = await verifyPolygonRestore(backupId);
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      await ensureMinStepDuration('verify');
+      if (!isMountedRef.current) {
+        return;
+      }
+      setMigrationVerificationStatus(verification.status);
+      setMigrationVerificationMessage(verification.message);
+
+      if (verification.status === 'error') {
+        setMigrationPhase('error');
+        setMigrationError(verification.message);
+        setMigrationErrorStep('verify');
+        return;
+      }
+
+      setMigrationPhase('complete');
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Entity re-sync failed.';
+      setMigrationPhase('error');
+      setMigrationError(message);
+      setMigrationErrorStep('resync');
+    } finally {
+      resyncInFlightRef.current = false;
+    }
+  }, [
+    backupMapping?.deviceName,
+    backupMapping?.profileId,
+    devices,
+    handleRestoreZoneBackup,
+    lastBackupId,
+    latestBackup?.id,
+    migrationBackupId,
+    profiles,
+    refreshMapping,
+    selectedDeviceId,
+    zoneBackups,
+    verifyPolygonRestore,
+  ]);
+
+  // Keep ref updated so transition effect can use latest without re-running
+  useEffect(() => {
+    startResyncFlowRef.current = startResyncFlow;
+  }, [startResyncFlow]);
+
+  useEffect(() => {
+    if (migrationPhase !== 'resync_wait') {
+      if (resyncWaitTimerRef.current) {
+        clearTimeout(resyncWaitTimerRef.current);
+        resyncWaitTimerRef.current = null;
+      }
+      resyncWaitResolveRef.current = null;
+      setResyncStepMessage(null);
+      return;
+    }
+
+    const deviceId = migrationDeviceIdRef.current || selectedDeviceId;
+    const startAt = Date.now();
+    let cancelled = false;
+
+    const triggerResync = () => {
+      const trigger = startResyncFlowRef.current;
+      if (trigger) {
+        trigger();
+      } else {
+        startResyncFlow();
+      }
+    };
+
+    resyncWaitResolveRef.current = () => {
+      if (resyncWaitTimerRef.current) {
+        clearTimeout(resyncWaitTimerRef.current);
+        resyncWaitTimerRef.current = null;
+      }
+      resyncWaitResolveRef.current = null;
+      setResyncStepMessage('Starting entity re-sync...');
+      triggerResync();
+    };
+
+    const poll = async () => {
+      if (cancelled || !isMountedRef.current) {
+        return;
+      }
+      if (!deviceId) {
+        setMigrationPhase('error');
+        setMigrationError('No device selected for entity re-sync.');
+        setMigrationErrorStep('resync');
+        return;
+      }
+
+      const elapsedMs = Date.now() - startAt;
+      if (elapsedMs > 2 * 60 * 1000) {
+        setMigrationPhase('error');
+        setMigrationError('Timed out waiting for device entities to become available after reboot.');
+        setMigrationErrorStep('resync');
+        return;
+      }
+
+      try {
+        const readiness = await fetchDeviceReadiness(deviceId, { require: 'discover' });
+        if (cancelled || !isMountedRef.current) {
+          return;
+        }
+
+        const checked = readiness.checkedEntityIds?.length ?? 0;
+        const available = readiness.availableEntityCount ?? 0;
+        setResyncStepMessage(
+          readiness.ready
+            ? 'Starting entity re-sync...'
+            : `Waiting for device entities (${available}/${checked})...`,
+        );
+
+        if (readiness.ready) {
+          resyncWaitResolveRef.current = null;
+          triggerResync();
+          return;
+        }
+      } catch {
+        setResyncStepMessage('Waiting for device entities...');
+      }
+
+      resyncWaitTimerRef.current = setTimeout(poll, 1500);
+    };
+
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (resyncWaitTimerRef.current) {
+        clearTimeout(resyncWaitTimerRef.current);
+        resyncWaitTimerRef.current = null;
+      }
+      resyncWaitResolveRef.current = null;
+      setResyncStepMessage(null);
+    };
+  }, [migrationPhase]);
+
+  useEffect(() => {
+    if (updateStatus !== 'complete' || migrationPhase !== 'installing') {
+      return;
+    }
+    // Immediately proceed to resync - the install step is complete
+    if (startResyncFlowRef.current) {
+      startResyncFlowRef.current();
+    }
+  }, [updateStatus, migrationPhase]);
+
+  useEffect(() => {
+    if (updateStatus !== 'error') {
+      return;
+    }
+    if (migrationPhase !== 'idle' && migrationPhase !== 'prompt' && migrationPhase !== 'error') {
+      setMigrationPhase('error');
+      setMigrationError('Firmware update failed before zone migration could complete.');
+      if (migrationPhase === 'installing') {
+        setMigrationErrorStep('install');
+      }
+    }
+  }, [updateStatus, migrationPhase]);
 
   if (loading) {
     return (
@@ -824,7 +2006,58 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                 </div>
               )}
 
-              {updateStatus === 'updating' && (
+              {migrationInProgress && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <div className="relative h-14 w-14">
+                      <div className="absolute inset-0 rounded-full border-4 border-cyan-500/20 animate-ping" />
+                      <div className="absolute inset-0 rounded-full border-4 border-cyan-400 border-t-transparent animate-spin" />
+                      <div className="absolute inset-2 rounded-full bg-cyan-500/10 animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="text-base font-semibold text-cyan-100">
+                        {activeStep
+                          ? migrationSteps.find((step) => step.key === activeStep)?.label ?? 'Working...'
+                          : 'Working...'}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {activeStep ? getMigrationStepDetail(activeStep, 'active') || 'Working on it...' : 'Working on it...'}
+                      </div>
+                    </div>
+                  </div>
+                  {updateStatus === 'updating' && updateProgress !== null ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-cyan-100">
+                        <span>Progress</span>
+                        <span>{updateProgress}%</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-slate-700/70 overflow-hidden">
+                        <div
+                          className="h-2 rounded-full bg-cyan-400 transition-all duration-500"
+                          style={{ width: `${Math.min(100, Math.max(0, updateProgress))}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : updateStatus === 'updating' ? (
+                    <div className="text-xs text-slate-400">Waiting for update progress...</div>
+                  ) : null}
+                  {updateStatus === 'updating' && updateEntityStatus && (
+                    <div className="text-xs text-slate-400">
+                      Update entity: {updateEntityStatus.state}
+                      {updateInstalledVersion ? ` | Installed: ${updateInstalledVersion}` : ''}
+                    </div>
+                  )}
+                  {activeStep === 'install' && (
+                    <div className="text-[11px] text-slate-500">
+                      This can take a few minutes. If the device stays offline for 2 minutes, we will stop waiting.
+                      Keep this window open while the update completes.
+                    </div>
+                  )}
+                  {migrationStepsPanel}
+                </div>
+              )}
+
+              {updateStatus === 'updating' && !migrationInProgress && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-4">
                     <div className="relative h-14 w-14">
@@ -865,14 +2098,53 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                     This can take a few minutes. If the device stays offline for 2 minutes, we will stop waiting.
                     Keep this window open while the update completes.
                   </div>
+                  {migrationStepsPanel}
                 </div>
               )}
 
-              {updateStatus === 'ready' && (
+              {updateStatus === 'ready' && !migrationInProgress && (
                 <div className="space-y-4">
-                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-                    Firmware {preparedVersion ? `v${preparedVersion}` : 'update'} is ready to install.
-                  </div>
+                  {!migrationPromptOpen && (
+                    <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                      Firmware {preparedVersion ? `v${preparedVersion}` : 'update'} is ready to install.
+                    </div>
+                  )}
+                  {migrationPromptOpen && (
+                    <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4 text-xs text-amber-100">
+                      <div className="text-sm font-semibold text-amber-100">
+                        Polygon migration required
+                      </div>
+                      <p className="mt-1 text-amber-200">
+                        {migrationPromptText}
+                      </p>
+                      <div className="mt-3 rounded-lg border border-amber-500/30 bg-slate-900/40 p-3">
+                        <img
+                          src={polygonMigrationGraphic}
+                          alt="Polygon migration preview"
+                          className="h-24 w-full object-contain"
+                        />
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          onClick={confirmMigrationAndInstall}
+                          disabled={creatingBackup || migrationPhase === 'backing_up'}
+                          className="rounded-lg bg-amber-500/30 px-3 py-1.5 text-xs font-semibold text-amber-50 transition hover:bg-amber-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {creatingBackup || migrationPhase === 'backing_up' ? 'Starting...' : 'Continue and Migrate'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            cancelMigration();
+                            setUpdateModalOpen(false);
+                          }}
+                          className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:bg-amber-500/20"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {migrationStepsPanel}
                   {validation && validation.warnings.length > 0 && (
                     <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4">
                       <h4 className="mb-2 text-sm font-semibold text-amber-200">Warnings</h4>
@@ -884,47 +2156,56 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                     </div>
                   )}
                   {canInstall && (
-                    <button
-                      onClick={handleTriggerUpdate}
-                      className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
-                    >
-                      Install on Device
-                    </button>
+                    <div className="space-y-2">
+                      <button
+                        onClick={handleTriggerUpdate}
+                        className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Install on Device
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
 
-              {updateStatus === 'complete' && (
+              {updateStatus === 'complete' && !migrationInProgress && (
                 <div className="space-y-4">
-                  <div className="flex items-start gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-                    <div className="relative mt-0.5 flex h-10 w-10 items-center justify-center rounded-full border border-emerald-400/50 bg-emerald-500/20">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/30" />
-                      <svg
-                        viewBox="0 0 24 24"
-                        aria-hidden="true"
-                        className="relative h-5 w-5 text-emerald-200"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold text-emerald-100">
-                        Firmware update successful
+                  {!showMigrationSteps && (
+                    <div className="flex items-start gap-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+                      <div className="relative mt-0.5 flex h-10 w-10 items-center justify-center rounded-full border border-emerald-400/50 bg-emerald-500/20">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/30" />
+                        <svg
+                          viewBox="0 0 24 24"
+                          aria-hidden="true"
+                          className="relative h-5 w-5 text-emerald-200"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M5 13l4 4L19 7" />
+                        </svg>
                       </div>
-                      <div className="text-xs text-emerald-100/90">
-                        Firmware updated{updateInstalledVersion ? ` to v${updateInstalledVersion}` : preparedVersion ? ` to v${preparedVersion}` : ''}.{' '}
-                        {rebootConfirmed ? 'Device rebooted and is back online.' : 'Device may reboot briefly.'}
+                      <div>
+                        <div className="text-sm font-semibold text-emerald-100">
+                          Firmware update successful
+                        </div>
+                        <div className="text-xs text-emerald-100/90">
+                          Firmware updated{updateInstalledVersion ? ` to v${updateInstalledVersion}` : preparedVersion ? ` to v${preparedVersion}` : ''}.{' '}
+                          {rebootConfirmed ? 'Device rebooted and is back online.' : 'Device may reboot briefly.'}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
+                  {migrationStepsPanel}
                   <button
                     type="button"
-                    onClick={() => setUpdateModalOpen(false)}
+                    onClick={() => {
+                      resetMigrationFlow();
+                      setUpdateModalOpen(false);
+                    }}
+                    disabled={migrationInProgress}
                     className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700"
                   >
                     Close
@@ -934,12 +2215,16 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
               {updateStatus === 'error' && (
                 <div className="space-y-4">
+                  {migrationStepsPanel}
                   <div className="rounded-xl border border-rose-500/50 bg-rose-500/10 p-4 text-sm text-rose-100">
                     Update failed. Check the error message above or Home Assistant for details.
                   </div>
                   <button
                     type="button"
-                    onClick={() => setUpdateModalOpen(false)}
+                    onClick={() => {
+                      resetMigrationFlow();
+                      setUpdateModalOpen(false);
+                    }}
                     className="w-full rounded-lg border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700"
                   >
                     Close
@@ -978,6 +2263,16 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
                   {deviceConfig?.configSource === 'entities' && availableUpdates.length > 0 && (
                     <div className="space-y-3">
+                      {latestUpdateMigration && (
+                        <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-200">
+                          <div className="text-sm font-semibold text-amber-100">
+                            Polygon migration required
+                          </div>
+                          <p className="mt-1">
+                            {latestUpdateMigration.description} The installer will back up and restore your zones automatically.
+                          </p>
+                        </div>
+                      )}
                       {availableUpdates.map((update, index) => (
                         <div
                           key={index}
@@ -1004,14 +2299,23 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                           {update.releaseNotes && (
                             <p className="mt-1 text-xs text-slate-400">{update.releaseNotes}</p>
                           )}
-                          {update.migration && (
-                            <div className="mt-2 rounded border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-200">
-                              <strong>Migration Required:</strong> {update.migration.description}
-                              {update.migration.backupRequired && (
-                                <span className="ml-1 text-amber-400">(Backup recommended)</span>
-                              )}
-                            </div>
-                          )}
+                          {(() => {
+                            const migrationInfo = getZoneMigrationInfo(
+                              update.currentVersion,
+                              update.newVersion,
+                              deviceConfig?.model ?? selectedDevice?.model ?? undefined,
+                              update.migration
+                            );
+                            if (!migrationInfo) return null;
+                            return (
+                              <div className="mt-2 rounded border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-200">
+                                <strong>Migration Required:</strong> {migrationInfo.description}
+                                {migrationInfo.backupRequired && (
+                                  <span className="ml-1 text-amber-400">(Auto migrate)</span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       ))}
 
@@ -1020,7 +2324,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                         disabled={
                           updateStatus === 'preparing' ||
                           updateStatus === 'downloading' ||
-                          updateStatus === 'updating'
+                          updateStatus === 'updating' ||
+                          migrationInProgress
                         }
                         className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -1038,7 +2343,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                           disabled={
                             updateStatus === 'preparing' ||
                             updateStatus === 'downloading' ||
-                            updateStatus === 'updating'
+                            updateStatus === 'updating' ||
+                            migrationInProgress
                           }
                           className="rounded-lg border border-slate-600 bg-slate-700 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
                         >

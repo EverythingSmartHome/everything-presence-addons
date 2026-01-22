@@ -7,6 +7,7 @@ import type { IHaReadTransport } from '../ha/readTransport';
 import type { FirmwareConfig } from '../config';
 import { DEFAULT_FIRMWARE_INDEX_URLS } from '../types/firmware';
 import { deviceEntityService } from '../domain/deviceEntityService';
+import { firmwareMigrationStorage, FirmwareMigrationPhase } from '../config/firmwareMigrationStorage';
 
 export interface FirmwareRouterDependencies {
   config: FirmwareConfig;
@@ -20,6 +21,61 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
     config: deps.config,
     writeClient: deps.writeClient,
     readTransport: deps.readTransport,
+  });
+
+  /**
+   * GET /api/firmware/migration/active
+   * Returns the currently active migration (if any).
+   */
+  router.get('/migration/active', (_req, res) => {
+    const state = firmwareMigrationStorage.getActive();
+    res.json({ state });
+  });
+
+  /**
+   * GET /api/firmware/migration/:deviceId
+   * Returns persisted migration state for a device.
+   */
+  router.get('/migration/:deviceId', (req, res) => {
+    const { deviceId } = req.params;
+    const state = firmwareMigrationStorage.get(deviceId);
+    res.json({ state });
+  });
+
+  /**
+   * PUT /api/firmware/migration/:deviceId
+   * Persist migration phase updates from the UI so the flow can resume after reload.
+   *
+   * Body: { phase: FirmwareMigrationPhase, backupId?: string|null, preparedVersion?: string|null, lastError?: string|null }
+   */
+  router.put('/migration/:deviceId', (req, res) => {
+    const { deviceId } = req.params;
+    const phase = req.body?.phase as FirmwareMigrationPhase | undefined;
+    if (!phase || typeof phase !== 'string') {
+      return res.status(400).json({ error: 'phase is required' });
+    }
+
+    const backupId = (req.body?.backupId as string | null | undefined) ?? undefined;
+    const preparedVersion = (req.body?.preparedVersion as string | null | undefined) ?? undefined;
+    const lastError = (req.body?.lastError as string | null | undefined) ?? undefined;
+
+    const state = firmwareMigrationStorage.upsert(deviceId, {
+      phase,
+      backupId,
+      preparedVersion,
+      lastError,
+    });
+    return res.json({ state });
+  });
+
+  /**
+   * DELETE /api/firmware/migration/:deviceId
+   * Clear a persisted migration record.
+   */
+  router.delete('/migration/:deviceId', (req, res) => {
+    const { deviceId } = req.params;
+    firmwareMigrationStorage.clear(deviceId);
+    res.json({ ok: true });
   });
 
   /**

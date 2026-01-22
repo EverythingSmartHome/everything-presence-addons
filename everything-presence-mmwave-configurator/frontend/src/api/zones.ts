@@ -47,6 +47,7 @@ export interface PolygonModeStatus {
   supported: boolean;
   enabled: boolean;
   entityId?: string;
+  controllable?: boolean;
 }
 
 /**
