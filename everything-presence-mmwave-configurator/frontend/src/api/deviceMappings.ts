@@ -46,6 +46,8 @@ export interface DeviceMapping {
   deviceId: string;
   profileId: string;
   deviceName: string;
+  /** ESPHome node name extracted from device identifiers or inferred from device name */
+  esphomeNodeName?: string;
   discoveredAt: string;
   lastUpdated: string;
   confirmedByUser: boolean;
@@ -65,6 +67,10 @@ export interface DeviceMapping {
   profileSchemaVersion?: string;
   /** Zone labels keyed by zone ID (e.g., "Zone 1" -> "Bed", "Exclusion 2" -> "Window") */
   zoneLabels?: Record<string, string>;
+  /** Manually mapped ESPHome service names (e.g., "getBuildFlags" -> "esphome.device_name_get_build_flags") */
+  serviceMappings?: Record<string, string>;
+  /** Whether service mappings were confirmed by user (won't be overwritten during re-sync) */
+  serviceConfirmedByUser?: boolean;
 }
 
 /**

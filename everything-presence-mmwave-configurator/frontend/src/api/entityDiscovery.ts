@@ -45,6 +45,8 @@ export interface DiscoveryResult {
   results: EntityMatchResult[];
   suggestedMappings: Partial<EntityMappings>;
   deviceEntities: EntityRegistryEntry[];
+  /** Auto-discovered ESPHome services (if any), e.g. getBuildFlags */
+  serviceMappings?: Record<string, string>;
 }
 
 /**

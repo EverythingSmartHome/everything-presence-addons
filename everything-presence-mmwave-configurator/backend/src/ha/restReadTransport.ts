@@ -269,6 +269,11 @@ export class RestReadTransport implements IHaReadTransport {
     return [];
   }
 
+  async getServicesByDomain(_domain: string): Promise<string[]> {
+    logger.debug('RestReadTransport: getServicesByDomain not supported, returning empty list');
+    return [];
+  }
+
   /**
    * Fallback: Query area registry via HA template API.
    */

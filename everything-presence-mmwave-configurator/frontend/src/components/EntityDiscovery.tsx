@@ -11,6 +11,7 @@ import {
 } from '../api/entityDiscovery';
 import { saveDeviceMapping, DeviceMapping } from '../api/deviceMappings';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { ServiceMappingSelector } from './ServiceMappingSelector';
 import { validateMappings } from '../api/entityDiscovery';
 
 interface EntityDiscoveryProps {
@@ -37,6 +38,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
   const [status, setStatus] = useState<DiscoveryStatus>('loading');
   const [saving, setSaving] = useState(false);
   const [discoveryResult, setDiscoveryResult] = useState<DiscoveryResult | null>(null);
+  const [discoveredServices, setDiscoveredServices] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string | null>(null);
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
@@ -64,11 +66,13 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     setError(null);
     setValidationErrors(null);
     setManualOverrides({});
+    setDiscoveredServices({});
 
     try {
       const result = await discoverEntities(deviceId, profileId);
       setDiscoveryResult(result);
       setAllEntities(result.deviceEntities);
+      setDiscoveredServices(result.serviceMappings ?? {});
 
       const conflictCount = result.results.filter((r) => r.matchConfidence === 'conflict').length;
 
@@ -330,6 +334,16 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
       }
 
       // Build device mapping for storage
+      const existingServiceMappings = existingMapping?.serviceMappings;
+      const serviceConfirmedByUser = existingMapping?.serviceConfirmedByUser ?? false;
+      let mergedServiceMappings = existingServiceMappings;
+      if (!serviceConfirmedByUser && Object.keys(discoveredServices).length > 0) {
+        mergedServiceMappings = {
+          ...existingServiceMappings,
+          ...discoveredServices,
+        };
+      }
+
       const deviceMapping: DeviceMapping = {
         deviceId,
         profileId,
@@ -343,6 +357,8 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         unmappedEntities: discoveryResult?.results
           .filter(r => !r.matchedEntityId && !manualOverrides[r.templateKey])
           .map(r => r.templateKey) || [],
+        serviceMappings: mergedServiceMappings,
+        serviceConfirmedByUser,
       };
 
       // Save to device storage
@@ -713,6 +729,44 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
                 </svg>
                 Re-discover entities
               </button>
+            </div>
+
+            {/* Service Mapping Selector - for firmware service mapping */}
+            <div className="mt-6 pt-4 border-t border-slate-700">
+              {(() => {
+                const displayMapping: DeviceMapping =
+                  existingMapping ??
+                  ({
+                    deviceId,
+                    profileId,
+                    deviceName,
+                    discoveredAt: new Date().toISOString(),
+                    lastUpdated: new Date().toISOString(),
+                    confirmedByUser: false,
+                    autoMatchedCount: 0,
+                    manuallyMappedCount: 0,
+                    mappings: {},
+                    unmappedEntities: [],
+                    serviceMappings: existingMapping?.serviceMappings,
+                    serviceConfirmedByUser: existingMapping?.serviceConfirmedByUser ?? false,
+                  } as DeviceMapping);
+
+                return (
+                  <ServiceMappingSelector
+                    deviceId={deviceId}
+                    mapping={displayMapping}
+                    discoveredServices={discoveredServices}
+                    onUpdated={async () => {
+                      // Refresh mapping data after service mapping update
+                      await refreshMapping(deviceId);
+                      const updated = await getMapping(deviceId);
+                      if (updated) {
+                        setExistingMapping(updated);
+                      }
+                    }}
+                  />
+                );
+              })()}
             </div>
           </>
         )}

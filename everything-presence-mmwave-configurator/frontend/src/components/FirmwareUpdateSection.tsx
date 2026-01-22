@@ -90,6 +90,26 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const [migrationVerificationMessage, setMigrationVerificationMessage] = useState<string | null>(null);
   const [resyncStepMessage, setResyncStepMessage] = useState<string | null>(null);
   const migrationStepStartRef = useRef<Record<string, number>>({});
+  const { getMapping, refreshMapping } = useDeviceMappings();
+
+  const ensureMappedService = useCallback(
+    async (
+      deviceId: string,
+      serviceKey: 'getBuildFlags' | 'setUpdateManifest',
+      label: string,
+    ): Promise<DeviceMapping | null> => {
+      const mapping = backupMapping ?? (await getMapping(deviceId));
+      const mapped = mapping?.serviceMappings?.[serviceKey];
+      if (!mapped) {
+        onErrorRef.current(
+          `${label} service not mapped. Run re-sync entities and confirm firmware services.`,
+        );
+        return null;
+      }
+      return mapping ?? null;
+    },
+    [backupMapping, getMapping],
+  );
 
   // Settings state
   const [lanIpOverride, setLanIpOverride] = useState('');
@@ -130,8 +150,6 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const resyncWaitResolveRef = useRef<(() => void) | null>(null);
   const resyncWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startResyncFlowRef = useRef<(() => Promise<void>) | null>(null);
-
-  const { getMapping, refreshMapping } = useDeviceMappings();
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -399,6 +417,12 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     setSelectedUpdate(null);
 
     try {
+      const mapping = await ensureMappedService(device.id, 'getBuildFlags', 'Build flags');
+      if (!mapping) {
+        setUpdateStatus('idle');
+        return;
+      }
+
       // Get device config via get_build_flags service call
       const configRes = await getDeviceConfig(
         device.model,
@@ -454,6 +478,11 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
 
     try {
+      const mapping = await ensureMappedService(selectedDeviceId, 'getBuildFlags', 'Build flags');
+      if (!mapping) {
+        return;
+      }
+
       let config = deviceConfig;
       if (!config || config.configSource !== 'entities') {
         const configRes = await getDeviceConfig(
@@ -516,6 +545,10 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     const mapping = await getMapping(selectedDeviceId);
     if (!mapping) {
       onError('Device mapping not found. Run entity discovery to enable update tracking.');
+      return;
+    }
+    if (!mapping.serviceMappings?.setUpdateManifest) {
+      onError('Update manifest service not mapped. Run re-sync entities and confirm firmware services.');
       return;
     }
 
@@ -662,6 +695,11 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     const device = devices.find((d) => d.id === selectedDeviceId);
     if (!device || !device.model || !device.firmwareVersion) {
       onError('Device information incomplete');
+      return;
+    }
+
+    const mapping = await ensureMappedService(selectedDeviceId, 'getBuildFlags', 'Build flags');
+    if (!mapping) {
       return;
     }
 

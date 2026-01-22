@@ -63,6 +63,8 @@ export interface DiscoveryResult {
   results: EntityMatchResult[];
   suggestedMappings: Partial<EntityMappings>;
   deviceEntities: EntityRegistryEntry[];  // All entities for this device
+  /** Auto-discovered ESPHome services (if any), e.g. getBuildFlags */
+  serviceMappings?: Record<string, string>;
 }
 
 /**
@@ -98,6 +100,48 @@ export class EntityDiscoveryService {
     const deviceEntities = await this.getDeviceEntities(deviceId);
     logger.info({ deviceId, entityCount: deviceEntities.length }, 'Found device entities');
 
+    // Attempt ESPHome service discovery in parallel with entity discovery.
+    // This mirrors the entity auto-match flow: try to find services now,
+    // but don't persist until the user saves.
+    let serviceMappings: Record<string, string> | undefined;
+    try {
+      const existingMapping = deviceMappingStorage.getMapping(deviceId);
+      let esphomeNodeName = existingMapping?.esphomeNodeName;
+      if (!esphomeNodeName) {
+        try {
+          const devices = await this.readTransport.listDevices();
+          const device = devices.find(d => d.id === deviceId);
+          if (device) {
+            esphomeNodeName = this.extractEsphomeNodeName(device);
+          }
+        } catch (err) {
+          logger.warn({ err, deviceId }, 'Failed to fetch device info for service discovery, continuing without it');
+        }
+      }
+
+      const discoveredBuildFlags = await this.discoverServiceBySuffix(
+        deviceId,
+        esphomeNodeName,
+        '_get_build_flags',
+        'getBuildFlags'
+      );
+      const discoveredUpdateManifest = await this.discoverServiceBySuffix(
+        deviceId,
+        esphomeNodeName,
+        '_set_update_manifest',
+        'setUpdateManifest'
+      );
+
+      if (discoveredBuildFlags || discoveredUpdateManifest) {
+        serviceMappings = {
+          ...(discoveredBuildFlags ? { getBuildFlags: discoveredBuildFlags } : {}),
+          ...(discoveredUpdateManifest ? { setUpdateManifest: discoveredUpdateManifest } : {}),
+        };
+      }
+    } catch (err) {
+      logger.warn({ err, deviceId }, 'Service discovery failed during entity discovery');
+    }
+
     if (deviceEntities.length === 0) {
       logger.warn({ deviceId }, 'No entities found for device');
       return {
@@ -114,6 +158,7 @@ export class EntityDiscoveryService {
           manuallyMappedCount: 0,
         },
         deviceEntities,
+        serviceMappings,
       };
     }
 
@@ -173,6 +218,7 @@ export class EntityDiscoveryService {
       results,
       suggestedMappings,
       deviceEntities,
+      serviceMappings,
     };
 
     if (unmatchedRequired > 0) {
@@ -938,6 +984,28 @@ export class EntityDiscoveryService {
       logger.warn({ err, deviceId }, 'Failed to fetch device firmware version, continuing without it');
     }
 
+    // Auto-discover ESPHome service mappings (e.g., getBuildFlags, setUpdateManifest)
+    let serviceMappings: Record<string, string> | undefined;
+    const discoveredBuildFlags = await this.discoverServiceBySuffix(
+      deviceId,
+      esphomeNodeName,
+      '_get_build_flags',
+      'getBuildFlags'
+    );
+    const discoveredUpdateManifest = await this.discoverServiceBySuffix(
+      deviceId,
+      esphomeNodeName,
+      '_set_update_manifest',
+      'setUpdateManifest'
+    );
+
+    if (discoveredBuildFlags || discoveredUpdateManifest) {
+      serviceMappings = {
+        ...(discoveredBuildFlags ? { getBuildFlags: discoveredBuildFlags } : {}),
+        ...(discoveredUpdateManifest ? { setUpdateManifest: discoveredUpdateManifest } : {}),
+      };
+    }
+
     // Build DeviceMapping object
     const mapping: DeviceMapping = {
       deviceId,
@@ -960,6 +1028,7 @@ export class EntityDiscoveryService {
       esphomeVersion,
       rawSwVersion,
       profileSchemaVersion,
+      serviceMappings,
     };
 
     // Save to device storage
@@ -1219,5 +1288,89 @@ export class EntityDiscoveryService {
       if (targetSet.resolution) mappings[`target${index}Resolution`] = targetSet.resolution;
       if (targetSet.active) mappings[`target${index}Active`] = targetSet.active;
     }
+  }
+
+  /**
+   * Discover an ESPHome service for a device by suffix.
+   * Uses two methods:
+   * 1. Query getServicesForTarget for device-specific services
+   * 2. Construct expected service name from esphomeNodeName and verify it exists
+   */
+  private async discoverServiceBySuffix(
+    deviceId: string,
+    esphomeNodeName: string | undefined,
+    suffix: string,
+    logLabel: string
+  ): Promise<string | null> {
+    let discoveredService: string | undefined;
+
+    // Method 1: Try getServicesForTarget (works for some devices)
+    try {
+      const services = await this.readTransport.getServicesForTarget({ device_id: [deviceId] });
+      logger.info(
+        { deviceId, servicesCount: services.length, services: services.slice(0, 10) },
+        'Service discovery Method 1: getServicesForTarget result'
+      );
+      discoveredService = services.find((s) => s.endsWith(suffix));
+      if (discoveredService) {
+        logger.info(
+          { deviceId, service: discoveredService, logLabel },
+          'Found service via getServicesForTarget'
+        );
+        return discoveredService;
+      } else {
+        logger.info(
+          { deviceId, logLabel },
+          'Method 1: No matching service found in getServicesForTarget result'
+        );
+      }
+    } catch (err) {
+      logger.warn({ err, deviceId }, 'getServicesForTarget failed (non-fatal)');
+    }
+
+    // Method 2: If Method 1 failed and we have esphomeNodeName, construct expected name and verify it exists
+    if (esphomeNodeName) {
+      try {
+        const expectedService = `esphome.${esphomeNodeName}${suffix}`;
+        logger.info(
+          { deviceId, esphomeNodeName, expectedService, logLabel },
+          'Service discovery Method 2: trying esphomeNodeName construction'
+        );
+        const allEsphomeServices = await this.readTransport.getServicesByDomain('esphome');
+        logger.info(
+          {
+            deviceId,
+            totalServices: allEsphomeServices.length,
+            matchingServices: allEsphomeServices.filter((s) => s.endsWith(suffix)),
+            logLabel,
+          },
+          'Service discovery Method 2: matching ESPHome services'
+        );
+        if (allEsphomeServices.includes(expectedService)) {
+          logger.info(
+            { deviceId, service: expectedService, logLabel },
+            'Found service via esphomeNodeName construction'
+          );
+          return expectedService;
+        } else {
+          logger.info(
+            {
+              deviceId,
+              expectedService,
+              available: allEsphomeServices.filter((s) => s.endsWith(suffix)),
+              logLabel,
+            },
+            'Method 2: Expected service not found in available services'
+          );
+        }
+      } catch (err) {
+        logger.warn({ err, deviceId }, 'getServicesByDomain fallback failed (non-fatal)');
+      }
+    } else {
+      logger.warn({ deviceId, logLabel }, 'Service discovery Method 2 skipped: no esphomeNodeName available');
+    }
+
+    logger.warn({ deviceId, esphomeNodeName, logLabel }, 'Service discovery: failed to find service');
+    return null;
   }
 }
