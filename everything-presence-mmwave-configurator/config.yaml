@@ -1,5 +1,5 @@
 name: Everything Presence Zone Configurator
-version: 2.0.10
+version: 2.0.11
 slug: everything-presence-zone-configurator
 description: Helps you to visualise Everything Presence Lite, Everything Presence One and Everything Presence Pro, a mmWave Presence Sensor for Home Assistant with real-time tracking (Everything Presence Lite) and other advanced capabilities.
 url: https://github.com/everythingsmarthome/everything-presence-addons
