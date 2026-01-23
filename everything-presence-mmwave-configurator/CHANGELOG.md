@@ -1,3 +1,34 @@
+## 2.0.10
+This release adds room management upgrades (rename/unlink), firmware/backup features, improved device mappings and discovery, plus multiple UI/zone‑editor fixes and a drag/auto‑zoom bug fix.
+
+## Features
+
+  - Feature: Rename rooms by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/226
+  - Feature: Unlinking a device from a room by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/231
+  - Feature: Add display option for enabling or disabling target tracking dots by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/232
+  - Feature: Show target tracking during initial setup by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/235
+  - Improve using entiity mappings over hardcoded entity names by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/242
+  - Feature: Add firmware update option by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/243
+  - Feature: Add backup and restore zones by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/246
+  - Feature: Add services to device mapping by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/248
+  - Feature: Allow configuring of add‑on app port by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/249
+
+## Bugs
+
+  - Fix room import to use proper API client (fixes #209) by @xenjke in https://github.com/EverythingSmartHome/everything-presence-addons/pull/225
+  - Bug: Fix zone names not saving by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/227
+  - Bug: Make UI consistent between polygon and rectangular zones by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/228
+  - Bug: Fix issue where scrolling zone slots panel would scroll canvas by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/229
+  - Bug: Fix issue where when in zone editor, you can't change rooms by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/230
+  - Bug: Fix zones not being re‑sizeable when under target tracking dot or device icon by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/233
+  - Bug: Fix EP Pro installation angle not working by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/236
+  - Fix ESPHome service resolution for renamed devices by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/244
+  - Bug: Fix Issue where dragging a room layout would auto zoom the page by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/250
+
+## New Contributors
+
+  - @xenjke made their first contribution in https://github.com/EverythingSmartHome/everything-presence-addons/pull/225
+
 ## 2.0.9
 * Add support for Everything Presence Pro by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/222
 
