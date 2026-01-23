@@ -1,3 +1,9 @@
+## 2.0.11
+### Breaking change
+Slight breaking change for docker users, the default port has changed from 3000 to 42069. You may need to update your docker compose (see example in repo). This should avoid conflicting with other addons that use port 3000. Apologies for the change. Home Assistant add-on users should be unaffected.
+
+* Fix: Change default  port to avoid conflicting with other add-ons by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/254
+
 ## 2.0.10
 This release adds room management upgrades (rename/unlink), firmware/backup features, improved device mappings and discovery, plus multiple UI/zone‑editor fixes and a drag/auto‑zoom bug fix.
 
