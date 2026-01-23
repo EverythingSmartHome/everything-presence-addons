@@ -100,6 +100,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Canvas controls for embedded room drawing
   const [canvasZoom, setCanvasZoom] = useState(1.1);
+  const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [canvasSnap, setCanvasSnap] = useState(100);
   const [canvasPan, setCanvasPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
@@ -1407,6 +1408,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         <div
           className="h-full w-full"
           onWheelCapture={(e) => {
+            if (isCanvasDragging) return;
             // Check if the event target is within a scrollable container (like zone list panel)
             // If so, let the native scroll happen instead of zooming
             let target = e.target as HTMLElement | null;
@@ -1432,6 +1434,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onChange={handleRoomOutlineChange}
               onCanvasClick={wallDrawingClick}
               onCanvasMove={wallDrawingMove}
+              onDragStateChange={setIsCanvasDragging}
               previewFrom={pendingStart}
               previewTo={pendingStart && previewPoint ? previewPoint : null}
               rangeMm={15000}
@@ -1440,6 +1443,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
             />
           )}
@@ -1455,6 +1459,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
               doors={selectedRoom?.doors ?? []}
               selectedDoorId={selectedDoorId}
@@ -1508,6 +1513,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
               doors={selectedRoom?.doors ?? []}
               showDoors={true}
@@ -1608,6 +1614,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             <div
               className="h-full w-full overflow-hidden overscroll-contain touch-none"
               onWheelCapture={(e) => {
+                if (isCanvasDragging) return;
                 // Check if the event target is within a scrollable container
                 let target = e.target as HTMLElement | null;
                 while (target && target !== e.currentTarget) {
@@ -2642,6 +2649,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             className="relative -mx-[calc((100vw-min(1152px,100vw))/2+1.5rem)] border-y border-slate-800 bg-slate-950/70 overflow-hidden"
             style={{ height: 'calc(100vh - 380px)', minHeight: '500px' }}
             onWheelCapture={(e) => {
+              if (isCanvasDragging) return;
               if (e.cancelable) e.preventDefault();
               e.stopPropagation();
               const delta = e.deltaY > 0 ? -0.1 : 0.1;
@@ -2653,6 +2661,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onChange={handleRoomOutlineChange}
               onCanvasClick={wallDrawingClick}
               onCanvasMove={wallDrawingMove}
+              onDragStateChange={setIsCanvasDragging}
               previewFrom={pendingStart}
               previewTo={pendingStart && previewPoint ? previewPoint : null}
               rangeMm={15000}
@@ -2661,6 +2670,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
             />
 
@@ -2735,6 +2745,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             className="relative -mx-[calc((100vw-min(1152px,100vw))/2+1.5rem)] border-y border-slate-800 bg-slate-950/70 overflow-hidden"
             style={{ height: 'calc(100vh - 380px)', minHeight: '500px' }}
             onWheelCapture={(e) => {
+              if (isCanvasDragging) return;
               if (e.cancelable) e.preventDefault();
               e.stopPropagation();
               const delta = e.deltaY > 0 ? -0.1 : 0.1;
@@ -3052,6 +3063,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             className="relative -mx-[calc((100vw-min(1152px,100vw))/2+1.5rem)] border-y border-slate-800 bg-slate-950/70 overflow-hidden"
             style={{ height: 'calc(100vh - 420px)', minHeight: '500px' }}
             onWheelCapture={(e) => {
+              if (isCanvasDragging) return;
               if (e.cancelable) e.preventDefault();
               e.stopPropagation();
               const delta = e.deltaY > 0 ? -0.1 : 0.1;

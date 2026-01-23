@@ -38,6 +38,7 @@ interface RoomCanvasProps {
   showRadar?: boolean;
   panOffsetMm?: { x: number; y: number };
   onPanChange?: (offset: { x: number; y: number }) => void;
+  onDragStateChange?: (isDragging: boolean) => void;
   previewFrom?: Point | null;
   previewTo?: Point | null;
   onSegmentHover?: (index: number | null) => void;
@@ -324,6 +325,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   showRadar = true,
   panOffsetMm = { x: 0, y: 0 },
   onPanChange,
+  onDragStateChange,
   previewFrom = null,
   previewTo = null,
   onSegmentHover,
@@ -456,7 +458,13 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     onCanvasClick?.(point);
   };
 
-  const handleDragStart = (idx: number) => () => setDragIdx(idx);
+  const handleDragStart = (idx: number) => (e: React.MouseEvent<SVGCircleElement, MouseEvent>) => {
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+    suppressClickRef.current = true;
+    setDragIdx(idx);
+    onDragStateChange?.(true);
+  };
   const handleMouseUp = () => {
     // Finalize furniture drag
     if (furnitureDrag && onFurnitureChange) {
@@ -518,6 +526,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     setDragIdx(null);
     setDragDevice(false);
     setPanDrag(null);
+    onDragStateChange?.(false);
     onCanvasRelease?.();
   };
 
@@ -722,6 +731,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             e.preventDefault();
             const world = fromCanvasWithOffset(svgPoint.x - HALF, svgPoint.y - HALF, panOffsetMm);
             setPanDrag({ start: world, base: panOffsetMm });
+            onDragStateChange?.(true);
             suppressClickRef.current = true;
             return;
           }
@@ -752,6 +762,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           if (best !== null && onSegmentDragStart) {
             onSegmentDragStart(best, world);
             suppressClickRef.current = true;
+            onDragStateChange?.(true);
           }
         }}
         onContextMenu={(e) => e.preventDefault()}
@@ -931,10 +942,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       rx={2}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
                         if (onEndpointDragStart) {
-                          const world = { x: p.x, y: p.y };
+                          const world = toWorldFromEvent(e as any) ?? { x: p.x, y: p.y };
                           onEndpointDragStart(selectedSegment, 'start', world);
                           suppressClickRef.current = true;
+                          onDragStateChange?.(true);
                         }
                       }}
                     />
@@ -949,10 +962,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       rx={2}
                       onMouseDown={(e) => {
                         e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
                         if (onEndpointDragStart) {
-                          const world = { x: next.x, y: next.y };
+                          const world = toWorldFromEvent(e as any) ?? { x: next.x, y: next.y };
                           onEndpointDragStart(selectedSegment, 'end', world);
                           suppressClickRef.current = true;
+                          onDragStateChange?.(true);
                         }
                       }}
                     />
@@ -1089,6 +1104,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     // Start dragging if selected
                     if (isSelected) {
                       onDoorDragStart?.(door.id, doorX, doorY);
+                      onDragStateChange?.(true);
                     }
                   }}
                 />
@@ -1215,6 +1231,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     if (!worldPos) return;
                     suppressClickRef.current = false;
                     setFurnitureDrag({ id: item.id, start: worldPos, basePos: { x: item.x, y: item.y } });
+                    onDragStateChange?.(true);
                     onFurnitureSelect?.(item.id);
                   }}
                 />
@@ -1257,6 +1274,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                             baseSize: { width: item.width, depth: item.depth },
                             basePos: { x: item.x, y: item.y },
                           });
+                          onDragStateChange?.(true);
                         }}
                       />
                     ))}
@@ -1292,6 +1310,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                             centerPos: { x: item.x, y: item.y },
                             baseRotation: item.rotationDeg,
                           });
+                          onDragStateChange?.(true);
                         }}
                       />
                     </g>
@@ -1614,7 +1633,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     width={iconSize}
                     height={iconSize}
                     style={{ cursor: 'grab', pointerEvents: 'all' }}
-                    onMouseDown={() => setDragDevice(true)}
+                    onMouseDown={() => {
+                      setDragDevice(true);
+                      onDragStateChange?.(true);
+                    }}
                   />
                 ) : (
                   <>
@@ -1625,7 +1647,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       fill="#3b82f6"
                       stroke="#1d4ed8"
                       strokeWidth={2}
-                      onMouseDown={() => setDragDevice(true)}
+                      onMouseDown={() => {
+                        setDragDevice(true);
+                        onDragStateChange?.(true);
+                      }}
                       style={{ cursor: 'grab' }}
                     />
                     <line

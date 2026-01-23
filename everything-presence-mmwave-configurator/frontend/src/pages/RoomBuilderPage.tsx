@@ -66,6 +66,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [cursorDelta, setCursorDelta] = useState<{ dx: number; dy: number; len: number } | null>(null);
   const [displayUnits, setDisplayUnits] = useState<'metric' | 'imperial'>('metric');
   const [zoom, setZoom] = useState(1.1);
+  const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNavMenu, setShowNavMenu] = useState(false);
   // Display settings (persisted to localStorage)
@@ -771,13 +772,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   };
 
-  const handleAutoZoom = useCallback(() => {
-    if (!selectedRoom?.roomShell?.points?.length) {
+  const handleAutoZoom = useCallback((room: RoomConfig | null) => {
+    if (!room?.roomShell?.points?.length) {
       setZoom(1);
       setPanOffsetMm({ x: 0, y: 0 });
       return;
     }
-    const pts = selectedRoom.roomShell.points;
+    const pts = room.roomShell.points;
     const xs = pts.map((p) => p.x);
     const ys = pts.map((p) => p.y);
     const minX = Math.min(...xs);
@@ -792,13 +793,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const targetZoom = Math.min(5, Math.max(0.1, (0.8 * rangeMm) / maxDim));
     setZoom(targetZoom);
     setPanOffsetMm({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
-  }, [selectedRoom, rangeMm]);
+  }, [rangeMm]);
 
   // Auto-zoom when room loads
   useEffect(() => {
-    if (selectedRoom?.roomShell?.points?.length) {
-      handleAutoZoom();
+    if (!selectedRoom) return;
+    if (selectedRoom.roomShell?.points?.length) {
+      handleAutoZoom(selectedRoom);
+      return;
     }
+    setZoom(1);
+    setPanOffsetMm({ x: 0, y: 0 });
   }, [selectedRoom?.id, handleAutoZoom]);
 
   const isSuggestionApplied =
@@ -975,6 +980,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         <div
           className="h-full w-full overflow-hidden overscroll-contain touch-none"
           onWheelCapture={(e) => {
+            if (isCanvasDragging) return;
             if (e.cancelable) e.preventDefault();
             if ((e.nativeEvent as any)?.cancelable) {
               (e.nativeEvent as any).preventDefault();
@@ -998,7 +1004,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     setCursorPos(null);
                     setCursorDelta(null);
                     handleDoorDragEnd();
+                    setIsCanvasDragging(false);
                   }}
+                  onDragStateChange={setIsCanvasDragging}
                   rangeMm={rangeMm}
                   gridSpacingMm={1000}
                   snapGridMm={snapGridMm}
@@ -1244,7 +1252,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             </button>
             <button
               className="rounded-xl border border-aqua-600/50 bg-aqua-600/10 backdrop-blur px-4 py-2.5 text-sm font-semibold text-aqua-100 shadow-lg transition-all hover:bg-aqua-600/20 hover:shadow-xl active:scale-95"
-              onClick={handleAutoZoom}
+              onClick={() => handleAutoZoom(selectedRoom)}
             >
               Auto Zoom
             </button>
