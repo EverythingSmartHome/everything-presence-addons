@@ -4,7 +4,7 @@ services:
     container_name: everything-presence-mmwave-configurator
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "42069:42069"
       - "38080:38080"
     environment:
       HA_BASE_URL: "http://homeassistant.local:8123"
