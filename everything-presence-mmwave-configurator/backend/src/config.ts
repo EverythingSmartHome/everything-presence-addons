@@ -26,7 +26,7 @@ export interface AppConfig {
   firmware: FirmwareConfig;
 }
 
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 42069;
 const DEFAULT_FIRMWARE_LAN_PORT = 38080;
 const DEFAULT_MAX_VERSIONS_PER_DEVICE = 3;
 const DEFAULT_FRONTEND_DIST = path.resolve(__dirname, '../../frontend/dist');

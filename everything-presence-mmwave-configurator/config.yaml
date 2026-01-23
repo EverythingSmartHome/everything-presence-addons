@@ -10,15 +10,15 @@ arch:
 startup: services
 boot: auto
 ingress: true
-ingress_port: 3000
+ingress_port: 42069
 panel_icon: mdi:radar
 panel_title: Zone Configurator
-watchdog: "http://[HOST]:[PORT:3000]/api/health"
+watchdog: "http://[HOST]:[PORT:42069]/api/health"
 ports:
-  3000/tcp: null
+  42069/tcp: null
   38080/tcp: 38080
 ports_description:
-  3000/tcp: Optional direct access (ingress preferred, configurable in add-on settings)
+  42069/tcp: Optional direct access (ingress preferred, configurable in add-on settings)
   38080/tcp: LAN firmware server for device OTA updates (configurable in add-on settings)
 homeassistant_api: true
 auth_api: true
@@ -28,13 +28,13 @@ stdin: true
 stdin_open: true
 init: false
 environment:
-  PORT: "3000"
+  PORT: "42069"
   FIRMWARE_LAN_PORT: "38080"
 map:
   - config:rw
   - share:rw
 options:
-  port: 3000
+  port: 42069
   firmware_lan_port: 38080
 schema:
   port: port
