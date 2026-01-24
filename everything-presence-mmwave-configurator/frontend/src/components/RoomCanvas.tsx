@@ -47,6 +47,7 @@ interface RoomCanvasProps {
   selectedSegment?: number | null;
   onSegmentDragStart?: (index: number, start: Point) => void;
   onEndpointDragStart?: (segment: number, endpoint: 'start' | 'end', start: Point) => void;
+  onSegmentInsert?: (segmentIndex: number, point: Point) => void;
   renderOverlay?: (ctx: {
     toCanvas: (p: Point) => { x: number; y: number };
     fromCanvas: (x: number, y: number) => Point;
@@ -334,6 +335,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   selectedSegment,
   onSegmentDragStart,
   onEndpointDragStart,
+  onSegmentInsert,
   renderOverlay,
   lockShell = false,
   furniture = [],
@@ -744,6 +746,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           const world = fromCanvasCoord(cx, cy);
           let best: number | null = null;
           let bestDist = 250;
+          let bestProj: Point | null = null;
           safePoints.forEach((p, idx) => {
             const next = safePoints[(idx + 1) % safePoints.length];
             const dx = next.x - p.x;
@@ -756,8 +759,16 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             if (dist < bestDist) {
               bestDist = dist;
               best = idx;
+              bestProj = { x: projX, y: projY };
             }
           });
+          if (!isDoorPlacementMode && (e as any).shiftKey && onSegmentInsert && best !== null && bestProj) {
+            e.preventDefault();
+            e.stopPropagation();
+            onSegmentInsert(best, bestProj);
+            suppressClickRef.current = true;
+            return;
+          }
           onSegmentSelect?.(best);
           if (best !== null && onSegmentDragStart) {
             onSegmentDragStart(best, world);

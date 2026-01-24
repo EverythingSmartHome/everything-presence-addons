@@ -62,6 +62,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     base: { x: number; y: number }[];
   } | null>(null);
   const [snapGridMm, setSnapGridMm] = useState(100); // 0.1m default snap
+  const [angleSnapEnabled, setAngleSnapEnabled] = useState(false);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [cursorDelta, setCursorDelta] = useState<{ dx: number; dy: number; len: number } | null>(null);
   const [displayUnits, setDisplayUnits] = useState<'metric' | 'imperial'>('metric');
@@ -690,14 +691,36 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setHoveredSegment(null);
   };
 
-  const snapPointToGrid = (pt: { x: number; y: number }) => {
+  const snapPointToGrid = useCallback((pt: { x: number; y: number }) => {
     if (!snapGridMm || snapGridMm <= 0) return pt;
     const step = snapGridMm;
     return {
       x: Math.round(pt.x / step) * step,
       y: Math.round(pt.y / step) * step,
     };
-  };
+  }, [snapGridMm]);
+
+  const insertPointOnSegment = useCallback((segmentIndex: number, point?: { x: number; y: number }) => {
+    if (!selectedRoom?.roomShell?.points) return;
+    if (isDrawingWall || isDoorPlacementMode) return;
+    const pts = selectedRoom.roomShell.points;
+    if (pts.length < 2) return;
+    const a = pts[segmentIndex];
+    const b = pts[(segmentIndex + 1) % pts.length];
+    if (!a || !b) return;
+    const rawPoint = point ?? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const snapped = snapPointToGrid(rawPoint);
+    const minDist = Math.min(
+      Math.hypot(snapped.x - a.x, snapped.y - a.y),
+      Math.hypot(snapped.x - b.x, snapped.y - b.y),
+    );
+    if (minDist < 50) return;
+    const insertIndex = segmentIndex === pts.length - 1 ? pts.length : segmentIndex + 1;
+    const next = [...pts];
+    next.splice(insertIndex, 0, snapped);
+    handlePointsChange(next);
+    setSelectedSegment(segmentIndex);
+  }, [selectedRoom, isDrawingWall, isDoorPlacementMode, snapPointToGrid, handlePointsChange]);
 
   const handleCanvasMove = (pt: { x: number; y: number }) => {
     setCursorPos(pt);
@@ -718,7 +741,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     if (endpointDrag && selectedRoom) {
       let dx = pt.x - endpointDrag.start.x;
       let dy = pt.y - endpointDrag.start.y;
-      ({ dx, dy } = snapDelta(dx, dy));
+      if (angleSnapEnabled) {
+        ({ dx, dy } = snapDelta(dx, dy));
+      }
       const next = endpointDrag.base.map((p) => ({ x: p.x, y: p.y }));
       if (!next.length) return;
       const targetIdx =
@@ -739,7 +764,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     if (segmentDragIndex !== null && segmentDragStart && segmentDragBase && selectedRoom) {
       let dx = pt.x - segmentDragStart.x;
       let dy = pt.y - segmentDragStart.y;
-      ({ dx, dy } = snapDelta(dx, dy));
+      if (angleSnapEnabled) {
+        ({ dx, dy } = snapDelta(dx, dy));
+      }
       const next = segmentDragBase.map((p) => ({ x: p.x, y: p.y }));
       const aIdx = segmentDragIndex;
       const bIdx = (segmentDragIndex + 1) % next.length;
@@ -1058,6 +1085,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     setSegmentDragStart(null);
                     setSegmentDragBase(null);
                   }}
+                  onSegmentInsert={
+                    !isDrawingWall && !isDoorPlacementMode
+                      ? (segmentIndex, point) => {
+                        insertPointOnSegment(segmentIndex, point);
+                      }
+                      : undefined
+                  }
                   height="100%"
                   furniture={selectedRoom.furniture ?? []}
                   selectedFurnitureId={selectedFurnitureId}
@@ -1555,6 +1589,29 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 ))}
               </div>
               <div className="flex items-center gap-3">
+                <span className="text-slate-400 font-medium">Wall Snap Angle:</span>
+                <button
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all active:scale-95 ${
+                    angleSnapEnabled
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100 shadow-lg shadow-aqua-500/20'
+                      : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:border-slate-600'
+                  }`}
+                  onClick={() => setAngleSnapEnabled(true)}
+                >
+                  45 deg
+                </button>
+                <button
+                  className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all active:scale-95 ${
+                    !angleSnapEnabled
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100 shadow-lg shadow-aqua-500/20'
+                      : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:border-slate-600'
+                  }`}
+                  onClick={() => setAngleSnapEnabled(false)}
+                >
+                  Free
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
                 <span className="text-slate-400 font-medium">Units:</span>
                 <button
                   className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all active:scale-95 ${
@@ -1654,6 +1711,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                                 }}
                               >
                                 Delete
+                              </button>
+                              <button
+                                className="rounded-md border border-emerald-500/70 px-2 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"
+                                onClick={() => {
+                                  insertPointOnSegment(selectedSegment);
+                                }}
+                              >
+                                + Insert point
                               </button>
                               <div className="flex items-center gap-2 pt-1 text-xs text-slate-200">
                                 <span>Offset</span>
