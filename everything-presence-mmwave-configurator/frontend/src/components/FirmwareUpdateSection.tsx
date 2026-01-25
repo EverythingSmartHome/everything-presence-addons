@@ -49,6 +49,15 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   onError,
   onSuccess,
 }) => {
+  const BRIDGE_FIRMWARE_BY_MODEL: Record<string, string> = {
+    'everything-presence-pro': '1.1.4',
+    'everything-presence-lite': '1.4.2',
+  };
+  const BRIDGE_FLASH_URL_BY_MODEL: Record<string, string> = {
+    'everything-presence-pro': 'https://docs.everythingsmart.io/flash/1.1.4/everything-presence-pro.html',
+    'everything-presence-lite': 'https://docs.everythingsmart.io/flash/1.4.2/everything-presence-lite.html',
+  };
+
   const buildConfigUnavailableMessage =
     'Device build config not available. Firmware updates are disabled to prevent mismatched installs.';
   const onErrorRef = useRef(onError);
@@ -89,8 +98,27 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const [migrationVerificationStatus, setMigrationVerificationStatus] = useState<'idle' | 'running' | 'success' | 'warning' | 'error'>('idle');
   const [migrationVerificationMessage, setMigrationVerificationMessage] = useState<string | null>(null);
   const [resyncStepMessage, setResyncStepMessage] = useState<string | null>(null);
+  const [bridgeResyncing, setBridgeResyncing] = useState(false);
+  const [bridgePhase, setBridgePhase] = useState<'idle' | 'checking_version' | 'resyncing' | 'error'>('idle');
+  const [bridgeStatusMessage, setBridgeStatusMessage] = useState<string | null>(null);
   const migrationStepStartRef = useRef<Record<string, number>>({});
   const { getMapping, refreshMapping } = useDeviceMappings();
+
+  const normalizeModelKey = (value?: string | null): string => {
+    const normalized = value?.toLowerCase() ?? '';
+    if (normalized.includes('lite')) return 'everything-presence-lite';
+    if (normalized.includes('pro')) return 'everything-presence-pro';
+    if (normalized.includes('one')) return 'everything-presence-one';
+    return normalized;
+  };
+
+  const filterEpDevices = useCallback((list: DiscoveredDevice[]) => {
+    return list.filter(
+      (d) =>
+        d.manufacturer?.toLowerCase().includes('everything') ||
+        d.model?.toLowerCase().includes('presence')
+    );
+  }, []);
 
   const ensureMappedService = useCallback(
     async (
@@ -185,6 +213,51 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
   };
 
+  function normalizeValue(value?: string): string {
+    return value?.trim().toLowerCase() ?? '';
+  }
+
+  function getDeviceProfile(device: DiscoveredDevice): DeviceProfile | null {
+    if (!profiles.length) return null;
+    const model = normalizeValue(device.model);
+    const name = normalizeValue(device.name);
+    const manufacturer = normalizeValue(device.manufacturer);
+    const matchKey = model || name;
+    const byModel = profiles.find((profile) => {
+      const profileModel = normalizeValue((profile as DeviceProfile & { model?: string }).model);
+      const profileLabel = normalizeValue(profile.label);
+      const profileManufacturer = normalizeValue(profile.manufacturer);
+      const modelMatch = profileModel && profileModel === matchKey;
+      const labelMatch = profileLabel && profileLabel === matchKey;
+      const manufacturerMatch =
+        !manufacturer || !profileManufacturer || profileManufacturer === manufacturer;
+      return (modelMatch || labelMatch) && manufacturerMatch;
+    });
+    if (byModel) return byModel;
+    if (matchKey) {
+      const matchId = profiles.find((profile) => {
+        const profileId = normalizeValue(profile.id).replace(/_/g, ' ');
+        return profileId && matchKey.includes(profileId);
+      });
+      return matchId ?? null;
+    }
+    return null;
+  }
+
+  const resolveDeviceInfo = (device: DiscoveredDevice | null | undefined) => {
+    if (!device) return null;
+    const profileFromDevice = getDeviceProfile(device);
+    const profileFromMapping =
+      backupMapping?.profileId
+        ? profiles.find((profile) => profile.id === backupMapping.profileId)
+        : null;
+    const profile = profileFromDevice ?? profileFromMapping;
+    const model = device.model ?? profile?.model ?? profile?.label ?? device.name ?? null;
+    const firmwareVersion =
+      device.firmwareVersion ?? backupMapping?.firmwareVersion ?? backupMapping?.rawSwVersion ?? null;
+    return { model, firmwareVersion, profile };
+  };
+
   // Manual mode state
   const [showManualMode, setShowManualMode] = useState(false);
   const [manifestUrl, setManifestUrl] = useState('');
@@ -214,11 +287,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         ]);
 
         // Filter to only EP devices
-        const epDevices = devicesRes.devices.filter(
-          (d) =>
-            d.manufacturer?.toLowerCase().includes('everything') ||
-            d.model?.toLowerCase().includes('presence')
-        );
+        const epDevices = filterEpDevices(devicesRes.devices);
         setDevices(epDevices);
         setProfiles(profilesRes.profiles ?? []);
 
@@ -239,7 +308,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       }
     };
     load();
-  }, []);
+  }, [filterEpDevices]);
 
   useEffect(() => {
     if (!selectedDeviceId) {
@@ -307,6 +376,9 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     setMigrationErrorStep(null);
     setMigrationVerificationStatus('idle');
     setMigrationVerificationMessage(null);
+    setBridgeResyncing(false);
+    setBridgePhase('idle');
+    setBridgeStatusMessage(null);
     updateMonitorRef.current = {
       attempts: 0,
       seenStart: false,
@@ -397,17 +469,33 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
   };
 
-  const handleCheckForUpdates = async () => {
-    const device = devices.find((d) => d.id === selectedDeviceId);
+  const handleCheckForUpdates = async (
+    overrideDevice?: DiscoveredDevice | null,
+    options: { skipBridgeCheck?: boolean } = {},
+  ) => {
+    const effectiveOverride =
+      overrideDevice && typeof (overrideDevice as DiscoveredDevice).id === 'string'
+        ? overrideDevice
+        : null;
+    const device = effectiveOverride ?? devices.find((d) => d.id === selectedDeviceId);
     if (!device) {
       onError('Please select a device');
       return;
     }
 
-    if (!device.model || !device.firmwareVersion) {
+    const resolved = resolveDeviceInfo(device);
+    if (!resolved?.model || !resolved.firmwareVersion) {
       onError('Device is missing required information (model or firmware version)');
       return;
     }
+
+    const deviceModelKey = normalizeModelKey(resolved.model ?? device.name ?? null);
+    const requiredBridge = BRIDGE_FIRMWARE_BY_MODEL[deviceModelKey];
+    const needsBridge =
+      !options.skipBridgeCheck &&
+      requiredBridge && compareVersions(resolved.firmwareVersion, requiredBridge) !== null
+        ? compareVersions(resolved.firmwareVersion, requiredBridge) < 0
+        : false;
 
     setCheckingUpdates(true);
     setUpdateStatus('checking');
@@ -415,6 +503,11 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     setDeviceConfig(null);
     setAvailableUpdates([]);
     setSelectedUpdate(null);
+    if (needsBridge) {
+      setUpdateStatus('idle');
+      setCheckingUpdates(false);
+      return;
+    }
 
     try {
       const mapping = await ensureMappedService(device.id, 'getBuildFlags', 'Build flags');
@@ -425,8 +518,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
       // Get device config via get_build_flags service call
       const configRes = await getDeviceConfig(
-        device.model,
-        device.firmwareVersion,
+        resolved.model,
+        resolved.firmwareVersion,
         device.id
       );
       setDeviceConfig(configRes.config);
@@ -439,8 +532,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
       // Get available updates
       const updatesRes = await getAvailableUpdates(
-        device.model,
-        device.firmwareVersion,
+        resolved.model,
+        resolved.firmwareVersion,
         device.id
       );
       setAvailableUpdates(updatesRes.updates);
@@ -472,7 +565,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
 
     const device = devices.find((d) => d.id === selectedDeviceId);
-    if (!device || !device.model || !device.firmwareVersion) {
+    const resolved = resolveDeviceInfo(device);
+    if (!device || !resolved?.model || !resolved.firmwareVersion) {
       onError('Device information incomplete');
       return;
     }
@@ -486,8 +580,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       let config = deviceConfig;
       if (!config || config.configSource !== 'entities') {
         const configRes = await getDeviceConfig(
-          device.model,
-          device.firmwareVersion,
+          resolved.model,
+          resolved.firmwareVersion,
           device.id
         );
         config = configRes.config;
@@ -511,8 +605,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
       setUpdateStatus('downloading');
       const prepareRes = await prepareFirmware(selectedDeviceId, manifestUrl, {
-        deviceModel: device.model,
-        firmwareVersion: device.firmwareVersion,
+        deviceModel: resolved.model,
+        firmwareVersion: resolved.firmwareVersion,
       });
 
       setPreparedToken(prepareRes.token);
@@ -615,7 +709,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const handleAutoInstall = async () => {
     resetMigrationFlow();
     const device = devices.find((d) => d.id === selectedDeviceId);
-    if (!device || !device.model || !device.firmwareVersion) {
+    const resolved = resolveDeviceInfo(device);
+    if (!device || !resolved?.model || !resolved.firmwareVersion) {
       onError('Device information incomplete');
       return;
     }
@@ -634,8 +729,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
       setUpdateStatus('downloading');
       const res = await autoPrepare(
-        device.model,
-        device.firmwareVersion,
+        resolved.model,
+        resolved.firmwareVersion,
         device.id
       );
 
@@ -648,9 +743,9 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       setCachedEntries(cacheRes.entries);
 
       const migrationInfo = getZoneMigrationInfo(
-        device.firmwareVersion,
+        resolved.firmwareVersion,
         res.newVersion,
-        device.model,
+        resolved.model,
         null
       );
       if (migrationInfo?.required) {
@@ -693,7 +788,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
 
     const device = devices.find((d) => d.id === selectedDeviceId);
-    if (!device || !device.model || !device.firmwareVersion) {
+    const resolved = resolveDeviceInfo(device);
+    if (!device || !resolved?.model || !resolved.firmwareVersion) {
       onError('Device information incomplete');
       return;
     }
@@ -707,8 +803,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     try {
       if (!config || config.configSource !== 'entities') {
         const configRes = await getDeviceConfig(
-          device.model,
-          device.firmwareVersion,
+          resolved.model,
+          resolved.firmwareVersion,
           device.id
         );
         config = configRes.config;
@@ -727,7 +823,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     const migrationGate = getZoneMigrationInfo(
       backupMapping?.firmwareVersion ?? backupMapping?.rawSwVersion ?? device.firmwareVersion,
       entry.version,
-      config?.model ?? device.model,
+      config?.model ?? resolved.model,
       null
     );
     if (migrationGate?.required) {
@@ -1084,6 +1180,18 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     backupMapping?.rawSwVersion ??
     selectedDevice?.firmwareVersion ??
     selectedUpdate?.currentVersion;
+  const resolvedPromptInfo = resolveDeviceInfo(selectedDevice ?? null);
+  const promptFirmwareVersion = resolvedPromptInfo?.firmwareVersion ?? currentFirmwareVersion ?? null;
+  const selectedModelKey = normalizeModelKey(
+    resolvedPromptInfo?.model ?? deviceConfig?.model ?? selectedDevice?.model ?? selectedDevice?.name ?? null
+  );
+  const bridgeVersion = BRIDGE_FIRMWARE_BY_MODEL[selectedModelKey];
+  const bridgeFlashUrl = BRIDGE_FLASH_URL_BY_MODEL[selectedModelKey];
+  const bridgeCompare =
+    bridgeVersion && promptFirmwareVersion
+      ? compareVersions(promptFirmwareVersion, bridgeVersion)
+      : null;
+  const needsBridgeUpdate = Boolean(bridgeVersion && bridgeCompare !== null && bridgeCompare < 0);
   const sortedBackups = [...zoneBackups].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
@@ -1118,6 +1226,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     typeof updateEntityStatus?.attributes?.installed_version === 'string'
       ? updateEntityStatus.attributes.installed_version
       : null;
+  const checkUpdatesDisabled = !selectedDeviceId || checkingUpdates || bridgeResyncing;
   const latestUpdate = availableUpdates.reduce<AvailableUpdate | null>((latest, update) => {
     if (!latest) return update;
     const comparison = compareVersions(update.newVersion, latest.newVersion);
@@ -1252,6 +1361,107 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
     startResyncFlow();
   };
+
+  const handleBridgeResync = async () => {
+    if (!selectedDeviceId) {
+      onErrorRef.current('Please select a device');
+      return;
+    }
+    const device = devices.find((d) => d.id === selectedDeviceId);
+    if (!device) {
+      onErrorRef.current('Device not found');
+      return;
+    }
+
+    const profileId = backupMapping?.profileId ?? getDeviceProfile(device)?.id ?? '';
+    if (!profileId) {
+      onErrorRef.current('Device profile not found. Run entity discovery to sync the device.');
+      return;
+    }
+
+    const deviceName =
+      backupMapping?.deviceName ??
+      device.name ??
+      device.entityNamePrefix ??
+      device.model ??
+      'Device';
+
+    let hadError = false;
+    setBridgeResyncing(true);
+    setBridgePhase('checking_version');
+    setBridgeStatusMessage(`Waiting for your device to come back online (v${bridgeVersion})...`);
+    try {
+      const pollStart = Date.now();
+      const pollTimeoutMs = 120_000;
+      let confirmedVersion: string | null = null;
+
+      while (Date.now() - pollStart < pollTimeoutMs) {
+        const devicesRes = await fetchDevices();
+        const epDevices = filterEpDevices(devicesRes.devices);
+        setDevices(epDevices);
+
+        const refreshed = epDevices.find((d) => d.id === device.id);
+        const refreshedVersion = refreshed?.firmwareVersion ?? null;
+        if (refreshedVersion) {
+          setBridgeStatusMessage(`We see firmware v${refreshedVersion}.`);
+        }
+
+        const bridgeOk =
+          bridgeVersion && compareVersions(refreshedVersion, bridgeVersion) !== null
+            ? compareVersions(refreshedVersion, bridgeVersion) >= 0
+            : false;
+
+        if (bridgeOk) {
+          confirmedVersion = refreshedVersion;
+          break;
+        }
+
+        await sleep(2000);
+      }
+
+      if (!confirmedVersion) {
+        setBridgePhase('error');
+        setBridgeStatusMessage('We could not confirm the update yet. Please wait a moment and try again.');
+        hadError = true;
+        return;
+      }
+
+      setBridgePhase('resyncing');
+      setBridgeStatusMessage('Refreshing device details in Home Assistant...');
+      const discoveryResult = await withTimeout(
+        discoverAndSaveMapping(device.id, profileId, deviceName),
+        45000,
+        'Entity re-sync timed out. Make sure the device is online and try again.'
+      );
+      if (discoveryResult?.mapping) {
+        setBackupMapping(discoveryResult.mapping);
+      }
+      await refreshMapping(device.id);
+
+      setBridgeStatusMessage(`Update confirmed (v${confirmedVersion}). Checking for the next update...`);
+      setCheckingUpdates(true);
+      setUpdateStatus('checking');
+      setUpdateModalOpen(true);
+      setDeviceConfig(null);
+      setAvailableUpdates([]);
+      setSelectedUpdate(null);
+      await handleCheckForUpdates(
+        {
+          ...device,
+          firmwareVersion: confirmedVersion,
+        },
+        { skipBridgeCheck: true }
+      );
+    } catch (err) {
+      setBridgePhase('error');
+      setBridgeStatusMessage(err instanceof Error ? err.message : 'Failed to re-sync entities');
+      hadError = true;
+    } finally {
+      setBridgeResyncing(false);
+      if (!hadError) setBridgePhase('idle');
+    }
+  };
+
   const migrationStepsPanel = showMigrationSteps ? (
     <div className="rounded-xl border border-slate-700/60 bg-slate-900/60 p-4 text-xs text-slate-200">
       <div className="flex items-center justify-between">
@@ -1631,35 +1841,6 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     return features.length > 0 ? features.join(', ') : 'None';
   };
 
-  const normalizeValue = (value?: string) => value?.trim().toLowerCase() ?? '';
-
-  const getDeviceProfile = (device: DiscoveredDevice): DeviceProfile | null => {
-    if (!profiles.length) return null;
-    const model = normalizeValue(device.model);
-    const name = normalizeValue(device.name);
-    const manufacturer = normalizeValue(device.manufacturer);
-    const matchKey = model || name;
-    const byModel = profiles.find((profile) => {
-      const profileModel = normalizeValue((profile as DeviceProfile & { model?: string }).model);
-      const profileLabel = normalizeValue(profile.label);
-      const profileManufacturer = normalizeValue(profile.manufacturer);
-      const modelMatch = profileModel && profileModel === matchKey;
-      const labelMatch = profileLabel && profileLabel === matchKey;
-      const manufacturerMatch =
-        !manufacturer || !profileManufacturer || profileManufacturer === manufacturer;
-      return (modelMatch || labelMatch) && manufacturerMatch;
-    });
-    if (byModel) return byModel;
-    if (matchKey) {
-      const matchId = profiles.find((profile) => {
-        const profileId = normalizeValue(profile.id).replace(/_/g, ' ');
-        return profileId && matchKey.includes(profileId);
-      });
-      return matchId ?? null;
-    }
-    return null;
-  };
-
   const startResyncFlow = useCallback(async () => {
     if (resyncInFlightRef.current) {
       return;
@@ -2023,6 +2204,42 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
             </div>
 
             <div className="p-6 pt-4 space-y-4">
+              {needsBridgeUpdate && bridgeFlashUrl && (
+                <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-4 text-sm text-amber-100">
+                  <div className="font-semibold">Quick one-time update needed</div>
+                  <div className="mt-1 text-xs text-amber-200">
+                    Before Zone Configurator can update this device, it needs firmware v{bridgeVersion}.
+                    Install that version once, then return here and we will continue automatically.
+                  </div>
+                  {bridgeStatusMessage && (
+                    <div className="mt-2 flex items-center gap-2 text-xs text-amber-200">
+                      {bridgeResyncing && (
+                        <div className="h-3 w-3 animate-spin rounded-full border-2 border-amber-200 border-t-transparent" />
+                      )}
+                      <span>{bridgeStatusMessage}</span>
+                    </div>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <a
+                      href={bridgeFlashUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-amber-400"
+                    >
+                      Open installer
+                    </a>
+                    <button
+                      type="button"
+                      onClick={handleBridgeResync}
+                      disabled={bridgeResyncing}
+                      className="rounded-lg border border-amber-400/60 px-3 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {bridgeResyncing ? 'Checking device...' : `I have installed v${bridgeVersion}`}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {updateStatus === 'checking' && (
                 <div className="flex items-center gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/10 p-4 text-sm text-cyan-100">
                   <div className="h-5 w-5 animate-spin rounded-full border-2 border-cyan-300 border-t-transparent" />
@@ -2142,7 +2359,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
               {updateStatus === 'ready' && !migrationInProgress && (
                 <div className="space-y-4">
-                  {!migrationPromptOpen && (
+                  {!migrationPromptOpen && !needsBridgeUpdate && (
                     <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
                       Firmware {preparedVersion ? `v${preparedVersion}` : 'update'} is ready to install.
                     </div>
@@ -2506,8 +2723,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button
-            onClick={handleCheckForUpdates}
-            disabled={!selectedDeviceId || checkingUpdates}
+            onClick={() => handleCheckForUpdates()}
+            disabled={checkUpdatesDisabled}
             className="w-full rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
           >
             {checkingUpdates ? (
