@@ -1,3 +1,8 @@
+## 2.0.12
+## Features
+* Feature: Room builder - Add mid-segment wall insert and wall snap angle toggle by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/256
+* Feature: Firmware - Add guided firmware flow to firmware updates by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/259
+
 ## 2.0.11
 ### Breaking change
 Slight breaking change for docker users, the default port has changed from 3000 to 42069. You may need to update your docker compose (see example in repo). This should avoid conflicting with other addons that use port 3000. Apologies for the change. Home Assistant add-on users should be unaffected.
