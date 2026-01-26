@@ -29,6 +29,7 @@ export class DeviceDiscoveryService {
   private readonly manufacturerFilters = [
     'EverythingSmartTechnology',        // EP Lite format (no spaces)
     'Everything Smart Technology',      // EP1 format (with spaces)
+    'diy'
   ];
 
   constructor(readTransport: IHaReadTransport) {
