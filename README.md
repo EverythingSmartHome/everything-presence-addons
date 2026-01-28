@@ -29,9 +29,9 @@ A visual configuration tool for Everything Presence devices in Home Assistant.
    - If that link doesn't work, then
         1. Go to http://homeassistant.local:8123/hassio/store (or whatever your Home Assistant URL is)
         1. Click the 3 dots icon in the upper right, then click `Repository`
-        1. In the Add field, paste `https://github.com/EverythingSmartHome/everything-presence-addons` 
+        1. In the Add field, paste `https://github.com/EverythingSmartHome/everything-presence-addons`
         1. Click `+ Add` then `Close`
-1. Scroll to the section "Everything Presence Add-ons" 
+1. Scroll to the section "Everything Presence Add-ons"
 1. Click "Everything Presence Zone Configurator" and then Install
 1. Start the add-on and open the web UI
 
