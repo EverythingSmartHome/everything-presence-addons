@@ -19,9 +19,9 @@ A visual configuration tool for Everything Presence devices in Home Assistant.
 
 ### Supported Devices
 
-- Everything Presence Lite
-- Everything Presence One
-- Everything Presence Pro
+- [Everything Presence Lite](https://shop.everythingsmart.io/products/everything-presence-lite)
+- [Everything Presence One](https://shop.everythingsmart.io/products/everything-presence-one-kit)
+- [Everything Presence Pro](https://shop.everythingsmart.io/products/everything-presence-pro)
 
 ### Installation
 
