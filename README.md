@@ -1,6 +1,6 @@
 # Everything Presence Add-ons
 
-Home Assistant add-ons for Everything Presence One/Lite mmWave presence sensors.
+Home Assistant add-ons for Everything Presence One/Lite/Pro mmWave presence sensors.
 
 ## Everything Presence Zone Configurator
 
@@ -21,6 +21,7 @@ A visual configuration tool for Everything Presence devices in Home Assistant.
 
 - Everything Presence Lite
 - Everything Presence One
+- Everything Presence Pro
 
 ### Installation
 
