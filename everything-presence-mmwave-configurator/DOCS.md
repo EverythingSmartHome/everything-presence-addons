@@ -27,7 +27,9 @@
 
         1. Click **`+ Add`** then **`Close`**.
 
-1. Click the "Install" button to install the add-on.
+1. Scroll to the section **"Everything Presence Add-ons"**
+
+1. Click **"Everything Presence Zone Configurator"** and then Install.
 
 1. Start the **Everything Presence Zone Configurator** add-on.
 
