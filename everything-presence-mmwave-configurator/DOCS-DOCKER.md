@@ -10,7 +10,7 @@ All of the deployment methods below use following the [`latest`](https://hub.doc
 everythingsmarthome/everything-presence-mmwave-configurator:latest
 ```
 
-**NOTE:** The [`:addon`][epzc-ha-addon-ta] tag is the [Home Assistant Add-on](DOCS.md) base image and **requires** Supervisor to run.
+**NOTE:** The [`:addon`][epzc-ha-addon-tag] tag is the [Home Assistant Add-on](DOCS.md) base image and **requires** Supervisor to run.
 
 [epzc-ha-addon-tag]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=addon
 
