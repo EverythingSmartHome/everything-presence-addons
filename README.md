@@ -16,7 +16,7 @@ Home Assistant add-ons for Everything Presence One/Lite/Pro mmWave presence sens
 
 ## Install Repository
 
-Use this installation method **ONLY** if you have a [Home Assistant OS Installation](https://www.home-assistant.io/installation/), if you have another installation type that does not support [Add-ons](https://www.home-assistant.io/addons/), you should use the [standalone Docker](#standalone-docker).
+Use this installation method **ONLY** if you have a [Home Assistant OS Installation](https://www.home-assistant.io/installation/), if you have another installation type that does not support [Add-ons](https://www.home-assistant.io/addons/), you should use the [standalone Docker](everything-presence-mmwave-configurator/DOCS-DOCKER.md).
 
 1. Click the Home Assistant My button below to open the add-on on your Home Assistant instance and click **`Add`**.
   
@@ -24,7 +24,7 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 
    - If that link doesn't work, then...
 
-        1. Go to http://homeassistant.local:8123/hassio/store (or whatever your Home Assistant URL is).
+        1. Go to **`http://homeassistant.local:8123/hassio/store`** (or whatever your Home Assistant URL is).
 
         1. Click the 3 dots icon in the upper right, then click **`Repository`**.
 
