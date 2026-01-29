@@ -6,6 +6,10 @@ Home Assistant add-ons for Everything Presence One/Lite/Pro mmWave presence sens
 
 A visual configuration tool for Everything Presence devices in Home Assistant.
 
+### Documentation
+
+For additional documentation about this software visit the [**Everything Smart Home Zone Configurator Documentation**](https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2).
+
 ### Features
 
 - **Real-time Tracking** - Live visualization of detected targets with coordinate tracking (Everything Presence Lite)
