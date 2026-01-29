@@ -41,11 +41,6 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 ### Everything Presence Zone Configurator
 
 [![Release][release-shield]][release]
-![Supports armhf Architecture][adguard-armhf-shield]
-![Supports armv7 Architecture][adguard-armv7-shield]
-![Supports aarch64 Architecture][adguard-aarch64-shield]
-![Supports amd64 Architecture][adguard-amd64-shield]
-![Supports i386 Architecture][adguard-i386-shield]
 
 A visual configuration tool for Everything Presence devices in Home Assistant.
 
@@ -56,6 +51,8 @@ A visual configuration tool for Everything Presence devices in Home Assistant.
 [📚 Zone Configurator Full Documentation][zone-configurator-docs]
 
 [zone-configurator-docs]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2
+
+---
 
 ### Everything Smart Home Documentation
 
