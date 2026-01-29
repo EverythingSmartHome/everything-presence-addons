@@ -92,7 +92,7 @@ In order for this software to communicate with your Home Assistant installation,
 
 1. Click on the **Create Token** button and give it a name (ex. Everything Presence Zone Configurator).
 
-1. Copy the token generated and save it in a **secure place** (ex. password manager) if you plan on using this later. You will **NOT** be able to display this sting again. 
+1. Copy the token generated and save it in a **secure place** (ex. password manager) if you plan on using this later. You will **NOT** be able to display this sting again.
 
     **If you lose this token, you will have to delete the old one and generate a fresh one.**
 
