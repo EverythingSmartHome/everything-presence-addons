@@ -27,17 +27,31 @@ For additional documentation about this software visit the [**Everything Smart H
 - [Everything Presence One](https://shop.everythingsmart.io/products/everything-presence-one-kit)
 - [Everything Presence Pro](https://shop.everythingsmart.io/products/everything-presence-pro)
 
-### Installation
+---
 
-1. [Click this link to add this repository to the Add-on Store](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https://github.com/EverythingSmartHome/everything-presence-addons) (note: not HACS) and click Add.
-   - If that link doesn't work, then
-        1. Go to http://homeassistant.local:8123/hassio/store (or whatever your Home Assistant URL is)
-        1. Click the 3 dots icon in the upper right, then click `Repository`
-        1. In the Add field, paste `https://github.com/EverythingSmartHome/everything-presence-addons`
-        1. Click `+ Add` then `Close`
-1. Scroll to the section "Everything Presence Add-ons"
-1. Click "Everything Presence Zone Configurator" and then Install
-1. Start the add-on and open the web UI
+### Home Assistant OS Add-on
+
+Use this installation method **ONLY** if you have a [Home Assistant OS Installation](https://www.home-assistant.io/installation/), if you have another installation type that does not support [Add-ons](https://www.home-assistant.io/addons/), you should use the [standalone Docker](#standalone-docker).
+
+1. [Click this link to add this repository to the Add-on Store](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https://github.com/EverythingSmartHome/everything-presence-addons) (note: not HACS) and click **Add**.
+
+   - If that link doesn't work, then...
+
+        1. Go to http://homeassistant.local:8123/hassio/store (or whatever your Home Assistant URL is).
+
+        1. Click the 3 dots icon in the upper right, then click **`Repository`**.
+
+        1. In the Add field, paste **`https://github.com/EverythingSmartHome/everything-presence-addons`**.
+
+        1. Click **`+ Add`** then **`Close`**.
+
+1. Scroll to the section **"Everything Presence Add-ons"**.
+
+1. Click **"Everything Presence Zone Configurator"** and then **Install**.
+
+1. Start the add-on and open the web UI.
+
+---
 
 ### Standalone Docker
 
