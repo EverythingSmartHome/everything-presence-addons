@@ -238,8 +238,6 @@ For more details on how to use `docker run`, refer to the [official Docker docum
     everythingsmarthome/everything-presence-mmwave-configurator:latest
 
   ```
-<<<<<<< Updated upstream
-=======
 
 <!--
 ###########################
@@ -277,4 +275,3 @@ For more details on how to use `docker run`, refer to the [official Docker docum
 [docker-compose-docs]: https://docs.docker.com/compose/
 [portainer-docs]: https://docs.portainer.io/
 [docker-run-docs]: https://docs.docker.com/
->>>>>>> Stashed changes

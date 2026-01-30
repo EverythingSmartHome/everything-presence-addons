@@ -6,6 +6,8 @@
 
 ## Installation
 
+Use this installation method **ONLY** if you have a [Home Assistant OS Installation][ha-install-docs], if you have another installation type that does not support [Add-ons][ha-addons-docs], you should use the [standalone Docker (`DOCS-DOCKER.md`)][zc-repo-standalone-docs].
+
 1. Click the Home Assistant My button below to open the add-on on your Home
    Assistant instance.
 
@@ -70,11 +72,15 @@
 <!-- Zone Configurator Documentation -->
 
 [zone-configurator-docs]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2
+[zc-repo-standalone-docs]: everything-presence-mmwave-configurator/DOCS-DOCKER.md
 
-<!-- Home Assistant Buttons -->
+<!-- Home Assistant Links -->
 
 [ha-addon-svg]: https://my.home-assistant.io/badges/supervisor_addon.svg
 [ha-addon-url]: https://my.home-assistant.io/redirect/supervisor_addon/?addon=234db91b_everything-presence-zone-configurator&repository_url=https%3A%2F%2Fgithub.com%2FEverythingSmartHome%2Feverything-presence-addons
+
+[ha-install-docs]: https://www.home-assistant.io/installation/
+[ha-addons-docs]: https://www.home-assistant.io/addons/
 
 <!-- Zone Configurator Documentation Quick Links -->
 [installation]: https://docs.everythingsmart.io/s/products/doc/27058e80-a358-4e3c-9138-2f91af17692e
