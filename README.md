@@ -74,5 +74,5 @@ For more information about Everything Presence devices, visit [Everything Smart 
 <!-- Zone Configurator Links -->
 
 [zc-repo-standalone-docs]: everything-presence-mmwave-configurator/DOCS-DOCKER.md
-[zc-repo-addon-docs]: everything-presence-mmwave-configurator/DOCS-DOCKER.md
+[zc-repo-addon-docs]: everything-presence-mmwave-configurator/DOCS.md
 [zone-configurator-docs]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2
