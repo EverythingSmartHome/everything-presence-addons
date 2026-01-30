@@ -2,7 +2,7 @@
 
 [![Stars][stars-shield]][repo]  [![Release][release-shield]][release] [![Discord][discord-shield]][discord]
 
-[**Click here for the most up to date documentation on the Zone Configurator.**][zone-configurator-docs]
+[**📚 Click here for the most up to date documentation on the Zone Configurator.**][zone-configurator-docs]
 
 ## Installation
 

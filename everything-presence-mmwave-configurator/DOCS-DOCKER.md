@@ -6,6 +6,8 @@
 
 Use this installation method if your Home Assistant installation does **NOT** support [Add-ons][ha-addons], or you just want to run the Everything Presence Zone Configurator outside of your Home Assistant install.
 
+**[📚 Additional Zone Configurator Installation Documentation][epzc-install-docs]**
+
 ## Standalone Docker Image
 
 All of the deployment methods below use following the [`latest`][epzc-docker-latest] standalone image for non-Home Assistant OS installs:
@@ -260,6 +262,7 @@ For more details on how to use `docker run`, refer to the [official Docker docum
 
 [epzc-ha-addon-tag]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=addon
 [epzc-docker-latest]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=latest
+[epzc-install-docs]: https://docs.everythingsmart.io/s/products/doc/installation-cMmmVVeJce
 
 <!-- Home Assistant Documentation -->
 
