@@ -241,6 +241,10 @@ For more details on how to use `docker run`, refer to the [official Docker docum
 
   ```
 
+## Next Steps
+
+[**Setup Wizard**][za-setup-wizard] - Configure your first device.
+
 <!--
 ###########################
 ### Markdown Page Links ###
@@ -263,6 +267,7 @@ For more details on how to use `docker run`, refer to the [official Docker docum
 [epzc-ha-addon-tag]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=addon
 [epzc-docker-latest]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=latest
 [epzc-install-docs]: https://docs.everythingsmart.io/s/products/doc/installation-cMmmVVeJce
+[za-setup-wizard]: https://docs.everythingsmart.io/s/products/doc/12eba20b-11c3-4451-a484-69636ea2b213
 
 <!-- Home Assistant Documentation -->
 
