@@ -1,77 +1,78 @@
 # Everything Presence Add-ons
 
-Home Assistant add-ons for Everything Presence One/Lite mmWave presence sensors.
+[![Stars][stars-shield]][repo]  [![Release][release-shield]][release] [![Discord][discord-shield]][discord]
 
-## Everything Presence Zone Configurator
+## About
+
+Home Assistant add-ons for Everything Presence One/Lite/Pro mmWave presence sensors.
+
+## Install Repository
+
+Use this installation method **ONLY** if you have a [Home Assistant OS Installation][ha-install-docs], if you have another installation type that does not support [Add-ons][ha-addons-docs], you should use the standalone Dockers.
+
+1. Click the Home Assistant My button below to open the add-on on your Home Assistant instance and click **`Add`**.
+  
+    [![Open your Home Assistant instance and show the add-on store.][ha-addon-repo-svg]][ha-addon-repo-url]
+
+   - If that link doesn't work, then...
+
+        1. Go to **`http://homeassistant.local:8123/hassio/store`** (or whatever your Home Assistant URL is).
+
+        1. Click the 3 dots icon in the upper right, then click **`Repository`**.
+
+        1. In the Add field, paste **`https://github.com/EverythingSmartHome/everything-presence-addons`**.
+
+        1. Click **`+ Add`** then **`Close`**.
+
+1. Scroll to the section **`"Everything Presence Add-ons"`**.
+
+1. Install any of the **`Add-ons`** in this repository.
+
+## Add-ons provided by this repository
+
+### Everything Presence Zone Configurator
 
 A visual configuration tool for Everything Presence devices in Home Assistant.
 
-### Features
+**[📚 Zone Configurator Add-on documentation:][zc-repo-addon-docs]** Use for Home Assistant OS Installations
 
-- **Real-time Tracking** - Live visualization of detected targets with coordinate tracking (Everything Presence Lite)
-- **Visual Zone Editor** - Draw and configure detection zones directly on a room layout
-- **Polygon Zones** - Create custom-shaped zones beyond simple rectangles
-- **Entry Zones** - Define entry/exit zones for directional presence detection
-- **Assumed Presence Mode** - Configure assumed presence behavior for more reliable detection
-- **Room Builder** - Design your room layout with walls, doors, and furniture for accurate zone placement
-- **Multi-device Support** - Manage multiple Everything Presence devices from a single interface
-- **Environmental Monitoring** - View temperature, humidity, CO2, and illuminance data (device dependent)
+**[📚 Zone Configurator Standalone Docker Documentation][zc-repo-standalone-docs]** Use for Home Assistant Installations that **DO NOT** support add-ons.
 
-### Supported Devices
+**[📚 Zone Configurator Full Documentation][zone-configurator-docs]** Use for general setup and configuration instructions.
 
-- Everything Presence Lite
-- Everything Presence One
+---
 
-### Installation
-
-1. [Click this link to add this repository to the Add-on Store](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https://github.com/EverythingSmartHome/everything-presence-addons) (note: not HACS) and click Add.
-   - If that link doesn't work, then
-        1. Go to http://homeassistant.local:8123/hassio/store (or whatever your Home Assistant URL is)
-        2. Click the 3 dots icon in the upper right, then click `Repository`
-        3. In the Add field, paste `https://github.com/EverythingSmartHome/everything-presence-addons` 
-        4. Click `+ Add` then `Close`
-3. Scroll to the section "Everything Presence Add-ons" 
-4. Click "Everything Presence Zone Configurator" and then Install
-5. Start the add-on and open the web UI
-
-### Standalone Docker
-
-Use the standalone image for non-Home Assistant installs:
-
-```
-everythingsmarthome/everything-presence-mmwave-configurator:latest
-```
-
-Set `HA_BASE_URL` and `HA_LONG_LIVED_TOKEN` for standalone mode. The `:addon` tag is the Home Assistant add-on base image and requires Supervisor to run.
-
-**Port change (v2.0.11):** The default app port is now `42069`. Existing Docker users can either update their port mapping to `42069:42069` or keep the old behavior by setting `PORT=3000` and continuing to map `3000:3000`.
-
-Example `docker-compose.yaml`:
-
-```yaml
-services:
-  zone-configurator:
-    image: everythingsmarthome/everything-presence-mmwave-configurator:latest
-    container_name: everything-presence-mmwave-configurator
-    restart: unless-stopped
-    ports:
-      - "42069:42069"
-      - "38080:38080"
-    environment:
-      HA_BASE_URL: "http://homeassistant.local:8123"
-      HA_LONG_LIVED_TOKEN: "REPLACE_WITH_LONG_LIVED_TOKEN"
-      FIRMWARE_LAN_PORT: "38080"
-    volumes:
-      - ./config:/config
-```
-
-### LAN Firmware Port
-
-Firmware updates are served over a local HTTP port for ESP devices. By default this uses port `38080`.
-
-- Home Assistant add-on: configure `firmware_lan_port` in the add-on Configuration tab.
-- Standalone Docker: set `FIRMWARE_LAN_PORT` and map the same host port.
-
-### Documentation
+### Everything Smart Home Documentation
 
 For more information about Everything Presence devices, visit [Everything Smart Home](https://docs.everythingsmart.io)
+
+<!--
+###########################
+### Markdown Page Links ###
+###########################
+-->
+
+<!-- shields.io -->
+
+[stars-shield]: https://img.shields.io/github/stars/EverythingSmartHome/everything-presence-addons
+[repo]: https://github.com/EverythingSmartHome/everything-presence-addons
+
+[discord-shield]: https://img.shields.io/discord/719115387425521704.svg
+[discord]: https://discord.gg/Bgfvy2f
+
+[release-shield]: https://img.shields.io/github/v/release/EverythingSmartHome/everything-presence-addons.svg
+[release]: https://github.com/EverythingSmartHome/everything-presence-addons/releases
+
+<!-- Home Assistant Links -->
+
+[ha-addon-repo-svg]: https://my.home-assistant.io/badges/supervisor_store.svg
+[ha-addon-repo-url]: https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https://github.com/EverythingSmartHome/everything-presence-addons
+
+[ha-install-docs]: https://www.home-assistant.io/installation/
+[ha-addons-docs]: https://www.home-assistant.io/addons/
+
+<!-- Zone Configurator Links -->
+
+[zc-repo-standalone-docs]: everything-presence-mmwave-configurator/DOCS-DOCKER.md
+[zc-repo-addon-docs]: everything-presence-mmwave-configurator/DOCS.md
+[zone-configurator-docs]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2

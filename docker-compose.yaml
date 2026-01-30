@@ -4,11 +4,16 @@ services:
     container_name: everything-presence-mmwave-configurator
     restart: unless-stopped
     ports:
-      - "42069:42069"
-      - "38080:38080"
+      - "${APP_PORT:-42069}:42069"
+      - "${FIRMWARE_LAN_PORT:-38080}:${FIRMWARE_LAN_PORT:-38080}"
     environment:
-      HA_BASE_URL: "http://homeassistant.local:8123"
-      HA_LONG_LIVED_TOKEN: "REPLACE_WITH_LONG_LIVED_TOKEN"
-      FIRMWARE_LAN_PORT: "38080"
+      HA_BASE_URL: "${HA_BASE_URL:-http://homeassistant.local:8123}"
+      HA_LONG_LIVED_TOKEN: "${HA_LONG_LIVED_TOKEN}"
+      FIRMWARE_LAN_PORT: "${FIRMWARE_LAN_PORT:-38080}"
     volumes:
       - ./config:/config
+
+# Uncomment the lines below and replace the volume mount above with "- epzone-config:/config" if you want to used a named volume instead. 
+#volumes:
+#    epzone-config:
+#        driver: local
