@@ -1,10 +1,14 @@
 # Everything Presence Standalone Docker: Zone Configurator
 
-Use this installation method if your Home Assistant installation does **NOT** support [Add-ons](https://www.home-assistant.io/addons/), or you just want to run the Everything Presence Zone Configurator outside of your Home Assistant install.
+[![Stars][stars-shield]][repo]  [![Release][release-shield]][release] [![Discord][discord-shield]][discord]
+
+---
+
+Use this installation method if your Home Assistant installation does **NOT** support [Add-ons][ha-addons], or you just want to run the Everything Presence Zone Configurator outside of your Home Assistant install.
 
 ## Standalone Docker Image
 
-All of the deployment methods below use following the [`latest`](https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=latest) standalone image for non-Home Assistant OS installs:
+All of the deployment methods below use following the [`latest`][epzc-docker-latest] standalone image for non-Home Assistant OS installs:
 
 ```yaml
 everythingsmarthome/everything-presence-mmwave-configurator:latest
@@ -12,11 +16,9 @@ everythingsmarthome/everything-presence-mmwave-configurator:latest
 
 **NOTE:** The [`:addon`][epzc-ha-addon-tag] tag is the [Home Assistant Add-on](DOCS.md) base image and **requires** Supervisor to run.
 
-[epzc-ha-addon-tag]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=addon
-
 ### Zone Configurator Ports
 
-**_Resources:_** [Publishing & Exposing Ports in Docker](https://docs.docker.com/get-started/docker-concepts/running-containers/publishing-ports/)
+**_Resources:_** [Publishing & Exposing Ports in Docker][exposing-ports-docker]
 
 **App Port:** Port `42069` is exposed for the web interface.
 
@@ -31,7 +33,7 @@ everythingsmarthome/everything-presence-mmwave-configurator:latest
 
 ### 1. Create a Long Lived Token
 
-In order for this software to communicate with your Home Assistant installation, you **MUST** create a Long Lived Token for this software to [authenticate](https://www.home-assistant.io/docs/authentication/) with the [Home Assistant's API](https://developers.home-assistant.io/docs/api/rest/).
+In order for this software to communicate with your Home Assistant installation, you **MUST** create a Long Lived Token for this software to [authenticate][ha-auth-docs] with the [Home Assistant's API][ha-api-docs].
 
 1. Log into your Home Assistant instance and go to your **`User profile`** page by selecting on the **`circular icon`** at the very bottom of the sidebar.
 
@@ -45,7 +47,7 @@ In order for this software to communicate with your Home Assistant installation,
 
 ### 2. Create an `.env` File
 
-Settings for the standalone Docker are controlled via [**environment variables**](https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/).
+Settings for the standalone Docker are controlled via [**environment variables**][docker-compose-env-docs].
 
 While it is not required, it is **recommended** you make an `.env` file in the root directory that you plan to run your commands.
 
@@ -98,7 +100,7 @@ You can use the links below to jump to the instructions for whichever method sui
 
 **Resources**
 
-For more details on how to use Docker Compose, refer to the [official Docker Compose documentation](https://docs.docker.com/compose/).
+For more details on how to use Docker Compose, refer to the [official Docker Compose documentation][docker-compose-docs].
 
 **Installation**
 
@@ -151,7 +153,7 @@ For more details on how to use Docker Compose, refer to the [official Docker Com
 
 **Resources**
 
-For more details on how to use Portainer, refer to the [official Portainer documentation](https://docs.portainer.io/).
+For more details on how to use Portainer, refer to the [official Portainer documentation][portainer-docs].
 
 **Instructions**
 
@@ -196,7 +198,7 @@ For more details on how to use Portainer, refer to the [official Portainer docum
 
 **Resources**
 
-For more details on how to use Portainer, refer to the [official Docker documentation](https://docs.docker.com/).
+For more details on how to use `docker run`, refer to the [official Docker documentation][docker-run-docs].
 
 **Instructions**
 
@@ -236,3 +238,43 @@ For more details on how to use Portainer, refer to the [official Docker document
     everythingsmarthome/everything-presence-mmwave-configurator:latest
 
   ```
+<<<<<<< Updated upstream
+=======
+
+<!--
+###########################
+### Markdown Page Links ###
+###########################
+-->
+
+<!-- shields.io -->
+
+[stars-shield]: https://img.shields.io/github/stars/EverythingSmartHome/everything-presence-addons
+[repo]: https://github.com/EverythingSmartHome/everything-presence-addons
+
+[discord-shield]: https://img.shields.io/discord/719115387425521704.svg
+[discord]: https://discord.gg/Bgfvy2f
+
+[release-shield]: https://img.shields.io/github/v/release/EverythingSmartHome/everything-presence-addons.svg
+[release]: https://github.com/EverythingSmartHome/everything-presence-addons/releases
+
+<!-- Zone Configurator Links -->
+
+[epzc-ha-addon-tag]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=addon
+[epzc-docker-latest]: https://hub.docker.com/r/everythingsmarthome/everything-presence-mmwave-configurator/tags?name=latest
+
+<!-- Home Assistant Documentation -->
+
+[ha-addons]: https://www.home-assistant.io/addons/
+[ha-api-docs]: https://developers.home-assistant.io/docs/api/rest/
+[ha-auth-docs]: https://www.home-assistant.io/docs/authentication/
+
+<!-- Other Documentation -->
+
+[exposing-ports-docker]: https://docs.docker.com/get-started/docker-concepts/running-containers/publishing-ports/
+[docker-compose-env-docs]: https://docs.docker.com/compose/how-tos/environment-variables/set-environment-variables/
+
+[docker-compose-docs]: https://docs.docker.com/compose/
+[portainer-docs]: https://docs.portainer.io/
+[docker-run-docs]: https://docs.docker.com/
+>>>>>>> Stashed changes

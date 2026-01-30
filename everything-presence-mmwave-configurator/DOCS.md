@@ -1,21 +1,15 @@
 # Everything Presence Add-on: Zone Configurator
 
-[Zone Configurator][zone-configurator] is a Home Assistant add-on that provides a visual interface for configuring Everything Presence devices. Draw room layouts, create detection zones, and watch real-time target tracking - all from your browser.
-
-[zone-configurator]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2
-
-## Documentation
+[![Stars][stars-shield]][repo]  [![Release][release-shield]][release] [![Discord][discord-shield]][discord]
 
 [**Click here for the most up to date documentation on the Zone Configurator.**][zone-configurator-docs]
-
-[zone-configurator-docs]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2
 
 ## Installation
 
 1. Click the Home Assistant My button below to open the add-on on your Home
    Assistant instance.
 
-    [![Open your Home Assistant instance and show the dashboard of an add-on.](https://my.home-assistant.io/badges/supervisor_addon.svg)](https://my.home-assistant.io/redirect/supervisor_addon/?addon=234db91b_everything-presence-zone-configurator&repository_url=https%3A%2F%2Fgithub.com%2FEverythingSmartHome%2Feverything-presence-addons)
+    [![Open your Home Assistant instance and show the dashboard of an add-on.][ha-addon-svg]][ha-addon-url]
 
    - If that link doesn't work, then...
 
@@ -37,10 +31,18 @@
 
 1. Click the **OPEN WEB UI** button to open **Everything Presence Zone Configurator**.
 
+## Configuration
+
+### Options
+
+- **port:** This is the port used to reach the web interface.
+
+- **firmware_lan_port:** This is the port used for device OTA updates.
+
 ## Quick Links
 
 | I want to...              | Go to...
-|:--------------------------|:-
+| :-------------------------| :-
 | Install the add-on        | [Installation][installation]
 | Set up my first device    | [Setup Wizard][setup-wizard]
 | Create detection zones    | [Zone Editor][zone-editor]
@@ -48,6 +50,33 @@
 | Fix a problem             | [Troubleshooting][troubleshooting]
 | Update device firmware    | [Firmware Updates][firmware-updates]
 
+<!--
+###########################
+### Markdown Page Links ###
+###########################
+-->
+
+<!-- shields.io -->
+
+[stars-shield]: https://img.shields.io/github/stars/EverythingSmartHome/everything-presence-addons
+[repo]: https://github.com/EverythingSmartHome/everything-presence-addons
+
+[discord-shield]: https://img.shields.io/discord/719115387425521704.svg
+[discord]: https://discord.gg/Bgfvy2f
+
+[release-shield]: https://img.shields.io/github/v/release/EverythingSmartHome/everything-presence-addons.svg
+[release]: https://github.com/EverythingSmartHome/everything-presence-addons/releases
+
+<!-- Zone Configurator Documentation -->
+
+[zone-configurator-docs]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2
+
+<!-- Home Assistant Buttons -->
+
+[ha-addon-svg]: https://my.home-assistant.io/badges/supervisor_addon.svg
+[ha-addon-url]: https://my.home-assistant.io/redirect/supervisor_addon/?addon=234db91b_everything-presence-zone-configurator&repository_url=https%3A%2F%2Fgithub.com%2FEverythingSmartHome%2Feverything-presence-addons
+
+<!-- Zone Configurator Documentation Quick Links -->
 [installation]: https://docs.everythingsmart.io/s/products/doc/27058e80-a358-4e3c-9138-2f91af17692e
 [setup-wizard]: https://docs.everythingsmart.io/s/products/doc/12eba20b-11c3-4451-a484-69636ea2b213
 [zone-editor]: https://docs.everythingsmart.io/s/products/doc/66bbf380-ac1f-408e-a58b-c878f72783f7
