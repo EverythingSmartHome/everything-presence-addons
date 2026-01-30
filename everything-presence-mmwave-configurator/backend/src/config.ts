@@ -1,5 +1,6 @@
 import path from 'path';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -73,7 +74,20 @@ const detectHaConfig = (): HaConfig => {
   }
 
   const standaloneUrl = process.env.HA_BASE_URL;
-  const standaloneToken = process.env.HA_LONG_LIVED_TOKEN;
+  const tokenFromEnv = process.env.HA_LONG_LIVED_TOKEN;
+  const tokenFilePath = process.env.HA_LONG_LIVED_TOKEN_FILE;
+  
+  let standaloneToken: string | undefined = tokenFromEnv;
+  
+  if (tokenFilePath) {
+    try {
+      standaloneToken = fs.readFileSync(tokenFilePath, 'utf8').trim();
+    } catch (err) {
+      throw new Error(
+        `Failed to read HA_LONG_LIVED_TOKEN_FILE at "${tokenFilePath}": ${(err as Error).message}`
+      );
+    }
+  }
 
   if (standaloneUrl && standaloneToken) {
     return {
