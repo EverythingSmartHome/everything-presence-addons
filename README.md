@@ -65,8 +65,8 @@ For more information about Everything Presence devices, visit [Everything Smart 
 
 <!-- Home Assistant Links -->
 
-[ha-addon-repo-svg]: https://my.home-assistant.io/badges/supervisor_addon.svg
-[ha-addon-repo-url]: https://my.home-assistant.io/redirect/supervisor_addon/?addon=234db91b_everything-presence-zone-configurator&repository_url=https%3A%2F%2Fgithub.com%2FEverythingSmartHome%2Feverything-presence-addons
+[ha-addon-repo-svg]: https://my.home-assistant.io/badges/supervisor_store.svg
+[ha-addon-repo-url]: https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https://github.com/EverythingSmartHome/everything-presence-addons
 
 [ha-install-docs]: https://www.home-assistant.io/installation/
 [ha-addons-docs]: https://www.home-assistant.io/addons/
