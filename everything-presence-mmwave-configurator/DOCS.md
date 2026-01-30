@@ -76,7 +76,7 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 <!-- Zone Configurator Documentation -->
 
 [zone-configurator-docs]: https://docs.everythingsmart.io/s/products/doc/zone-configurator-93b9scGsa2
-[zc-repo-standalone-docs]: everything-presence-mmwave-configurator/DOCS-DOCKER.md
+[zc-repo-standalone-docs]: DOCS-DOCKER.md
 [za-setup-wizard]: https://docs.everythingsmart.io/s/products/doc/12eba20b-11c3-4451-a484-69636ea2b213
 
 <!-- Home Assistant Links -->
