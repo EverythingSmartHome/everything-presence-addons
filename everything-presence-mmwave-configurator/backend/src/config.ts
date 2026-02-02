@@ -98,7 +98,7 @@ const detectHaConfig = (): HaConfig => {
   }
 
   throw new Error(
-    'Home Assistant credentials are not configured. Provide SUPERVISOR_TOKEN (add-on) or HA_BASE_URL and HA_LONG_LIVED_TOKEN (standalone).',
+    'Home Assistant credentials are not configured. Provide SUPERVISOR_TOKEN (add-on) or HA_BASE_URL and HA_LONG_LIVED_TOKEN/HA_LONG_LIVED_TOKEN_FILE (standalone).',
   );
 };
 
