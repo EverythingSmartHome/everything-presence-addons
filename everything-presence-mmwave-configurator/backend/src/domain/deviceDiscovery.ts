@@ -28,7 +28,8 @@ export class DeviceDiscoveryService {
   private readonly readTransport: IHaReadTransport;
   private readonly manufacturerFilters = [
     'EverythingSmartTechnology',        // EP Lite format (no spaces)
-    'Everything Smart Technology',      // EP1 format (with spaces)
+    'Everything Smart Technology',      // EP1 format (with spaces),
+    "smarthomeshop"                   // Ultimate Sensor by Smarthomeshop 
   ];
 
   constructor(readTransport: IHaReadTransport) {
