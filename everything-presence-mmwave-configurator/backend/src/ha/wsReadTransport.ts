@@ -74,7 +74,11 @@ export class WsReadTransport implements IHaReadTransport {
 
       logger.info({ url }, 'WsReadTransport: Connecting to HA WebSocket');
 
-      this.socket = new WebSocket(url);
+      this.socket = new WebSocket(url, ...(
+        process.env.VERIFY_SSL?.toLowerCase() === 'false'
+          ? [{ rejectUnauthorized: false }]
+          : []
+      ));
 
       const connectionTimeout = setTimeout(() => {
         if (!this._isConnected) {
