@@ -15,6 +15,7 @@ import { fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
+import { FloorPlanUpload, BackgroundImageData } from '../components/FloorPlanUpload';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -95,6 +96,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [pushingZones, setPushingZones] = useState(false);
   const [pushSuccess, setPushSuccess] = useState(false);
 
+  // Floor plan upload modal
+  const [showFloorPlanUpload, setShowFloorPlanUpload] = useState(false);
+
   // Entity discovery mappings (discovered after device selection)
   const [discoveredMappings, setDiscoveredMappings] = useState<EntityMappings | null>(null);
 
@@ -155,6 +159,25 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update room outline');
       // Revert on error
+      onRoomUpdate?.(selectedRoom);
+    }
+  }, [selectedRoom, onRoomUpdate]);
+
+  const handleFloorPlanApply = useCallback(async (data: BackgroundImageData) => {
+    if (!selectedRoom) return;
+    setShowFloorPlanUpload(false);
+
+    const updatedRoom: RoomConfig = {
+      ...selectedRoom,
+      backgroundImage: data,
+    };
+
+    onRoomUpdate?.(updatedRoom);
+    try {
+      await updateRoom(selectedRoom.id, updatedRoom);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to apply floor plan image');
       onRoomUpdate?.(selectedRoom);
     }
   }, [selectedRoom, onRoomUpdate]);
@@ -1443,7 +1466,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
-              onDragStateChange={setIsCanvasDragging}
+              backgroundImage={selectedRoom?.backgroundImage}
               displayUnits={units}
             />
           )}
@@ -1786,7 +1809,73 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               >
                 🗑️ Clear
               </button>
+              <div className="mt-2 pt-2 border-t border-slate-700/30">
+                <button
+                  className="w-full rounded-xl border border-purple-600/50 bg-purple-600/10 px-4 py-2.5 text-sm font-semibold text-purple-100 shadow-lg transition-all hover:bg-purple-600/20 active:scale-95"
+                  onClick={() => setShowFloorPlanUpload(true)}
+                >
+                  📄 {selectedRoom?.backgroundImage ? 'Change' : 'Import'} Floor Plan
+                </button>
+                {selectedRoom?.backgroundImage && (
+                  <>
+                    <button
+                      className="w-full mt-1 rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2 text-xs font-semibold text-rose-200 shadow-lg transition-all hover:bg-rose-600/20 active:scale-95"
+                      onClick={async () => {
+                        if (!selectedRoom) return;
+                        const updatedRoom: RoomConfig = { ...selectedRoom, backgroundImage: undefined };
+                        onRoomUpdate?.(updatedRoom);
+                        try { await updateRoom(selectedRoom.id, updatedRoom); } catch {}
+                      }}
+                    >
+                      Remove Image
+                    </button>
+                    <div className="mt-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-3 py-2 shadow-lg space-y-2">
+                      <div>
+                        <label className="text-xs text-slate-400">Scale</label>
+                        <input
+                          type="range" min={1} max={50} step={0.5}
+                          value={selectedRoom.backgroundImage.scaleMmPerPx}
+                          onChange={async (e) => {
+                            const val = Number(e.target.value);
+                            const bg = { ...selectedRoom.backgroundImage!, scaleMmPerPx: val };
+                            const updatedRoom: RoomConfig = { ...selectedRoom, backgroundImage: bg };
+                            onRoomUpdate?.(updatedRoom);
+                            try { await updateRoom(selectedRoom.id, updatedRoom); } catch {}
+                          }}
+                          className="w-full accent-aqua-500"
+                        />
+                        <span className="text-xs text-aqua-300">{selectedRoom.backgroundImage.scaleMmPerPx} mm/px</span>
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400">Opacity</label>
+                        <input
+                          type="range" min={0.05} max={0.8} step={0.05}
+                          value={selectedRoom.backgroundImage.opacity}
+                          onChange={async (e) => {
+                            const val = Number(e.target.value);
+                            const bg = { ...selectedRoom.backgroundImage!, opacity: val };
+                            const updatedRoom: RoomConfig = { ...selectedRoom, backgroundImage: bg };
+                            onRoomUpdate?.(updatedRoom);
+                            try { await updateRoom(selectedRoom.id, updatedRoom); } catch {}
+                          }}
+                          className="w-full accent-aqua-500"
+                        />
+                        <span className="text-xs text-aqua-300">{Math.round(selectedRoom.backgroundImage.opacity * 100)}%</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
+          )}
+
+          {/* Floor Plan Upload Modal */}
+          {showFloorPlanUpload && (
+            <FloorPlanUpload
+              onApply={handleFloorPlanApply}
+              onClose={() => setShowFloorPlanUpload(false)}
+              existing={selectedRoom?.backgroundImage}
+            />
           )}
 
           {/* Door Controls (doors step only) */}

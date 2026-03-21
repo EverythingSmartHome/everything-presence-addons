@@ -288,6 +288,14 @@ export interface RoomConfig {
   devicePlacement?: DevicePlacement;
   furniture?: FurnitureInstance[];
   doors?: Door[];
+  backgroundImage?: {
+    dataUrl: string;
+    scaleMmPerPx: number;
+    offsetX: number;
+    offsetY: number;
+    opacity: number;
+    rotationDeg: number;
+  };
   metadata?: Record<string, unknown>;
 }
 

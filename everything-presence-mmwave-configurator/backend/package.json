@@ -21,8 +21,8 @@
     "@types/express": "^4.17.21",
     "@types/node": "^20.11.30",
     "@types/uuid": "^9.0.7",
-    "pino-pretty": "^11.2.2",
     "@types/ws": "^8.5.12",
+    "pino-pretty": "^11.2.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
   }
