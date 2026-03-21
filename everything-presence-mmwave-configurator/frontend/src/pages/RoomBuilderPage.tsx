@@ -11,6 +11,7 @@ import { FLOOR_MATERIALS } from '../components/FloorMaterials';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { FloorPlanUpload, BackgroundImageData } from '../components/FloorPlanUpload';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -90,6 +91,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     startY: number;
     originalPosition: number;
   } | null>(null);
+  const [showFloorPlanUpload, setShowFloorPlanUpload] = useState(false);
   const [showRotationSuggestion, setShowRotationSuggestion] = useState(false);
   const [rotationSuggestion, setRotationSuggestion] = useState<{ suggestedAngle: number; targetAxis: number } | null>(null);
   const [applyingInstallationAngle, setApplyingInstallationAngle] = useState(false);
@@ -562,6 +564,23 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     handlePointsChange([]);
     stopDrawing();
   };
+
+  const handleFloorPlanApply = useCallback(async (data: BackgroundImageData) => {
+    if (!selectedRoom) return;
+    setShowFloorPlanUpload(false);
+
+    const updatedRoom: RoomConfig = {
+      ...selectedRoom,
+      backgroundImage: data,
+    };
+
+    try {
+      const { room } = await updateRoom(selectedRoom.id, updatedRoom);
+      setRooms((prev) => prev.map((r) => (r.id === room.id ? room : r)));
+    } catch (err) {
+      console.error('Failed to apply floor plan image:', err);
+    }
+  }, [selectedRoom]);
 
   const handleCloseLoop = () => {
     if (!selectedRoom?.roomShell?.points || selectedRoom.roomShell.points.length < 2) {
@@ -1040,6 +1059,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   zoom={zoom}
                   panOffsetMm={panOffsetMm}
                   onPanChange={(next) => setPanOffsetMm(next)}
+                  backgroundImage={selectedRoom.backgroundImage}
                   displayUnits={displayUnits}
                   devicePlacement={
                     selectedRoom.devicePlacement ?? {
@@ -1220,6 +1240,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 disabled={!selectedRoom}
               >
                 🗑️ Clear
+              </button>
+
+              {/* Import Floor Plan Button */}
+              <button
+                className="rounded-xl border border-purple-600/50 bg-purple-600/10 px-4 py-2.5 font-semibold text-purple-100 shadow-lg transition-all hover:bg-purple-600/20 active:scale-95"
+                onClick={() => setShowFloorPlanUpload(true)}
+              >
+                📄 Import Floor Plan
               </button>
 
               {/* Furniture Button */}
@@ -1772,6 +1800,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         <FurnitureLibrary
           onSelect={handleAddFurniture}
           onClose={() => setShowFurnitureLibrary(false)}
+        />
+      )}
+      {showFloorPlanUpload && (
+        <FloorPlanUpload
+          onApply={handleFloorPlanApply}
+          onClose={() => setShowFloorPlanUpload(false)}
+          existing={selectedRoom?.backgroundImage}
         />
       )}
     </div>
