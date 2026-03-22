@@ -76,6 +76,16 @@ interface RoomCanvasProps {
   onDoorDragEnd?: () => void;
   roomShellFillMode?: 'overlay' | 'material';
   floorMaterial?: string;
+  // Background floor plan image
+  backgroundImage?: {
+    dataUrl: string;
+    scaleMmPerPx: number;
+    offsetX: number;
+    offsetY: number;
+    opacity: number;
+    rotationDeg: number;
+  };
+  onBackgroundImageChange?: (bg: { offsetX: number; offsetY: number }) => void;
   // Visibility toggles
   showWalls?: boolean;
   showFurniture?: boolean;
@@ -353,6 +363,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   onDoorDragEnd,
   roomShellFillMode = 'overlay',
   floorMaterial = 'none',
+  backgroundImage,
+  onBackgroundImageChange,
   showWalls = true,
   showFurniture = true,
   showDoors = true,
@@ -823,6 +835,29 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             );
           }
           return lines;
+        })()}
+        {/* Background floor plan image overlay */}
+        {backgroundImage?.dataUrl && (() => {
+          const imgRef = React.createRef<SVGImageElement>();
+          const cx = HALF + toCanvas(-panOffsetMm.x + (backgroundImage.offsetX || 0), effectiveRangeMm);
+          const cy = HALF + toCanvas(-panOffsetMm.y + (backgroundImage.offsetY || 0), effectiveRangeMm);
+          const pxToCanvas = (backgroundImage.scaleMmPerPx || 10) / effectiveRangeMm * CANVAS_SIZE;
+          return (
+            <image
+              href={backgroundImage.dataUrl}
+              x={cx}
+              y={cy}
+              opacity={backgroundImage.opacity ?? 0.3}
+              style={{
+                transformOrigin: `${cx}px ${cy}px`,
+                transform: backgroundImage.rotationDeg ? `rotate(${backgroundImage.rotationDeg}deg)` : undefined,
+                width: `calc(100%)`,
+                pointerEvents: 'none',
+              }}
+              preserveAspectRatio="xMinYMin meet"
+              transform={`scale(${pxToCanvas})`}
+            />
+          );
         })()}
         {safePoints.length > 0 && (
           <>
