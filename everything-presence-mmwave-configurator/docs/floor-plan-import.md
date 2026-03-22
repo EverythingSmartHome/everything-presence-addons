@@ -12,8 +12,12 @@ Import a floor plan image as a background overlay on the canvas, then trace over
 6. Click **"Apply to Canvas"**
 7. Use **"Add wall (A)"** to click corner points on top of the image, tracing the walls
 8. Fine-tune Scale and Opacity using the sidebar sliders while drawing
-9. Continue to the next steps to add doors, furniture, and device placement
-10. Click **"Remove Image"** when you no longer need the reference
+9. Continue to the next steps - the image stays visible through **all wizard steps**:
+   - **Doors** - place doors at the right wall positions by referencing the image
+   - **Furniture** - drag and resize furniture to match exact positions and sizes from the floor plan
+   - **Placement** - position the device with the floor plan as a guide
+10. Adjust **Opacity** or **Remove** the image from any step using the compact controls in the sidebar
+11. Click **"Remove Image"** when you no longer need the reference
 
 ## Supported formats
 

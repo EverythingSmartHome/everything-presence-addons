@@ -1483,6 +1483,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
               onDragStateChange={setIsCanvasDragging}
+              backgroundImage={selectedRoom?.backgroundImage}
               displayUnits={units}
               doors={selectedRoom?.doors ?? []}
               selectedDoorId={selectedDoorId}
@@ -1537,6 +1538,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
               onDragStateChange={setIsCanvasDragging}
+              backgroundImage={selectedRoom?.backgroundImage}
               displayUnits={units}
               doors={selectedRoom?.doors ?? []}
               showDoors={true}
@@ -1602,6 +1604,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              backgroundImage={selectedRoom?.backgroundImage}
               displayUnits={units}
               furniture={selectedRoom?.furniture ?? []}
               showFurniture={true}
@@ -1930,6 +1933,39 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   </span>
                 </label>
               </div>
+              {selectedRoom?.backgroundImage && (
+                <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-3 py-2 shadow-lg space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400 font-medium">Floor Plan Image</span>
+                    <button
+                      className="text-xs text-rose-400 hover:text-rose-300 transition-colors"
+                      onClick={async () => {
+                        if (!selectedRoom) return;
+                        const updatedRoom: RoomConfig = { ...selectedRoom, backgroundImage: undefined };
+                        onRoomUpdate?.(updatedRoom);
+                        try { await updateRoom(selectedRoom.id, updatedRoom); } catch {}
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500">Opacity</label>
+                    <input
+                      type="range" min={0.05} max={0.8} step={0.05}
+                      value={selectedRoom.backgroundImage.opacity}
+                      onChange={async (e) => {
+                        const val = Number(e.target.value);
+                        const bg = { ...selectedRoom.backgroundImage!, opacity: val };
+                        const updatedRoom: RoomConfig = { ...selectedRoom, backgroundImage: bg };
+                        onRoomUpdate?.(updatedRoom);
+                        try { await updateRoom(selectedRoom.id, updatedRoom); } catch {}
+                      }}
+                      className="w-full accent-aqua-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1983,6 +2019,39 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   </span>
                 </label>
               </div>
+              {selectedRoom?.backgroundImage && (
+                <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-3 py-2 shadow-lg space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400 font-medium">Floor Plan Image</span>
+                    <button
+                      className="text-xs text-rose-400 hover:text-rose-300 transition-colors"
+                      onClick={async () => {
+                        if (!selectedRoom) return;
+                        const updatedRoom: RoomConfig = { ...selectedRoom, backgroundImage: undefined };
+                        onRoomUpdate?.(updatedRoom);
+                        try { await updateRoom(selectedRoom.id, updatedRoom); } catch {}
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500">Opacity</label>
+                    <input
+                      type="range" min={0.05} max={0.8} step={0.05}
+                      value={selectedRoom.backgroundImage.opacity}
+                      onChange={async (e) => {
+                        const val = Number(e.target.value);
+                        const bg = { ...selectedRoom.backgroundImage!, opacity: val };
+                        const updatedRoom: RoomConfig = { ...selectedRoom, backgroundImage: bg };
+                        onRoomUpdate?.(updatedRoom);
+                        try { await updateRoom(selectedRoom.id, updatedRoom); } catch {}
+                      }}
+                      className="w-full accent-aqua-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
