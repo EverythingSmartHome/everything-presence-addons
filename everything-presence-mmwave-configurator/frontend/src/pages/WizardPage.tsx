@@ -15,6 +15,8 @@ import { fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
+import { getDeviceIconUrl } from '../utils/deviceIcon';
+import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -183,6 +185,23 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     () => profiles.find((p) => p.id === (selectedRoom?.profileId ?? profileId ?? undefined)) ?? null,
     [profiles, profileId, selectedRoom?.profileId],
   );
+
+  const deviceIconUrl = useMemo(
+    () => getDeviceIconUrl(currentProfile, selectedRoom?.devicePlacement),
+    [currentProfile, selectedRoom?.devicePlacement],
+  );
+
+  const coverageFov = useMemo(
+    () => resolveCoverageFov(currentProfile, selectedRoom?.devicePlacement),
+    [currentProfile, selectedRoom?.devicePlacement],
+  );
+  const trackingCoverageFov = useMemo(
+    () => resolveTrackingCoverageFov(currentProfile),
+    [currentProfile],
+  );
+  const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? currentProfile?.limits?.maxRangeMeters;
+  const trackingMaxRangeMeters = trackingCoverageFov?.maxRangeMeters ?? currentProfile?.limits?.maxRangeMeters;
+  const trackingFieldOfViewDeg = trackingCoverageFov?.horizontalFovDeg ?? currentProfile?.limits?.fieldOfViewDegrees;
 
   const isEplDevice = useMemo(() => {
     const caps = currentProfile?.capabilities as { tracking?: boolean; distanceOnlyTracking?: boolean } | undefined;
@@ -443,7 +462,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const handleDevicePlacementChange = useCallback(async (placement: DevicePlacement) => {
     if (!selectedRoom) return;
-    const updatedRoom: RoomConfig = { ...selectedRoom, devicePlacement: placement };
+    const basePlacement = selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 };
+    const updatedRoom: RoomConfig = { ...selectedRoom, devicePlacement: { ...basePlacement, ...placement } };
     // Optimistic update
     onRoomUpdate?.(updatedRoom);
     try {
@@ -758,7 +778,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   useEffect(() => {
     if (currentStep === 'zones' && roomPath === 'skip' && selectedRoom && !selectedRoom.devicePlacement) {
       // Calculate offset to center device + FOV together
-      const maxRangeMeters = currentProfile?.limits?.maxRangeMeters ?? 6;
+      const maxRangeMeters = trackingMaxRangeMeters ?? 6;
       const maxRangeMm = maxRangeMeters * 1000;
       const offsetY = -maxRangeMm / 2; // Negative Y shifts upward
 
@@ -769,7 +789,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         rotationDeg: 90,
       });
     }
-  }, [currentStep, roomPath, selectedRoom, currentProfile, handleDevicePlacementChange]);
+  }, [currentStep, roomPath, selectedRoom, trackingMaxRangeMeters, handleDevicePlacementChange]);
 
   // Load zones from device when entering zones step
   useEffect(() => {
@@ -1443,7 +1463,6 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
-              onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
             />
           )}
@@ -1472,9 +1491,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onDoorDragEnd={handleDoorDragEnd}
               showDoors={true}
               devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
-              fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
-              maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
-              deviceIconUrl={currentProfile?.iconUrl}
+              fieldOfViewDeg={trackingFieldOfViewDeg}
+              maxRangeMeters={trackingMaxRangeMeters}
+              deviceIconUrl={deviceIconUrl}
+              showRadar
               clipRadarToWalls={clipRadarToWalls}
               renderOverlay={({ toCanvas }) => {
                 if (!showTargets || !targetPositions?.length) return null;
@@ -1526,9 +1546,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onFurnitureChange={handleFurnitureChange}
               showFurniture={true}
               devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
-              fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
-              maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
-              deviceIconUrl={currentProfile?.iconUrl}
+              fieldOfViewDeg={trackingFieldOfViewDeg}
+              maxRangeMeters={trackingMaxRangeMeters}
+              deviceIconUrl={deviceIconUrl}
+              showRadar
               clipRadarToWalls={clipRadarToWalls}
               renderOverlay={({ toCanvas }) => {
                 if (!showTargets || !targetPositions?.length) return null;
@@ -1569,9 +1590,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 }
               }
               onDeviceChange={handleDevicePlacementChange}
-              fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
-              maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
-              deviceIconUrl={currentProfile?.iconUrl}
+              fieldOfViewDeg={trackingFieldOfViewDeg}
+              maxRangeMeters={trackingMaxRangeMeters}
+              deviceIconUrl={deviceIconUrl}
+              showRadar
               clipRadarToWalls={clipRadarToWalls}
               rangeMm={15000}
               snapGridMm={canvasSnap}
@@ -1653,9 +1675,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 roomShell={isRoomMode ? selectedRoom?.roomShell : undefined}
                 devicePlacement={selectedRoom?.devicePlacement} // Always show device placement, even in skip mode
                 installationAngle={liveState?.config?.installationAngle}
-                fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
-                maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
-                deviceIconUrl={currentProfile?.iconUrl}
+                fieldOfViewDeg={trackingFieldOfViewDeg}
+                maxRangeMeters={trackingMaxRangeMeters}
+                deviceIconUrl={deviceIconUrl}
+              showRadar
                 rangeMm={15000}
                 snapGridMm={canvasSnap}
                 height="100%"
@@ -2458,7 +2481,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
                   // Calculate offset to center device + FOV together
                   // For 90° rotation (pointing down), shift device up by half the max range
-                  const maxRangeMeters = currentProfile?.limits?.maxRangeMeters ?? 6;
+                  const maxRangeMeters = trackingMaxRangeMeters ?? 6;
                   const maxRangeMm = maxRangeMeters * 1000;
                   const offsetY = -maxRangeMm / 2; // Negative Y shifts upward (device moves up, FOV extends down)
 
@@ -2670,7 +2693,6 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
-              onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
             />
 
@@ -2764,9 +2786,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 }
               }
               onDeviceChange={handleDevicePlacementChange}
-              fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
-              maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
-              deviceIconUrl={currentProfile?.iconUrl}
+              fieldOfViewDeg={trackingFieldOfViewDeg}
+              maxRangeMeters={trackingMaxRangeMeters}
+              deviceIconUrl={deviceIconUrl}
+              showRadar
               clipRadarToWalls={clipRadarToWalls}
               rangeMm={15000}
               snapGridMm={canvasSnap}
@@ -3088,9 +3111,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               roomShell={isRoomMode ? selectedRoom?.roomShell : undefined}
               devicePlacement={isRoomMode ? selectedRoom?.devicePlacement : undefined}
               installationAngle={liveState?.config?.installationAngle}
-              fieldOfViewDeg={currentProfile?.limits?.fieldOfViewDegrees}
-              maxRangeMeters={currentProfile?.limits?.maxRangeMeters}
-              deviceIconUrl={currentProfile?.iconUrl}
+              fieldOfViewDeg={trackingFieldOfViewDeg}
+              maxRangeMeters={trackingMaxRangeMeters}
+              deviceIconUrl={deviceIconUrl}
+              showRadar
               rangeMm={15000}
               snapGridMm={canvasSnap}
               height="100%"

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { fetchDevices, fetchProfiles, ingressAware } from '../api/client';
 import { fetchRooms, updateRoom } from '../api/rooms';
 import { RoomCanvas } from '../components/RoomCanvas';
-import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, FurnitureInstance, FurnitureType, Door } from '../api/types';
+import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, FurnitureInstance, FurnitureType, Door, DevicePlacement } from '../api/types';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { FurnitureLibrary } from '../components/FurnitureLibrary';
 import { FurnitureEditor } from '../components/FurnitureEditor';
@@ -11,6 +11,8 @@ import { FLOOR_MATERIALS } from '../components/FloorMaterials';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { getDeviceIconUrl } from '../utils/deviceIcon';
+import { resolveCoverageFov } from '../utils/coverage';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -113,6 +115,67 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     () => (selectedRoom?.deviceId ? devices.find((d) => d.id === selectedRoom.deviceId) ?? null : null),
     [devices, selectedRoom?.deviceId],
   );
+
+  const deviceIconUrl = useMemo(
+    () => getDeviceIconUrl(selectedProfile, selectedRoom?.devicePlacement),
+    [selectedProfile, selectedRoom?.devicePlacement],
+  );
+
+  const coverageFov = useMemo(
+    () => resolveCoverageFov(selectedProfile, selectedRoom?.devicePlacement),
+    [selectedProfile, selectedRoom?.devicePlacement],
+  );
+  const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
+
+  const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
+
+  const heightCoverageConfig = useMemo(() => {
+    if (!selectedRoom?.devicePlacement || !isCeilingMount) return null;
+    if (!coverageFov) return null;
+    const heightMm = selectedRoom.devicePlacement.heightMm;
+    const pitchDeg = Number.isFinite(selectedRoom.devicePlacement.pitchDeg)
+      ? Number(selectedRoom.devicePlacement.pitchDeg)
+      : (selectedRoom.devicePlacement.mountType === 'ceiling' ? 90 : 0);
+    if (!Number.isFinite(heightMm) || !Number.isFinite(pitchDeg)) return null;
+    return {
+      enabled: true,
+      heightMm: Number(heightMm),
+      pitchDeg: Number(pitchDeg),
+      horizontalFovDeg: coverageFov.horizontalFovDeg,
+      verticalFovDeg: coverageFov.verticalFovDeg,
+      maxRangeMeters: coverageFov.maxRangeMeters,
+    };
+  }, [coverageFov, selectedRoom?.devicePlacement, isCeilingMount]);
+
+  const updateDevicePlacement = useCallback((updates: Partial<DevicePlacement>) => {
+    if (!selectedRoom) return;
+    const base: DevicePlacement = selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 };
+    const nextPlacement: DevicePlacement = { ...base, ...updates };
+    const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: nextPlacement };
+    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+  }, [selectedRoom]);
+
+  const coveragePresets = selectedProfile?.coverage?.presets ?? null;
+  const coveragePresetId = useMemo(() => {
+    if (!coveragePresets) return null;
+    const persistedPresetId = selectedRoom?.devicePlacement?.coveragePresetId;
+    if (persistedPresetId === 'custom') return 'custom';
+    if (persistedPresetId && coveragePresets[persistedPresetId]) return persistedPresetId;
+    const h = selectedRoom?.devicePlacement?.horizontalFovDeg;
+    const v = selectedRoom?.devicePlacement?.verticalFovDeg;
+    if (Number.isFinite(h) && Number.isFinite(v)) {
+      const match = Object.entries(coveragePresets).find(([, preset]) =>
+        Math.abs(preset.horizontalFovDeg - Number(h)) < 0.5 &&
+        Math.abs(preset.verticalFovDeg - Number(v)) < 0.5
+      );
+      return match ? match[0] : 'custom';
+      }
+      return 'default';
+  }, [coveragePresets, selectedRoom?.devicePlacement]);
+
+  const displayHeightMeters = Number.isFinite(selectedRoom?.devicePlacement?.heightMm)
+    ? Number(((selectedRoom?.devicePlacement?.heightMm ?? 0) / 1000).toFixed(1))
+    : '';
 
   const selectedFurniture = useMemo(
     () => (selectedFurnitureId ? selectedRoom?.furniture?.find((f) => f.id === selectedFurnitureId) ?? null : null),
@@ -1048,15 +1111,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                       rotationDeg: 0,
                     }
                   }
-                  onDeviceChange={(placement) => {
-                    if (!selectedRoom) return;
-                    const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: placement };
-                    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
-                  }}
-                  fieldOfViewDeg={selectedProfile?.limits?.fieldOfViewDegrees}
-                  maxRangeMeters={selectedProfile?.limits?.maxRangeMeters}
-                  deviceIconUrl={selectedProfile?.iconUrl}
+                  onDeviceChange={(placement) => updateDevicePlacement(placement)}
+                  fieldOfViewDeg={coverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees}
+                  maxRangeMeters={effectiveCoverageMaxRangeMeters}
+                  deviceIconUrl={deviceIconUrl}
                   clipRadarToWalls={clipRadarToWalls}
+                  heightCoverage={heightCoverageConfig ?? undefined}
+                  showRadar={!isCeilingMount}
                   previewFrom={pendingStart}
                   previewTo={pendingStart && previewPoint ? previewPoint : null}
                   hoveredSegment={hoveredSegment}
@@ -1362,11 +1423,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                               value={selectedRoom?.devicePlacement?.x ?? 0}
                               onChange={(e) => {
-                                if (!selectedRoom) return;
-                                const placement = { ...(selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 }) };
-                                placement.x = Number(e.target.value) || 0;
-                                const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: placement };
-                                setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                                updateDevicePlacement({ x: Number(e.target.value) || 0 });
                               }}
                             />
                           </label>
@@ -1377,11 +1434,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                               value={selectedRoom?.devicePlacement?.y ?? 0}
                               onChange={(e) => {
-                                if (!selectedRoom) return;
-                                const placement = { ...(selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 }) };
-                                placement.y = Number(e.target.value) || 0;
-                                const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: placement };
-                                setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                                updateDevicePlacement({ y: Number(e.target.value) || 0 });
                               }}
                             />
                           </label>
@@ -1395,11 +1448,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             step={1}
                             value={selectedRoom?.devicePlacement?.rotationDeg ?? 0}
                             onChange={(e) => {
-                              if (!selectedRoom) return;
-                              const placement = { ...(selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 }) };
-                              placement.rotationDeg = Number(e.target.value) || 0;
-                              const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: placement };
-                              setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                              updateDevicePlacement({ rotationDeg: Number(e.target.value) || 0 });
                             }}
                             onMouseUp={(e) => {
                               handleRotationSuggestion(Number((e.currentTarget as HTMLInputElement).value) || 0);
@@ -1415,12 +1464,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           <button
                             className="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500"
                             onClick={() => {
-                              if (!selectedRoom) return;
-                              const nextRoom: RoomConfig = {
-                                ...selectedRoom,
-                                devicePlacement: { ...(selectedRoom.devicePlacement ?? {}), x: 0, y: 0 },
-                              };
-                              setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                              updateDevicePlacement({ x: 0, y: 0 });
                             }}
                             disabled={!selectedRoom}
                           >
@@ -1429,17 +1473,178 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           <button
                             className="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500"
                             onClick={() => {
-                              if (!selectedRoom) return;
-                              const nextRoom: RoomConfig = {
-                                ...selectedRoom,
-                                devicePlacement: { ...(selectedRoom.devicePlacement ?? {}), rotationDeg: 0 },
-                              };
-                              setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                              updateDevicePlacement({ rotationDeg: 0 });
                             }}
                             disabled={!selectedRoom}
                           >
                             Reset rot
                           </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="flex items-center gap-2">
+                            <span className="w-14">Mount</span>
+                            <select
+                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              value={selectedRoom?.devicePlacement?.mountType ?? 'wall'}
+                              onChange={(e) => {
+                                const value = e.target.value === 'ceiling' ? 'ceiling' : 'wall';
+                                updateDevicePlacement(
+                                  value === 'ceiling'
+                                    ? { mountType: value, pitchDeg: 90, heightMm: 2400 }
+                                    : { mountType: value }
+                                );
+                              }}
+                            >
+                              <option value="wall">Wall</option>
+                              <option value="ceiling">Ceiling</option>
+                            </select>
+                          </label>
+                          <label className="flex items-center gap-2">
+                            <span className="w-14">Height</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={0.1}
+                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              value={displayHeightMeters}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (raw === '') {
+                                  updateDevicePlacement({ heightMm: undefined });
+                                } else {
+                                  updateDevicePlacement({ heightMm: Math.round((Number(raw) || 0) * 1000) });
+                                }
+                              }}
+                              placeholder="m"
+                            />
+                            <span className="text-xs text-slate-400">m</span>
+                          </label>
+                        </div>
+                        <label className="flex items-center gap-2">
+                          <span className="w-14">Pitch</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={90}
+                            className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                            value={isCeilingMount ? 90 : (selectedRoom?.devicePlacement?.pitchDeg ?? '')}
+                            disabled={isCeilingMount}
+                            onChange={(e) => {
+                              if (isCeilingMount) return;
+                              const raw = e.target.value;
+                              if (raw === '') {
+                                updateDevicePlacement({ pitchDeg: undefined });
+                              } else {
+                                updateDevicePlacement({ pitchDeg: Number(raw) || 0 });
+                              }
+                            }}
+                            placeholder="deg"
+                          />
+                          <span className="text-xs text-slate-400">
+                            {isCeilingMount ? 'Locked to 90 degrees for ceiling mount' : '0 degrees = horizontal, 90 degrees = down'}
+                          </span>
+                        </label>
+                        <div className="space-y-2">
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Overlay Sensor</div>
+                          {coveragePresets ? (
+                            <>
+                              <label className="flex items-center gap-2">
+                                <span className="w-14">Sensor</span>
+                                <select
+                                  className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                                  value={coveragePresetId ?? 'default'}
+                                  onChange={(e) => {
+                                  const value = e.target.value;
+                                  if (value === 'default') {
+                                    updateDevicePlacement({
+                                      coveragePresetId: undefined,
+                                      horizontalFovDeg: undefined,
+                                      verticalFovDeg: undefined,
+                                    });
+                                    return;
+                                  }
+                                  if (value === 'custom') {
+                                    const defaultId = selectedProfile?.coverage?.defaultPresetId;
+                                    const fallbackPreset = (defaultId && coveragePresets[defaultId]) ?
+                                      coveragePresets[defaultId] :
+                                      coveragePresets[Object.keys(coveragePresets)[0]];
+                                    updateDevicePlacement({
+                                      coveragePresetId: 'custom',
+                                      horizontalFovDeg: selectedRoom?.devicePlacement?.horizontalFovDeg ?? fallbackPreset?.horizontalFovDeg ?? 120,
+                                      verticalFovDeg: selectedRoom?.devicePlacement?.verticalFovDeg ?? fallbackPreset?.verticalFovDeg ?? 70,
+                                    });
+                                    return;
+                                  }
+                                  const preset = coveragePresets[value];
+                                  if (preset) {
+                                    updateDevicePlacement({
+                                      coveragePresetId: value,
+                                      horizontalFovDeg: preset.horizontalFovDeg,
+                                      verticalFovDeg: preset.verticalFovDeg,
+                                    });
+                                  }
+                                  }}
+                                >
+                                  <option value="default">
+                                    Default {selectedProfile?.coverage?.defaultPresetId && coveragePresets[selectedProfile.coverage.defaultPresetId]
+                                      ? `(${coveragePresets[selectedProfile.coverage.defaultPresetId].label})`
+                                      : ''}
+                                  </option>
+                                  {Object.entries(coveragePresets).map(([id, preset]) => (
+                                    <option key={id} value={id}>
+                                      {preset.label} ({preset.horizontalFovDeg} deg x {preset.verticalFovDeg} deg)
+                                    </option>
+                                  ))}
+                                  <option value="custom">Custom</option>
+                                </select>
+                              </label>
+                              <div className="text-xs text-slate-400">
+                                Changes the visual overlay only. Zone limits still follow the tracking sensor.
+                              </div>
+                            </>
+                          ) : null}
+                          {(!coveragePresets || coveragePresetId === 'custom') && (
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="flex items-center gap-2">
+                                <span className="w-14">Horiz</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={180}
+                                  className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                                  value={selectedRoom?.devicePlacement?.horizontalFovDeg ?? ''}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                              if (raw === '') {
+                                updateDevicePlacement({ coveragePresetId: 'custom', horizontalFovDeg: undefined });
+                              } else {
+                                updateDevicePlacement({ coveragePresetId: 'custom', horizontalFovDeg: Number(raw) || 0 });
+                              }
+                                  }}
+                                  placeholder="deg"
+                                />
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <span className="w-14">Vert</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={180}
+                                  className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                                  value={selectedRoom?.devicePlacement?.verticalFovDeg ?? ''}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                              if (raw === '') {
+                                updateDevicePlacement({ coveragePresetId: 'custom', verticalFovDeg: undefined });
+                              } else {
+                                updateDevicePlacement({ coveragePresetId: 'custom', verticalFovDeg: Number(raw) || 0 });
+                              }
+                                  }}
+                                  placeholder="deg"
+                                />
+                              </label>
+                            </div>
+                          )}
                         </div>
                       </div>
 

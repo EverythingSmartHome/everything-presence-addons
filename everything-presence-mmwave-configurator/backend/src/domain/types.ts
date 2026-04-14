@@ -43,6 +43,12 @@ export interface DevicePlacement {
   x: number;
   y: number;
   rotationDeg?: number;
+  mountType?: 'wall' | 'ceiling';
+  heightMm?: number;
+  pitchDeg?: number;
+  coveragePresetId?: string;
+  horizontalFovDeg?: number;
+  verticalFovDeg?: number;
 }
 
 export interface FurnitureInstance {

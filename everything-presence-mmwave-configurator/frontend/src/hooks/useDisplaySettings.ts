@@ -89,6 +89,7 @@ export const useDisplaySettings = () => {
     setSettings((prev) => ({ ...prev, showDeviceRadar: value }));
   }, []);
 
+
   const setShowTargets = useCallback((value: boolean) => {
     setSettings((prev) => ({ ...prev, showTargets: value }));
   }, []);

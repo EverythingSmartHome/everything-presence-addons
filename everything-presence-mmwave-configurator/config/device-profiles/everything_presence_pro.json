@@ -5,6 +5,17 @@
   "model": "Everything Presence Pro",
   "manufacturer": "EverythingSmartTechnology",
   "iconUrl": "./icons/devices/everything_presence_pro.png",
+  "iconUrlCeiling": "./icons/devices/everything_presence_pro_ceiling.png",
+  "coverage": {
+    "presets": {
+      "ld2450": { "label": "LD2450", "horizontalFovDeg": 120, "verticalFovDeg": 70, "maxRangeMeters": 6 },
+      "sen0609": { "label": "SEN0609", "horizontalFovDeg": 100, "verticalFovDeg": 40, "maxRangeMeters": 25 }
+    },
+    "secondarySensors": {
+      "pir": { "label": "PIR", "horizontalFovDeg": 102, "verticalFovDeg": 92, "maxRangeMeters": 12 }
+    },
+    "defaultPresetId": "ld2450"
+  },
   "capabilities": {
     "tracking": true,
     "zones": true,

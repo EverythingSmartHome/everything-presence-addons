@@ -16,6 +16,8 @@ import { getZoneLabels, saveZoneLabels } from '../api/deviceMappings';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, LiveState, ZoneAvailability } from '../api/types';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { getDeviceIconUrl } from '../utils/deviceIcon';
+import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
 
 interface ZoneEditorPageProps {
   onBack?: () => void;
@@ -108,6 +110,23 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     () => selectedRoom?.deviceId ? devices.find((d) => d.id === selectedRoom.deviceId) ?? null : null,
     [devices, selectedRoom?.deviceId],
   );
+
+  const deviceIconUrl = useMemo(
+    () => getDeviceIconUrl(selectedProfile, selectedRoom?.devicePlacement),
+    [selectedProfile, selectedRoom?.devicePlacement],
+  );
+
+  const coverageFov = useMemo(
+    () => resolveCoverageFov(selectedProfile, selectedRoom?.devicePlacement),
+    [selectedProfile, selectedRoom?.devicePlacement],
+  );
+  const trackingCoverageFov = useMemo(
+    () => resolveTrackingCoverageFov(selectedProfile),
+    [selectedProfile],
+  );
+  const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
+  const trackingMaxRangeMeters = trackingCoverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
+  const trackingFieldOfViewDeg = trackingCoverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees;
 
   // Device mappings context - used to check if device has valid entity mappings
   const { hasValidMappings, clearCache } = useDeviceMappings();
@@ -660,7 +679,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     if (!selectedRoom) return;
 
     // Check if zones are outside max range
-    const maxRangeMeters = selectedProfile?.limits?.maxRangeMeters ?? 6;
+    const maxRangeMeters = trackingMaxRangeMeters ?? 6;
     const maxRangeMm = maxRangeMeters * 1000;
 
     const rectZones = (selectedRoom.zones ?? []).filter(zone => isZoneAvailable(zone));
@@ -1111,10 +1130,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             zoneLabels={deviceZoneLabels}
             devicePlacement={selectedRoom.devicePlacement}
             installationAngle={installationAngle}
-            fieldOfViewDeg={selectedProfile?.limits?.fieldOfViewDegrees}
-            maxRangeMeters={selectedProfile?.limits?.maxRangeMeters}
-            deviceIconUrl={selectedProfile?.iconUrl}
+            fieldOfViewDeg={trackingFieldOfViewDeg}
+            maxRangeMeters={trackingMaxRangeMeters}
+            deviceIconUrl={deviceIconUrl}
             clipRadarToWalls={clipRadarToWalls}
+            showRadar
             showWalls={showWalls}
             showFurniture={showFurniture}
             showDoors={showDoors}

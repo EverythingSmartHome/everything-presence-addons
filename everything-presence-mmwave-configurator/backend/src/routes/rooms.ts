@@ -33,11 +33,25 @@ export const createRoomsRouter = (): Router => {
     const x = Number(placement?.x ?? 0);
     const y = Number(placement?.y ?? 0);
     const rotationDeg = placement?.rotationDeg !== undefined ? Number(placement.rotationDeg) : undefined;
+    const heightMm = placement?.heightMm !== undefined ? Number(placement.heightMm) : undefined;
+    const pitchDeg = placement?.pitchDeg !== undefined ? Number(placement.pitchDeg) : undefined;
+    const coveragePresetId = typeof placement?.coveragePresetId === 'string' && placement.coveragePresetId.trim()
+      ? placement.coveragePresetId.trim()
+      : undefined;
+    const horizontalFovDeg = placement?.horizontalFovDeg !== undefined ? Number(placement.horizontalFovDeg) : undefined;
+    const verticalFovDeg = placement?.verticalFovDeg !== undefined ? Number(placement.verticalFovDeg) : undefined;
+    const mountType = placement?.mountType === 'ceiling' ? 'ceiling' : placement?.mountType === 'wall' ? 'wall' : undefined;
     if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
     return {
       x,
       y,
       rotationDeg: Number.isFinite(rotationDeg) ? rotationDeg : undefined,
+      mountType,
+      heightMm: Number.isFinite(heightMm) ? heightMm : undefined,
+      pitchDeg: Number.isFinite(pitchDeg) ? pitchDeg : undefined,
+      coveragePresetId,
+      horizontalFovDeg: Number.isFinite(horizontalFovDeg) ? horizontalFovDeg : undefined,
+      verticalFovDeg: Number.isFinite(verticalFovDeg) ? verticalFovDeg : undefined,
     };
   };
 

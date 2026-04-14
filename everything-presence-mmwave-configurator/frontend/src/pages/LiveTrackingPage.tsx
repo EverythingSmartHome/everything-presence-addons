@@ -19,6 +19,8 @@ import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useHeatmap } from '../hooks/useHeatmap';
 import { useDeviceMappings, useDeviceMapping } from '../contexts/DeviceMappingsContext';
+import { getDeviceIconUrl } from '../utils/deviceIcon';
+import { resolveCoverageFov } from '../utils/coverage';
 
 // Recording mode trail point
 interface RecordedPoint {
@@ -119,6 +121,39 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     () => profiles.find((p) => p.id === (selectedRoom?.profileId ?? selectedProfileId)) ?? null,
     [profiles, selectedRoom, selectedProfileId],
   );
+
+  const deviceIconUrl = useMemo(
+    () => getDeviceIconUrl(selectedProfile, selectedRoom?.devicePlacement),
+    [selectedProfile, selectedRoom?.devicePlacement],
+  );
+
+  const coverageFov = useMemo(
+    () => resolveCoverageFov(selectedProfile, selectedRoom?.devicePlacement),
+    [selectedProfile, selectedRoom?.devicePlacement],
+  );
+  const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
+
+  const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
+
+  const heightCoverageConfig = useMemo(() => {
+    if (!selectedRoom?.devicePlacement || !isCeilingMount) return null;
+    if (!coverageFov) return null;
+    const heightMm = selectedRoom.devicePlacement.heightMm;
+    const pitchDeg = Number.isFinite(selectedRoom.devicePlacement.pitchDeg)
+      ? Number(selectedRoom.devicePlacement.pitchDeg)
+      : (selectedRoom.devicePlacement.mountType === 'ceiling' ? 90 : 0);
+    if (!Number.isFinite(heightMm) || !Number.isFinite(pitchDeg)) return null;
+    return {
+      enabled: true,
+      heightMm: Number(heightMm),
+      pitchDeg: Number(pitchDeg),
+      horizontalFovDeg: coverageFov.horizontalFovDeg,
+      verticalFovDeg: coverageFov.verticalFovDeg,
+      maxRangeMeters: coverageFov.maxRangeMeters,
+    };
+  }, [coverageFov, selectedRoom?.devicePlacement, isCeilingMount]);
+
+  const showCoverageOverlay = showDeviceRadar;
 
   // Check if the selected room is using EP1
   const isEP1 = selectedRoom?.profileId === 'everything_presence_one';
@@ -842,11 +877,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             floorMaterial={selectedRoom.floorMaterial}
             devicePlacement={selectedRoom.devicePlacement}
             installationAngle={installationAngle}
-            fieldOfViewDeg={selectedProfile?.limits?.fieldOfViewDegrees}
-            maxRangeMeters={selectedProfile?.limits?.maxRangeMeters}
-            deviceIconUrl={selectedProfile?.iconUrl}
+            fieldOfViewDeg={coverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees}
+            maxRangeMeters={effectiveCoverageMaxRangeMeters}
+            deviceIconUrl={deviceIconUrl}
+            heightCoverage={showCoverageOverlay ? (heightCoverageConfig ?? undefined) : undefined}
+            showRadar={showCoverageOverlay && !isCeilingMount}
             clipRadarToWalls={clipRadarToWalls}
-            showRadar={showDeviceRadar}
             furniture={selectedRoom.furniture ?? []}
             doors={selectedRoom.doors ?? []}
             zoneLabels={deviceMapping?.zoneLabels}
@@ -1120,7 +1156,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         devicePlacement={selectedRoom.devicePlacement}
                         toCanvas={toCanvas}
                         rangeMm={rangeMm}
-                        fieldOfViewDeg={selectedProfile.limits?.fieldOfViewDegrees ?? 120}
+                        fieldOfViewDeg={coverageFov?.horizontalFovDeg ?? selectedProfile.limits?.fieldOfViewDegrees ?? 120}
                         color="#3b82f6"
                         fillOpacity={0.08}
                         strokeOpacity={0.3}
@@ -1737,11 +1773,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                       onChange={(e) => setShowDeviceRadar(e.target.checked)}
                       className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
                     />
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
-                      Device Max ({String(selectedProfile?.limits?.maxRangeMeters ?? 25)}m)
-                    </span>
-                  </label>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-3 h-3 rounded-full bg-emerald-500"></span>
+                      Device Max ({String(effectiveCoverageMaxRangeMeters ?? 25)}m)
+                      </span>
+                    </label>
 
                   {/* Aligned direction - EPL only */}
                   {!isEP1 && (
