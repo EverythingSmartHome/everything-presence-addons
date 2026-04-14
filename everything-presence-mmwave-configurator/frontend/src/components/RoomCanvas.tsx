@@ -14,6 +14,12 @@ export interface DevicePlacement {
   x: number;
   y: number;
   rotationDeg?: number;
+  mountType?: 'wall' | 'ceiling';
+  heightMm?: number;
+  pitchDeg?: number;
+  coveragePresetId?: string;
+  horizontalFovDeg?: number;
+  verticalFovDeg?: number;
 }
 
 interface RoomCanvasProps {
@@ -36,6 +42,14 @@ interface RoomCanvasProps {
   deviceIconUrl?: string;
   clipRadarToWalls?: boolean;
   showRadar?: boolean;
+  heightCoverage?: {
+    enabled: boolean;
+    heightMm: number;
+    pitchDeg: number;
+    horizontalFovDeg: number;
+    verticalFovDeg: number;
+    maxRangeMeters?: number;
+  };
   panOffsetMm?: { x: number; y: number };
   onPanChange?: (offset: { x: number; y: number }) => void;
   onDragStateChange?: (isDragging: boolean) => void;
@@ -89,6 +103,179 @@ const CANVAS_SIZE = 700;
 const HALF = CANVAS_SIZE / 2;
 const toCanvas = (v: number, range: number) => (v / range) * CANVAS_SIZE;
 const fromCanvas = (v: number, range: number) => (v / CANVAS_SIZE) * range;
+
+const degToRad = (deg: number) => (deg * Math.PI) / 180;
+
+const getClosestWallIntersectionDistance = (
+  origin: Point,
+  rayEnd: Point,
+  walls: Point[],
+  minClipDistance: number
+): number | null => {
+  let minDist = Infinity;
+  for (let i = 0; i < walls.length; i++) {
+    const wallStart = walls[i];
+    const wallEnd = walls[(i + 1) % walls.length];
+    const intersection = lineIntersection(origin, rayEnd, wallStart, wallEnd);
+    if (!intersection) continue;
+    const dist = Math.hypot(intersection.x - origin.x, intersection.y - origin.y);
+    if (dist > minClipDistance && dist < minDist) {
+      minDist = dist;
+    }
+  }
+  return minDist === Infinity ? null : minDist;
+};
+
+const buildHeightCoveragePolygon = (params: {
+  deviceWorld: Point;
+  rotationRad: number;
+  mountRotationDeg: number;
+  pitchDeg: number;
+  horizontalFovDeg: number;
+  maxRangeCapMm: number;
+  clipToWalls: boolean;
+  wallPoints: Point[];
+  heightMm: number;
+  verticalFovDeg: number;
+}): Point[] | null => {
+  const {
+    deviceWorld,
+    rotationRad,
+    mountRotationDeg,
+    pitchDeg,
+    horizontalFovDeg,
+    maxRangeCapMm,
+    clipToWalls,
+    wallPoints,
+    heightMm,
+    verticalFovDeg,
+  } = params;
+
+  if (!Number.isFinite(horizontalFovDeg) || horizontalFovDeg <= 0) return null;
+  if (!Number.isFinite(verticalFovDeg) || verticalFovDeg <= 0) return null;
+  if (!Number.isFinite(heightMm) || heightMm <= 0) return null;
+
+  const halfHFov = horizontalFovDeg / 2;
+  const halfVFov = verticalFovDeg / 2;
+  const verticalSteps = 16;
+  const horizontalSteps = 32;
+  const minClipDistance = 10;
+  const pitchRad = degToRad(pitchDeg);
+  const ceilingRotationRad = degToRad(mountRotationDeg);
+  const rotationCos = Math.cos(ceilingRotationRad);
+  const rotationSin = Math.sin(ceilingRotationRad);
+
+  if (Math.abs(pitchDeg - 90) < 0.5) {
+    const halfWidthMm = Math.min(heightMm * Math.tan(degToRad(halfHFov)), maxRangeCapMm);
+    const halfDepthMm = Math.min(heightMm * Math.tan(degToRad(halfVFov)), maxRangeCapMm);
+    if (!Number.isFinite(halfWidthMm) || !Number.isFinite(halfDepthMm) || halfWidthMm <= 0 || halfDepthMm <= 0) {
+      return null;
+    }
+
+    const ellipseSteps = 72;
+    const ellipsePoints: Point[] = [];
+
+    for (let i = 0; i < ellipseSteps; i++) {
+      const t = (i / ellipseSteps) * Math.PI * 2;
+      const localX = Math.cos(t) * halfWidthMm;
+      const localY = Math.sin(t) * halfDepthMm;
+      const worldDx = (localX * rotationCos) - (localY * rotationSin);
+      const worldDy = (localX * rotationSin) + (localY * rotationCos);
+
+      let point = {
+        x: deviceWorld.x + worldDx,
+        y: deviceWorld.y + worldDy,
+      };
+
+      if (clipToWalls && wallPoints.length >= 3) {
+        const wallDistance = getClosestWallIntersectionDistance(deviceWorld, point, wallPoints, minClipDistance);
+        if (wallDistance !== null) {
+          const targetDistance = Math.hypot(worldDx, worldDy);
+          if (targetDistance > minClipDistance) {
+            const clippedScale = wallDistance / targetDistance;
+            point = {
+              x: deviceWorld.x + worldDx * clippedScale,
+              y: deviceWorld.y + worldDy * clippedScale,
+            };
+          }
+        }
+      }
+
+      ellipsePoints.push(point);
+    }
+
+    return ellipsePoints.length >= 3 ? ellipsePoints : null;
+  }
+
+  const projectBoundaryRay = (horizontalDeg: number, verticalDeg: number): Point | null => {
+    const horizontalRad = degToRad(horizontalDeg);
+    const verticalRad = degToRad(verticalDeg);
+
+    const localX = 1;
+    const localY = Math.tan(horizontalRad);
+    const localZ = -Math.tan(verticalRad);
+
+    const rotatedX = Math.cos(pitchRad) * localX + Math.sin(pitchRad) * localZ;
+    const rotatedY = localY;
+    const rotatedZ = -Math.sin(pitchRad) * localX + Math.cos(pitchRad) * localZ;
+
+    if (!Number.isFinite(rotatedX) || !Number.isFinite(rotatedY) || !Number.isFinite(rotatedZ)) return null;
+    if (rotatedZ >= -1e-6) return null;
+
+    const scaleToFloor = heightMm / -rotatedZ;
+    const localFloorX = rotatedX * scaleToFloor;
+    const localFloorY = rotatedY * scaleToFloor;
+    const groundDistance = Math.hypot(localFloorX, localFloorY);
+    if (!Number.isFinite(groundDistance) || groundDistance < minClipDistance) return null;
+
+    const limitedDistance = Math.min(groundDistance, maxRangeCapMm);
+    const distanceScale = limitedDistance / groundDistance;
+
+    const worldDx = (localFloorX * distanceScale * rotationCos) - (localFloorY * distanceScale * rotationSin);
+    const worldDy = (localFloorX * distanceScale * rotationSin) + (localFloorY * distanceScale * rotationCos);
+
+    const unclippedPoint = {
+      x: deviceWorld.x + worldDx,
+      y: deviceWorld.y + worldDy,
+    };
+
+    if (!clipToWalls || wallPoints.length < 3) return unclippedPoint;
+
+    const wallDistance = getClosestWallIntersectionDistance(deviceWorld, unclippedPoint, wallPoints, minClipDistance);
+    if (wallDistance === null) return unclippedPoint;
+
+    const clippedScale = wallDistance / limitedDistance;
+    return {
+      x: deviceWorld.x + worldDx * clippedScale,
+      y: deviceWorld.y + worldDy * clippedScale,
+    };
+  };
+
+  const boundaryPoints: Point[] = [];
+
+  for (let i = 0; i <= horizontalSteps; i++) {
+    const horizontalDeg = -halfHFov + (horizontalFovDeg * i) / horizontalSteps;
+    const point = projectBoundaryRay(horizontalDeg, -halfVFov);
+    if (point) boundaryPoints.push(point);
+  }
+  for (let i = 1; i <= verticalSteps; i++) {
+    const verticalDeg = -halfVFov + (verticalFovDeg * i) / verticalSteps;
+    const point = projectBoundaryRay(halfHFov, verticalDeg);
+    if (point) boundaryPoints.push(point);
+  }
+  for (let i = horizontalSteps - 1; i >= 0; i--) {
+    const horizontalDeg = -halfHFov + (horizontalFovDeg * i) / horizontalSteps;
+    const point = projectBoundaryRay(horizontalDeg, halfVFov);
+    if (point) boundaryPoints.push(point);
+  }
+  for (let i = verticalSteps - 1; i > 0; i--) {
+    const verticalDeg = -halfVFov + (verticalFovDeg * i) / verticalSteps;
+    const point = projectBoundaryRay(-halfHFov, verticalDeg);
+    if (point) boundaryPoints.push(point);
+  }
+
+  return boundaryPoints.length >= 3 ? boundaryPoints : null;
+};
 
 const getSvgPoint = (
   e: React.MouseEvent<SVGSVGElement, MouseEvent>,
@@ -324,6 +511,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   deviceIconUrl,
   clipRadarToWalls = false,
   showRadar = true,
+  heightCoverage,
   panOffsetMm = { x: 0, y: 0 },
   onPanChange,
   onDragStateChange,
@@ -364,6 +552,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     x: Number.isFinite(devicePlacement?.x) ? (devicePlacement as DevicePlacement).x : 0,
     y: Number.isFinite(devicePlacement?.y) ? (devicePlacement as DevicePlacement).y : 0,
     rotationDeg: Number.isFinite(devicePlacement?.rotationDeg) ? devicePlacement?.rotationDeg : 0,
+    mountType: devicePlacement?.mountType,
+    heightMm: Number.isFinite(devicePlacement?.heightMm) ? devicePlacement?.heightMm : undefined,
+    pitchDeg: Number.isFinite(devicePlacement?.pitchDeg) ? devicePlacement?.pitchDeg : undefined,
+    horizontalFovDeg: Number.isFinite(devicePlacement?.horizontalFovDeg) ? devicePlacement?.horizontalFovDeg : undefined,
+    verticalFovDeg: Number.isFinite(devicePlacement?.verticalFovDeg) ? devicePlacement?.verticalFovDeg : undefined,
   };
 
   // Theme-aware colors for canvas
@@ -419,6 +612,27 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     x: fromCanvas(cx, effectiveRangeMm) + offset.x,
     y: fromCanvas(cy, effectiveRangeMm) + offset.y,
   });
+
+  const getHeightCoveragePathData = (deviceWorld: Point, rotationRad: number): string | null => {
+    if (!heightCoverage?.enabled) return null;
+
+    const polygon = buildHeightCoveragePolygon({
+      deviceWorld,
+      rotationRad,
+      mountRotationDeg: safePlacement.rotationDeg ?? 0,
+      pitchDeg: heightCoverage.pitchDeg,
+      horizontalFovDeg: heightCoverage.horizontalFovDeg,
+      maxRangeCapMm: (Number.isFinite(heightCoverage.maxRangeMeters) ? Number(heightCoverage.maxRangeMeters) : effectiveMaxRange) * 1000,
+      clipToWalls: safePoints.length >= 3,
+      wallPoints: safePoints,
+      heightMm: heightCoverage.heightMm,
+      verticalFovDeg: heightCoverage.verticalFovDeg,
+    });
+
+    if (!polygon || polygon.length < 2) return null;
+    const pathPoints = polygon.map(toCanvasCoord);
+    return pathPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
+  };
 
   const toWorldFromEvent = (e: React.MouseEvent<SVGSVGElement | SVGElement, MouseEvent>) => {
     const svgPoint = getSvgPoint(e as any, svgRef.current);
@@ -1353,6 +1567,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const deviceWorld = { x: safePlacement.x, y: safePlacement.y };
             const a1 = rotationRad - halfFov;
             const a2 = rotationRad + halfFov;
+            const heightCoveragePath = getHeightCoveragePathData(deviceWorld, rotationRad);
 
             // World coordinates for radar edges
             const edge1World = {
@@ -1459,9 +1674,20 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const pathData = radarPath.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
 
             const iconSize = 36;
+            const iconRotationDeg = safePlacement.mountType === 'ceiling' ? (safePlacement.rotationDeg ?? 0) : 0;
 
             return (
               <g style={{ pointerEvents: 'none' }}>
+                {heightCoveragePath && (
+                  <path
+                    d={heightCoveragePath}
+                    fill="#22c55e22"
+                    stroke="#22c55e"
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
                 {/* Radar coverage overlay - visible but non-blocking with pointerEvents: 'none' */}
                 {showRadar && (
                   <path
@@ -1476,14 +1702,16 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
 
                 {/* Device icon or fallback */}
                 {deviceIconUrl ? (
-                  <image
-                    href={deviceIconUrl}
-                    x={px - iconSize / 2}
-                    y={py - iconSize / 2}
-                    width={iconSize}
-                    height={iconSize}
-                    style={{ cursor: 'default', pointerEvents: 'none' }}
-                  />
+                  <g transform={`translate(${px}, ${py}) rotate(${iconRotationDeg})`}>
+                    <image
+                      href={deviceIconUrl}
+                      x={-iconSize / 2}
+                      y={-iconSize / 2}
+                      width={iconSize}
+                      height={iconSize}
+                      style={{ cursor: 'default', pointerEvents: 'none' }}
+                    />
+                  </g>
                 ) : (
                   <>
                     {/* Fallback: circle with direction indicator */}
@@ -1526,6 +1754,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const deviceWorld = { x: safePlacement.x, y: safePlacement.y };
             const a1 = rotationRad - halfFov;
             const a2 = rotationRad + halfFov;
+            const heightCoveragePath = getHeightCoveragePathData(deviceWorld, rotationRad);
 
             // World coordinates for radar edges
             const edge1World = {
@@ -1622,9 +1851,20 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const pathData = radarPath.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
 
             const iconSize = 36;
+            const iconRotationDeg = safePlacement.mountType === 'ceiling' ? (safePlacement.rotationDeg ?? 0) : 0;
 
             return (
               <g>
+                {heightCoveragePath && (
+                  <path
+                    d={heightCoveragePath}
+                    fill="#22c55e22"
+                    stroke="#22c55e"
+                    strokeWidth={1.5}
+                    vectorEffect="non-scaling-stroke"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
                 {showRadar && (
                   <path
                     d={pathData}
@@ -1637,18 +1877,20 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                 )}
 
                 {deviceIconUrl ? (
-                  <image
-                    href={deviceIconUrl}
-                    x={px - iconSize / 2}
-                    y={py - iconSize / 2}
-                    width={iconSize}
-                    height={iconSize}
-                    style={{ cursor: 'grab', pointerEvents: 'all' }}
-                    onMouseDown={() => {
-                      setDragDevice(true);
-                      onDragStateChange?.(true);
-                    }}
-                  />
+                  <g transform={`translate(${px}, ${py}) rotate(${iconRotationDeg})`}>
+                    <image
+                      href={deviceIconUrl}
+                      x={-iconSize / 2}
+                      y={-iconSize / 2}
+                      width={iconSize}
+                      height={iconSize}
+                      style={{ cursor: 'grab', pointerEvents: 'all' }}
+                      onMouseDown={() => {
+                        setDragDevice(true);
+                        onDragStateChange?.(true);
+                      }}
+                    />
+                  </g>
                 ) : (
                   <>
                     <circle

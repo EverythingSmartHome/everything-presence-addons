@@ -97,6 +97,12 @@ export interface DeviceProfile {
   /** Legacy entity map (for backward compatibility) */
   entityMap: Record<string, unknown>;
   iconUrl?: string;
+  iconUrlCeiling?: string;
+  coverage?: {
+    presets: Record<string, { label: string; horizontalFovDeg: number; verticalFovDeg: number; maxRangeMeters: number }>;
+    secondarySensors?: Record<string, { label: string; horizontalFovDeg: number; verticalFovDeg: number; maxRangeMeters: number }>;
+    defaultPresetId?: string;
+  };
 }
 
 export class DeviceProfileLoader {

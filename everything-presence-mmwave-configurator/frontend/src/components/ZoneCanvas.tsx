@@ -31,6 +31,14 @@ interface ZoneCanvasProps {
   deviceIconUrl?: string;
   clipRadarToWalls?: boolean;
   showRadar?: boolean;
+  heightCoverage?: {
+    enabled: boolean;
+    heightMm: number;
+    pitchDeg: number;
+    horizontalFovDeg: number;
+    verticalFovDeg: number;
+    maxRangeMeters?: number;
+  };
   furniture?: FurnitureInstance[];
   selectedFurnitureId?: string | null;
   onFurnitureSelect?: (id: string | null) => void;
@@ -78,6 +86,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   deviceIconUrl,
   clipRadarToWalls,
   showRadar,
+  heightCoverage,
   furniture = [],
   selectedFurnitureId,
   onFurnitureSelect,
@@ -319,6 +328,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       deviceIconUrl={deviceIconUrl}
       clipRadarToWalls={clipRadarToWalls}
       showRadar={showRadar}
+      heightCoverage={heightCoverage}
       doors={doors}
       showWalls={showWalls}
       showFurniture={false}
