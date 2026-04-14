@@ -257,6 +257,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         throw new Error('Failed to update installation angle');
       }
 
+      window.dispatchEvent(
+        new CustomEvent('ep:refresh-live-state', {
+          detail: { deviceId: selectedRoom.deviceId },
+        })
+      );
       setShowRotationSuggestion(false);
     } catch (err) {
       setRotationSuggestionError('Failed to update installation angle.');
@@ -847,20 +852,34 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   };
 
-  const handleSaveRoom = async () => {
-    if (!selectedRoom) return;
+  const handleSaveRoom = async (): Promise<boolean> => {
+    if (!selectedRoom) return false;
     setSaving(true);
     try {
       const result = await updateRoom(selectedRoom.id, selectedRoom);
       setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? result.room : r)));
       onWizardProgress?.({ outlineDone: true, placementDone: true });
       setError(null);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save room');
+      return false;
     } finally {
       setSaving(false);
     }
   };
+
+  const navigateWithSave = useCallback(
+    async (view: 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard') => {
+      if (!onNavigate) return;
+      if (selectedRoom) {
+        const saved = await handleSaveRoom();
+        if (!saved) return;
+      }
+      onNavigate(view);
+    },
+    [onNavigate, selectedRoom, handleSaveRoom]
+  );
 
   const handleAutoZoom = useCallback((room: RoomConfig | null) => {
     if (!room?.roomShell?.points?.length) {
@@ -1002,8 +1021,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               <div className="absolute top-14 left-0 z-50 min-w-[200px] rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl overflow-hidden">
                 <div className="p-2 space-y-1">
                   <button
-                    onClick={() => {
-                      onNavigate('liveDashboard');
+                    onClick={async () => {
+                      await navigateWithSave('liveDashboard');
                       setShowNavMenu(false);
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
@@ -1011,8 +1030,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     📡 Live Dashboard
                   </button>
                   <button
-                    onClick={() => {
-                      onNavigate('wizard');
+                    onClick={async () => {
+                      await navigateWithSave('wizard');
                       setShowNavMenu(false);
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
@@ -1020,8 +1039,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     ➕ Add Device
                   </button>
                   <button
-                    onClick={() => {
-                      onNavigate('zoneEditor');
+                    onClick={async () => {
+                      await navigateWithSave('zoneEditor');
                       setShowNavMenu(false);
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
@@ -1029,8 +1048,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     📐 Zone Editor
                   </button>
                   <button
-                    onClick={() => {
-                      onNavigate('settings');
+                    onClick={async () => {
+                      await navigateWithSave('settings');
                       setShowNavMenu(false);
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"

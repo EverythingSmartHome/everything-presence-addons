@@ -98,6 +98,49 @@ function App() {
     [profiles, selectedProfileId]
   );
 
+  const refreshLiveState = React.useCallback(async () => {
+    if (!selectedRoom || !selectedRoom.deviceId || !selectedProfile) {
+      setLiveState(null);
+      return;
+    }
+
+    const entityParam = selectedRoom.entityNamePrefix
+      ? `&entityNamePrefix=${encodeURIComponent(selectedRoom.entityNamePrefix)}`
+      : '';
+    const mappingsParam = selectedRoom.entityMappings
+      ? `&entityMappings=${encodeURIComponent(JSON.stringify(selectedRoom.entityMappings))}`
+      : '';
+    const restUrl = ingressAware(
+      `api/live/${selectedRoom.deviceId}/state?profileId=${selectedProfile.id}${entityParam}${mappingsParam}`
+    );
+
+    try {
+      const res = await fetch(restUrl);
+      if (!res.ok) {
+        throw new Error('Failed to refresh live state');
+      }
+      const data = await res.json() as { state?: LiveState };
+      setLiveState(data.state ?? null);
+    } catch {
+      // Keep the current live state if the refresh fails.
+    }
+  }, [selectedProfile, selectedRoom]);
+
+  useEffect(() => {
+    const handleRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ deviceId?: string }>).detail;
+      if (detail?.deviceId && detail.deviceId !== selectedRoom?.deviceId) {
+        return;
+      }
+      void refreshLiveState();
+    };
+
+    window.addEventListener('ep:refresh-live-state', handleRefresh as EventListener);
+    return () => {
+      window.removeEventListener('ep:refresh-live-state', handleRefresh as EventListener);
+    };
+  }, [refreshLiveState, selectedRoom?.deviceId]);
+
   // WebSocket connection for real-time state updates (global)
   useEffect(() => {
     if (!selectedRoom || !selectedRoom.deviceId || !selectedProfile) {
@@ -149,14 +192,7 @@ function App() {
               if (message.hasMappings === false) {
                 console.warn('Device subscribed but no mappings available');
               }
-              // Fetch initial state via REST as fallback
-              const entityParam = selectedRoom.entityNamePrefix ? `&entityNamePrefix=${selectedRoom.entityNamePrefix}` : '';
-              const mappingsParam = selectedRoom.entityMappings ? `&entityMappings=${encodeURIComponent(JSON.stringify(selectedRoom.entityMappings))}` : '';
-              const restUrl = ingressAware(`api/live/${selectedRoom.deviceId}/state?profileId=${selectedProfile.id}${entityParam}${mappingsParam}`);
-              fetch(restUrl)
-                .then((res) => res.json())
-                .then((data) => setLiveState(data.state))
-                .catch(() => null);
+              void refreshLiveState();
             } else if (message.type === 'state_update') {
               // Update live state with new entity value
               setLiveState((prev) => {
@@ -461,7 +497,7 @@ function App() {
       }
     };
     // Depend on memoized room/profile objects - only changes when the actual objects change
-  }, [selectedRoom, selectedProfile]);
+  }, [refreshLiveState, selectedRoom, selectedProfile]);
 
   // Transform device-relative coordinates to room coordinates
   const installationAngle =

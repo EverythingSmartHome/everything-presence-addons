@@ -79,6 +79,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [showModeChangeConfirm, setShowModeChangeConfirm] = useState(false);
   // Zone labels from device mapping (stored separately from zone coordinates)
   const [deviceZoneLabels, setDeviceZoneLabels] = useState<Record<string, string>>({});
+  const [roomLiveState, setRoomLiveState] = useState<LiveState | null>(null);
   // Display settings (persisted to localStorage)
   const {
     showWalls, setShowWalls,
@@ -89,9 +90,6 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     showTargets, setShowTargets,
     clipRadarToWalls,
   } = useDisplaySettings();
-  const liveState = propLiveState;
-  const installationAngle =
-    typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
   const loadedRoomRef = useRef<string | null>(null);
   const previousRoomIdRef = useRef<string | null>(null);
 
@@ -131,6 +129,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   // Device mappings context - used to check if device has valid entity mappings
   const { hasValidMappings, clearCache } = useDeviceMappings();
   const deviceHasValidMappings = selectedRoom?.deviceId ? hasValidMappings(selectedRoom.deviceId) : false;
+  const hasPropLiveStateForRoom = Boolean(
+    propLiveState && selectedRoom?.deviceId && propLiveState.deviceId === selectedRoom.deviceId
+  );
+  const liveState = hasPropLiveStateForRoom ? propLiveState : roomLiveState;
+  const installationAngle =
+    typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
 
   // Generate all possible zone slots based on profile limits
   const allPossibleZones = useMemo(() => {
@@ -223,6 +227,64 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     if (availability.status === 'disabled' || availability.status === 'unavailable') return false;
     return true;
   };
+
+  useEffect(() => {
+    if (hasPropLiveStateForRoom) {
+      setRoomLiveState(propLiveState);
+    }
+  }, [hasPropLiveStateForRoom, propLiveState]);
+
+  useEffect(() => {
+    if (!selectedRoom?.deviceId || !selectedRoom.profileId) {
+      setRoomLiveState(null);
+      return;
+    }
+
+    if (hasPropLiveStateForRoom) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadLiveState = async () => {
+      try {
+        const entityParam = selectedRoom.entityNamePrefix
+          ? `&entityNamePrefix=${encodeURIComponent(selectedRoom.entityNamePrefix)}`
+          : '';
+        const mappingsParam = selectedRoom.entityMappings
+          ? `&entityMappings=${encodeURIComponent(JSON.stringify(selectedRoom.entityMappings))}`
+          : '';
+        const res = await fetch(
+          ingressAware(
+            `api/live/${selectedRoom.deviceId}/state?profileId=${selectedRoom.profileId}${entityParam}${mappingsParam}`
+          )
+        );
+        if (!res.ok) {
+          throw new Error('Failed to load live state');
+        }
+        const data = await res.json() as { state?: LiveState };
+        if (!cancelled) {
+          setRoomLiveState(data.state ?? null);
+        }
+      } catch {
+        if (!cancelled) {
+          setRoomLiveState(null);
+        }
+      }
+    };
+
+    loadLiveState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hasPropLiveStateForRoom,
+    selectedRoom?.deviceId,
+    selectedRoom?.entityMappings,
+    selectedRoom?.entityNamePrefix,
+    selectedRoom?.profileId,
+  ]);
 
   const getZoneStatus = (zone: ZoneRect): 'enabled' | 'disabled' | 'unavailable' | 'unknown' => {
     const key = getAvailabilityKey(zone.id, zone.type);
