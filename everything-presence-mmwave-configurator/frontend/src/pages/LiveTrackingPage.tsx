@@ -426,10 +426,9 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
   }, [propTargetPositions, smoothTracking, showLiveOverlays]);
 
-  // Fetch existing zones from device when room is loaded
-  // Using ref to prevent re-fetching for the same room
-  const lastZonesFetchedRoomId = React.useRef<string | null>(null);
   useEffect(() => {
+    let cancelled = false;
+
     const loadZonesFromDevice = async () => {
       if (!selectedRoom || !selectedRoom.deviceId || !selectedRoom.profileId) {
         return;
@@ -456,9 +455,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
-      // Mark as fetched before the async call to prevent duplicate requests
-      lastZonesFetchedRoomId.current = selectedRoom.id;
-
       try {
         // Skip entityMappings if device has valid mappings stored
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
@@ -468,6 +464,15 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           entityNamePrefix,
           entityMappingsToUse
         );
+
+        if (cancelled) {
+          return;
+        }
+
+        // Avoid replacing known-good stored zones with a transient empty device read.
+        if (deviceZones.length === 0 && (selectedRoom.zones?.length ?? 0) > 0) {
+          return;
+        }
 
         // Always sync device zones to local storage (device is source of truth)
         const updatedRoom = { ...selectedRoom, zones: deviceZones };
@@ -485,23 +490,33 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, mappingLoading, deviceHasValidMappings, selectedRoom]);
 
-  // Fetch polygon mode status when room changes
-  // Using refs to prevent re-fetching when entityMappings changes
-  const lastPolygonModeRoomId = React.useRef<string | null>(null);
-  const lastPolygonModeMappingsReady = React.useRef<boolean>(false);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedRoom?.id,
+    selectedRoom?.deviceId,
+    selectedRoom?.profileId,
+    selectedRoom?.entityNamePrefix,
+    selectedRoom?.entityMappings,
+    selectedRoom?.zones,
+    devices,
+    mappingLoading,
+    deviceHasValidMappings,
+  ]);
+
   useEffect(() => {
+    setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+    setPolygonZones([]);
+  }, [selectedRoom?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     const loadPolygonModeStatus = async () => {
       if (!selectedRoom?.deviceId || !selectedRoom?.profileId) {
         setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
-        return;
-      }
-
-      // Only fetch once per room, or when mappings become ready for the first time
-      const mappingsReady = !mappingLoading;
-      if (selectedRoom.id === lastPolygonModeRoomId.current &&
-          lastPolygonModeMappingsReady.current === mappingsReady) {
         return;
       }
 
@@ -515,10 +530,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
         return;
       }
-
-      // Mark as fetched before the async call
-      lastPolygonModeRoomId.current = selectedRoom.id;
-      lastPolygonModeMappingsReady.current = mappingsReady;
 
       try {
         // Skip entityMappings if device has valid mappings stored
@@ -529,30 +540,38 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           entityNamePrefix,
           entityMappingsToUse
         );
-        setPolygonModeStatus(status);
+        if (!cancelled) {
+          setPolygonModeStatus(status);
+        }
       } catch (err) {
-        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+        if (!cancelled) {
+          setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+        }
       }
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, mappingLoading, deviceHasValidMappings, selectedRoom]);
 
-  // Fetch polygon zones when polygon mode is enabled
-  // Using refs to prevent re-fetching when entityMappings changes
-  const lastPolygonZonesRoomId = React.useRef<string | null>(null);
-  const lastPolygonZonesEnabled = React.useRef<boolean>(false);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedRoom?.id,
+    selectedRoom?.deviceId,
+    selectedRoom?.profileId,
+    selectedRoom?.entityNamePrefix,
+    selectedRoom?.entityMappings,
+    devices,
+    mappingLoading,
+    deviceHasValidMappings,
+  ]);
+
   useEffect(() => {
+    let cancelled = false;
+
     const loadPolygonZones = async () => {
       if (!polygonModeStatus.enabled || !selectedRoom?.deviceId || !selectedRoom?.profileId) {
         setPolygonZones([]);
-        lastPolygonZonesEnabled.current = false;
-        return;
-      }
-
-      // Only fetch once per room when polygon mode becomes enabled
-      if (selectedRoom.id === lastPolygonZonesRoomId.current &&
-          lastPolygonZonesEnabled.current === polygonModeStatus.enabled) {
         return;
       }
 
@@ -567,10 +586,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
-      // Mark as fetched before the async call
-      lastPolygonZonesRoomId.current = selectedRoom.id;
-      lastPolygonZonesEnabled.current = polygonModeStatus.enabled;
-
       try {
         // Skip entityMappings if device has valid mappings stored
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
@@ -580,14 +595,31 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           entityNamePrefix,
           entityMappingsToUse
         );
-        setPolygonZones(zones);
+        if (!cancelled) {
+          setPolygonZones(zones);
+        }
       } catch (err) {
-        setPolygonZones([]);
+        if (!cancelled) {
+          setPolygonZones([]);
+        }
       }
     };
 
     loadPolygonZones();
-  }, [polygonModeStatus.enabled, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, devices, deviceHasValidMappings, selectedRoom]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    polygonModeStatus.enabled,
+    selectedRoom?.id,
+    selectedRoom?.deviceId,
+    selectedRoom?.profileId,
+    selectedRoom?.entityNamePrefix,
+    selectedRoom?.entityMappings,
+    devices,
+    deviceHasValidMappings,
+  ]);
 
   const handleAutoZoom = useCallback(() => {
     if (!selectedRoom || !selectedRoom.roomShell || !selectedRoom.roomShell.points.length) {
