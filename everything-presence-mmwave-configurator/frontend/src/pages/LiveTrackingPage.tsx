@@ -16,8 +16,15 @@ import { HeatmapOverlay } from '../components/HeatmapOverlay';
 import { ZoneStatsPanel } from '../components/ZoneStatsPanel';
 import { HourlyActivityChart } from '../components/HourlyActivityChart';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
+import {
+  CanvasBottomToolbar,
+  CanvasMobileSheet,
+  CanvasToolbarButton,
+  CanvasTopBar,
+} from '../components/CanvasLayout';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useHeatmap } from '../hooks/useHeatmap';
+import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { useDeviceMappings, useDeviceMapping } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
@@ -53,6 +60,8 @@ interface LiveTrackingPageProps {
   }>;
   onRoomChange?: (roomId: string | null, profileId: string | null) => void;
 }
+
+type MobileLiveSheet = 'details' | 'display' | 'zoom' | 'device' | 'navigation' | null;
 
 const normalizeAngle = (angle: number): number => {
   let normalized = ((angle % 360) + 360) % 360;
@@ -96,6 +105,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const [showDetailedTracking, setShowDetailedTracking] = useState(false);
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(false);
+  const [activeMobileSheet, setActiveMobileSheet] = useState<MobileLiveSheet>(null);
   // Polygon mode state
   const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({
     supported: false,
@@ -118,6 +128,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     heatmapHours, setHeatmapHours,
     heatmapThreshold, setHeatmapThreshold,
   } = useDisplaySettings();
+  const isMobileCanvas = useIsMobileCanvas();
 
   const selectedRoom = useMemo(
     () => (selectedRoomId ? rooms.find((r) => r.id === selectedRoomId) ?? null : null),
@@ -735,6 +746,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     setPanOffsetMm({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
   }, [selectedRoom, rangeMm]);
 
+  const handleRoomSelection = useCallback((roomId: string | null) => {
+    setSelectedRoomId(roomId);
+    const room = rooms.find((candidate) => candidate.id === roomId);
+    const newProfileId = room?.profileId ?? selectedProfileId;
+    if (room?.profileId) setSelectedProfileId(room.profileId);
+    onRoomChange?.(roomId, newProfileId);
+  }, [onRoomChange, rooms, selectedProfileId]);
+
   // Auto-zoom when room changes (only on room ID change, not on every handleAutoZoom recreation)
   // Using a ref to track if we've already auto-zoomed for this room
   const lastAutoZoomedRoomId = React.useRef<string | null>(null);
@@ -744,6 +763,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       handleAutoZoom();
     }
   }, [selectedRoom?.id, selectedRoom?.roomShell?.points?.length, handleAutoZoom]);
+
+  useEffect(() => {
+    if (!isMobileCanvas && activeMobileSheet) {
+      setActiveMobileSheet(null);
+    }
+  }, [activeMobileSheet, isMobileCanvas]);
 
   // Calculate distance indicator position (for EP One)
   const distanceIndicatorPos = useMemo(() => {
@@ -849,18 +874,72 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         </div>
       )}
 
+      <div className="md:hidden">
+        <CanvasTopBar
+          left={onBack ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
+            >
+              Back
+            </button>
+          ) : onNavigate ? (
+            <button
+              type="button"
+              onClick={() => setActiveMobileSheet('navigation')}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
+            >
+              Menu
+            </button>
+          ) : null}
+          title={rooms.length > 0 ? (
+            <select
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm font-semibold text-slate-100 focus:border-aqua-500 focus:outline-none focus:ring-1 focus:ring-aqua-500/50"
+              value={selectedRoomId ?? ''}
+              onChange={(event) => handleRoomSelection(event.target.value || null)}
+            >
+              {rooms.map((room) => (
+                <option key={room.id} value={room.id}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            loading ? 'Loading' : 'Live Dashboard'
+          )}
+          subtitle={rooms.length > 0 ? undefined : selectedProfile?.label ?? (selectedRoom ? 'Live tracking' : 'Select a room')}
+          right={(
+            <button
+              type="button"
+              onClick={() => setActiveMobileSheet('details')}
+              className="flex min-h-[40px] items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 text-xs font-semibold text-slate-100"
+            >
+              <span className={`h-2.5 w-2.5 rounded-full ${
+                presenceAvailability === 'unavailable'
+                  ? 'bg-amber-500'
+                  : liveState?.presence
+                  ? 'bg-emerald-500'
+                  : 'bg-slate-600'
+              }`} />
+              Status
+            </button>
+          )}
+        />
+      </div>
+
       {/* Navigation (top left) */}
       {onBack && (
         <button
           onClick={onBack}
-          className="absolute top-6 left-6 z-40 group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
+          className="absolute top-6 left-6 z-40 hidden group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95 md:block"
         >
           <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span> Back
         </button>
       )}
 
       {!onBack && onNavigate && (
-        <div className="absolute top-6 left-6 z-40">
+        <div className="absolute top-6 left-6 z-40 hidden md:block">
           <button
             onClick={() => setShowNavMenu(!showNavMenu)}
             className="group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
@@ -1428,18 +1507,13 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           />
 
           {/* Floating Room Selector (top center) */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl">
+          <div className="absolute top-6 left-1/2 z-40 hidden -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl md:flex">
             <span className="text-slate-400 font-medium">Room:</span>
             <select
               className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-slate-100 transition-colors focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none font-medium"
               value={selectedRoomId ?? ''}
               onChange={(e) => {
-                const id = e.target.value || null;
-                setSelectedRoomId(id);
-                const room = rooms.find((r) => r.id === id);
-                const newProfileId = room?.profileId ?? selectedProfileId;
-                if (room?.profileId) setSelectedProfileId(room.profileId);
-                onRoomChange?.(id, newProfileId);
+                handleRoomSelection(e.target.value || null);
               }}
             >
               {rooms.map((r) => (
@@ -1451,7 +1525,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           </div>
 
           {/* Live State Info Panel (or EP1 Info Stack) */}
-          <div className="absolute top-24 right-6 z-40 w-72 max-w-full flex flex-col gap-3">
+          <div className="absolute top-24 right-6 z-40 hidden w-72 max-w-full flex-col gap-3 md:flex">
             {/* Main Status Panel */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-4 text-sm text-slate-200 shadow-xl">
               <div className="flex items-center gap-2 mb-3">
@@ -1927,7 +2001,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
           {/* Settings Panel (appears when toggled) */}
           {showSettings && (
-            <div className="absolute bottom-6 right-6 z-50 w-64">
+            <div className="absolute bottom-6 right-6 z-50 hidden w-64 md:block">
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur p-4 shadow-xl">
                 <div className="text-sm font-semibold text-slate-100 mb-3">Display Settings</div>
                 <div className="space-y-2.5">
@@ -2193,7 +2267,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
           {/* EP1 Recommendations Popup */}
           {showRecommendations && isEP1 && selectedRoom && liveState && (
-            <div className="absolute bottom-6 right-6 z-50 w-80">
+            <div className="absolute bottom-6 right-6 z-50 hidden w-80 md:block">
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur p-4 shadow-xl">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-sm font-semibold text-slate-100">💡 Settings Recommendations</div>
@@ -2308,7 +2382,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           )}
 
           {/* Floating Controls (bottom left, above snap) */}
-          <div className={`absolute ${isEP1 ? 'bottom-32' : 'bottom-56'} left-6 z-40 flex flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-3 py-3 shadow-xl`}>
+          <div className={`absolute ${isEP1 ? 'bottom-32' : 'bottom-56'} left-6 z-40 hidden flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-3 py-3 shadow-xl md:flex`}>
             <div className="flex flex-wrap gap-1.5">
               <button
                 className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-1.5 text-xs font-semibold text-slate-100 transition-all hover:border-slate-600 hover:bg-slate-700 active:scale-95"
@@ -2381,7 +2455,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
           {/* Recording Controls (bottom left, above snap) - EPL only */}
           {!isEP1 && (
-            <div className="absolute bottom-32 left-6 z-40 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl">
+            <div className="absolute bottom-32 left-6 z-40 hidden rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl md:block">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => {
@@ -2421,7 +2495,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           )}
 
           {/* Floating Snap Controls (bottom left) */}
-          <div className="absolute bottom-6 left-6 z-40 flex flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl">
+          <div className="absolute bottom-6 left-6 z-40 hidden flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl md:flex">
             <span className="text-xs text-slate-400 font-medium">Snap Grid</span>
             <div className="flex flex-wrap gap-2">
               {[0, 50, 100, 200].map((v) => (
@@ -2443,8 +2517,330 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               {cursorPos ? (cursorPos.y / 1000).toFixed(2) : '--'}m
             </div>
           </div>
+
+          <div className="md:hidden">
+            <CanvasBottomToolbar>
+              <CanvasToolbarButton
+                label="Details"
+                active={activeMobileSheet === 'details'}
+                onClick={() => setActiveMobileSheet(activeMobileSheet === 'details' ? null : 'details')}
+              />
+              <CanvasToolbarButton
+                label="Display"
+                active={activeMobileSheet === 'display'}
+                onClick={() => setActiveMobileSheet(activeMobileSheet === 'display' ? null : 'display')}
+              />
+              <CanvasToolbarButton
+                label="Zoom"
+                active={activeMobileSheet === 'zoom'}
+                onClick={() => setActiveMobileSheet(activeMobileSheet === 'zoom' ? null : 'zoom')}
+              />
+              {!isEP1 && (
+                <CanvasToolbarButton
+                  label={isRecording ? 'Stop' : 'Record'}
+                  active={isRecording}
+                  badge={recordedTrail.length > 0 ? recordedTrail.length : undefined}
+                  onClick={() => {
+                    if (isRecording) {
+                      setIsRecording(false);
+                    } else {
+                      setRecordedTrail([]);
+                      setIsRecording(true);
+                    }
+                  }}
+                />
+              )}
+              <CanvasToolbarButton
+                label="Device"
+                onClick={() => setShowDeviceSettings(true)}
+              />
+            </CanvasBottomToolbar>
+          </div>
         </div>
       )}
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'navigation'}
+        title="Menu"
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-2">
+          {onNavigate && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('wizard');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Add Device
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isEP1) {
+                    onNavigate('zoneEditor');
+                    setActiveMobileSheet(null);
+                  }
+                }}
+                disabled={isEP1}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100 disabled:opacity-40"
+              >
+                Zone Editor
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('roomBuilder');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Room Builder
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('settings');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Settings
+              </button>
+            </>
+          )}
+        </div>
+      </CanvasMobileSheet>
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'details'}
+        title={isEP1 ? 'EP1 Status' : 'Live Tracking'}
+        description={selectedRoom?.name}
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-4 text-sm text-slate-200">
+          <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <div className={`h-3 w-3 rounded-full ${
+                presenceAvailability === 'unavailable'
+                  ? 'bg-amber-500'
+                  : liveState?.presence
+                  ? 'bg-emerald-500'
+                  : 'bg-slate-600'
+              }`} />
+              <span className="font-semibold text-white">Current State</span>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between border-b border-slate-700/50 py-1">
+                <span className="text-slate-400">Presence</span>
+                <span className={presenceClass}>{presenceLabel}</span>
+              </div>
+              {!isEP1 && (
+                <div className="flex justify-between border-b border-slate-700/50 py-1">
+                  <span className="text-slate-400">Targets</span>
+                  <span className="text-aqua-400">{displayTargetPositions.length}</span>
+                </div>
+              )}
+              {liveState?.distance !== null && liveState?.distance !== undefined && (
+                <div className="flex justify-between border-b border-slate-700/50 py-1">
+                  <span className="text-slate-400">Distance</span>
+                  <span className="text-aqua-400">{liveState.distance.toFixed(2)}m</span>
+                </div>
+              )}
+              {isEP1 && (
+                <>
+                  <div className="flex justify-between border-b border-slate-700/50 py-1">
+                    <span className="text-slate-400">mmWave</span>
+                    <span className={mmwaveClass}>{mmwaveLabel}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-700/50 py-1">
+                    <span className="text-slate-400">PIR</span>
+                    <span className={pirClass}>{pirLabel}</span>
+                  </div>
+                </>
+              )}
+              {liveState?.temperature !== null && liveState?.temperature !== undefined && (
+                <div className="flex justify-between border-b border-slate-700/50 py-1">
+                  <span className="text-slate-400">Temperature</span>
+                  <span>{liveState.temperature.toFixed(1)}{deviceMapping?.entityUnits?.temperature || 'Â°C'}</span>
+                </div>
+              )}
+              {liveState?.co2 !== null && liveState?.co2 !== undefined && (
+                <div className="flex justify-between border-b border-slate-700/50 py-1">
+                  <span className="text-slate-400">CO2</span>
+                  <span>{Math.round(liveState.co2)} {deviceMapping?.entityUnits?.co2 || 'ppm'}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {!isEP1 && liveState && (
+            <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Zone Occupancy</div>
+              <div className="grid grid-cols-2 gap-2">
+                {zoneOccupancyNumbers.map((zoneNum) => {
+                  const zoneKey = `zone${zoneNum}`;
+                  const zoneOccupancy = liveState.zoneOccupancy as Record<string, boolean | undefined> | undefined;
+                  const isOccupied = zoneOccupancy?.[zoneKey] ?? false;
+                  return (
+                    <div
+                      key={zoneNum}
+                      className={`rounded-lg border px-2 py-2 text-xs ${
+                        isOccupied
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                          : 'border-slate-700 bg-slate-900/40 text-slate-500'
+                      }`}
+                    >
+                      <div className="truncate font-semibold">{getZoneLabel(zoneNum)}</div>
+                      <div className="mt-0.5 text-[10px]">{isOccupied ? 'Occupied' : 'Clear'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {!isEP1 && liveState?.targets && (
+            <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Targets</div>
+              <div className="space-y-2">
+                {[1, 2, 3].map((targetId) => {
+                  const target = liveState.targets?.find((candidate) => candidate.id === targetId);
+                  const isActive = target?.active || (target?.x !== null && target?.x !== undefined && target.x !== 0);
+                  return (
+                    <div key={targetId} className="rounded-lg bg-slate-900/50 px-3 py-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className={isActive ? 'font-semibold text-slate-100' : 'text-slate-500'}>Target {targetId}</span>
+                        <span className={isActive ? 'text-emerald-400' : 'text-slate-600'}>{isActive ? 'Active' : 'Inactive'}</span>
+                      </div>
+                      {isActive && target && (
+                        <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                          <span>X: {target.x?.toFixed(0) ?? '--'} mm</span>
+                          <span>Y: {target.y?.toFixed(0) ?? '--'} mm</span>
+                          {target.distance !== null && target.distance !== undefined && <span>Dist: {target.distance.toFixed(0)} mm</span>}
+                          {target.speed !== null && target.speed !== undefined && <span>Speed: {target.speed.toFixed(2)} m/s</span>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </CanvasMobileSheet>
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'display'}
+        title="Display"
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-3 text-sm text-slate-200">
+          {[
+            ['Max Distance', showMaxDistanceOverlay, setShowMaxDistanceOverlay],
+            ['Device Coverage', showDeviceRadar, setShowDeviceRadar],
+            ['Walls', showWalls, setShowWalls],
+            ['Furniture', showFurniture, setShowFurniture],
+            ['Doors', showDoors, setShowDoors],
+            ['Device Icon', showDeviceIcon, setShowDeviceIcon],
+            ['Targets', showTargets, setShowTargets],
+          ].map(([label, checked, setter]) => (
+            <label key={String(label)} className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
+              <span>{label}</span>
+              <input
+                type="checkbox"
+                checked={Boolean(checked)}
+                onChange={(event) => (setter as (value: boolean) => void)(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
+              />
+            </label>
+          ))}
+          {!isEP1 && (
+            <>
+              <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
+                <span>Zones</span>
+                <input
+                  type="checkbox"
+                  checked={showZones}
+                  onChange={(event) => setShowZones(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
+                />
+              </label>
+              <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
+                <span>Movement Trails</span>
+                <input
+                  type="checkbox"
+                  checked={showTrails}
+                  onChange={(event) => setShowTrails(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
+                />
+              </label>
+              {supportsHeatmap && (
+                <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
+                  <span>Heatmap</span>
+                  <input
+                    type="checkbox"
+                    checked={heatmapEnabled}
+                    onChange={(event) => setHeatmapEnabled(event.target.checked)}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
+                  />
+                </label>
+              )}
+            </>
+          )}
+          <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
+            <span>Clip Radar To Walls</span>
+            <input
+              type="checkbox"
+              checked={clipRadarToWalls}
+              onChange={(event) => setClipRadarToWalls(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
+            />
+          </label>
+          <div className="border-t border-slate-700 pt-3">
+            <ThemeSwitcher />
+          </div>
+        </div>
+      </CanvasMobileSheet>
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'zoom'}
+        title="Zoom and Snap"
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-4 text-sm text-slate-200">
+          <div className="grid grid-cols-2 gap-2">
+            <button className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold" onClick={() => setZoom((value) => Math.min(5, value + 0.1))}>Zoom In</button>
+            <button className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold" onClick={() => setZoom((value) => Math.max(0.1, value - 0.1))}>Zoom Out</button>
+            <button className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold" onClick={() => { setZoom(1.1); setPanOffsetMm({ x: 0, y: 0 }); }}>Reset</button>
+            <button className="rounded-lg border border-aqua-600/60 bg-aqua-600/20 px-4 py-3 font-semibold text-aqua-100" onClick={handleAutoZoom}>Auto Fit</button>
+          </div>
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Snap Grid</div>
+            <div className="grid grid-cols-4 gap-2">
+              {[0, 50, 100, 200].map((value) => (
+                <button
+                  key={value}
+                  onClick={() => setSnapGridMm(value)}
+                  className={`rounded-lg border px-2 py-2 text-xs font-semibold ${
+                    snapGridMm === value
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                      : 'border-slate-700 bg-slate-800 text-slate-200'
+                  }`}
+                >
+                  {value === 0 ? 'Off' : `${value}mm`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
+            Cursor: X {cursorPos ? (cursorPos.x / 1000).toFixed(2) : '--'}m, Y {cursorPos ? (cursorPos.y / 1000).toFixed(2) : '--'}m
+          </div>
+        </div>
+      </CanvasMobileSheet>
 
       {/* Device Settings Modal */}
       {selectedRoom && (

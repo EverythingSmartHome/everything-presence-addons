@@ -59,6 +59,43 @@ body {
   }
 }
 
+.mobile-sheet-backdrop {
+  animation: mobile-sheet-backdrop-in 160ms ease-out both;
+}
+
+.mobile-sheet-panel {
+  animation: mobile-sheet-panel-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes mobile-sheet-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mobile-sheet-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-sheet-backdrop,
+  .mobile-sheet-panel {
+    animation: none;
+  }
+}
+
 /* Dark mode glass card */
 .dark .glass-card {
   background-color: rgba(15, 23, 42, 0.6);

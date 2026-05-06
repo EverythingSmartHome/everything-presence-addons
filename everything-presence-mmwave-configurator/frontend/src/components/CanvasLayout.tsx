@@ -131,12 +131,12 @@ export const CanvasMobileSheet: React.FC<CanvasMobileSheetProps> = ({
       <button
         type="button"
         aria-label="Close panel"
-        className="absolute inset-0 bg-black/45"
+        className="mobile-sheet-backdrop absolute inset-0 bg-black/45"
         onClick={onClose}
       />
       <section
         className={joinClasses(
-          'absolute bottom-0 left-0 right-0 max-h-[82dvh] overflow-hidden rounded-t-2xl border-t border-slate-700 bg-slate-900 shadow-2xl mobile-safe-bottom',
+          'mobile-sheet-panel absolute bottom-0 left-0 right-0 max-h-[82dvh] overflow-hidden rounded-t-2xl border-t border-slate-700 bg-slate-900 shadow-2xl mobile-safe-bottom',
           className,
         )}
         role="dialog"
