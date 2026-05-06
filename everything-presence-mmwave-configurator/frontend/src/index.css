@@ -45,6 +45,20 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+.mobile-safe-top {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+.mobile-safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+@supports (height: 100dvh) {
+  .min-h-dvh {
+    min-height: 100dvh;
+  }
+}
+
 /* Dark mode glass card */
 .dark .glass-card {
   background-color: rgba(15, 23, 42, 0.6);
