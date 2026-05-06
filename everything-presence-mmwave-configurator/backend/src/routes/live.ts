@@ -344,6 +344,32 @@ export function createLiveRouter(
         liveState.config = config;
       }
 
+      // Zone occupancy states (EPL/EPP) from confirmed mappings only.
+      if (capabilities?.zones) {
+        for (let i = 1; i <= 4; i++) {
+          const mappingKey = `zone${i}Occupancy`;
+          let entityId: string | null = null;
+          if (hasDeviceMapping) {
+            entityId = deviceEntityService.getEntityId(deviceId, mappingKey);
+          } else {
+            const mapped = (entityMappings as Record<string, unknown> | undefined)?.[mappingKey];
+            entityId = typeof mapped === 'string' ? mapped : null;
+          }
+          if (!entityId) continue;
+
+          const occupancyState = await readTransport.getState(entityId).catch(() => null);
+          if (!occupancyState) continue;
+
+          markAvailability(mappingKey, occupancyState);
+          if (!isUnavailableState(occupancyState.state)) {
+            if (!liveState.zoneOccupancy) {
+              liveState.zoneOccupancy = {};
+            }
+            liveState.zoneOccupancy[`zone${i}`] = occupancyState.state === 'on';
+          }
+        }
+      }
+
       // Configuration entities (EP1)
       if (capabilities?.distanceOnlyTracking) {
         const config: any = {};

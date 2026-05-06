@@ -13,6 +13,7 @@ interface LiveClientSubscription {
   deviceId: string;
   profileId: string;
   entityIds: Set<string>;
+  entityKeysById: Map<string, string>;
   subscriptionId: string;
 }
 
@@ -33,10 +34,12 @@ export function createLiveWebSocketServer(
       // Broadcast to clients subscribed to this entity
       clients.forEach((subscription, clientWs) => {
         if (subscription.entityIds.has(entityId) && clientWs.readyState === WebSocket.OPEN) {
+          const entityKey = subscription.entityKeysById.get(entityId);
           try {
             clientWs.send(
               JSON.stringify({
                 type: 'state_update',
+                entityKey,
                 entityId,
                 state: newState.state,
                 attributes: newState.attributes,
@@ -115,6 +118,7 @@ export function createLiveWebSocketServer(
 
           // Build list of entity IDs to monitor using EntityResolver
           const entityIds = new Set<string>();
+          const entityKeysById = new Map<string, string>();
           const entityMap = profile.entityMap as any;
 
           // Helper to resolve entity ID - tries device mapping first, then legacy
@@ -130,6 +134,21 @@ export function createLiveWebSocketServer(
             }
             if (entityId) {
               entityIds.add(entityId);
+              entityKeysById.set(entityId, mappingKey);
+            }
+          };
+
+          const addMappedEntity = (mappingKey: string) => {
+            let entityId: string | null = null;
+            if (hasDeviceMapping) {
+              entityId = deviceEntityService.getEntityId(deviceId, mappingKey);
+            } else {
+              const mapped = (parsedMappings as Record<string, unknown> | undefined)?.[mappingKey];
+              entityId = typeof mapped === 'string' ? mapped : null;
+            }
+            if (entityId) {
+              entityIds.add(entityId);
+              entityKeysById.set(entityId, mappingKey);
             }
           };
 
@@ -186,7 +205,7 @@ export function createLiveWebSocketServer(
                 addEntity(zoneTargetCountKey, targetCountTemplate);
               }
               if (occupancyTemplate) {
-                addEntity(zoneOccupancyKey, occupancyTemplate);
+                addMappedEntity(zoneOccupancyKey);
               }
             }
           }
@@ -234,6 +253,7 @@ export function createLiveWebSocketServer(
             deviceId,
             profileId,
             entityIds,
+            entityKeysById,
             subscriptionId,
           });
 

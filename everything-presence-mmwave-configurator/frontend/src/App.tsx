@@ -233,16 +233,16 @@ function App() {
 
                 // Helper to check zone occupancy entities from mappings
                 const checkZoneOccupancy = (): { matched: boolean; zoneNum?: number } => {
-                  // Check mapped zone occupancy entities first
-                  if (mappings?.trackingTargets) {
-                    // Zone occupancy entities aren't in trackingTargets, check settingsEntities or dedicated zone mappings
-                  }
-                  // For now, check each zone individually - these would be in a zoneOccupancyEntities mapping
-                  // Fall back to pattern matching for legacy rooms
-                  if (!mappings) {
-                    const match = message.entityId.match(/zone_(\d+)_(occupancy|presence)/);
-                    if (match) {
-                      return { matched: true, zoneNum: parseInt(match[1], 10) };
+                  const entityKey = typeof message.entityKey === 'string' ? message.entityKey : '';
+                  for (let zoneNum = 1; zoneNum <= (selectedProfile.limits.maxZones ?? 4); zoneNum += 1) {
+                    const mappingKey = `zone${zoneNum}Occupancy`;
+                    if (entityKey === mappingKey) {
+                      return { matched: true, zoneNum };
+                    }
+
+                    const mappedEntity = (mappings as Record<string, unknown> | undefined)?.[mappingKey];
+                    if (typeof mappedEntity === 'string' && message.entityId === mappedEntity) {
+                      return { matched: true, zoneNum };
                     }
                   }
                   return { matched: false };

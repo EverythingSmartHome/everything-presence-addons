@@ -30,6 +30,14 @@ export const canonicalKeyPairs: Array<[string, string]> = [
   ['firmwareUpdate', 'firmwareUpdateEntity'],
   ['installationAngle', 'installationAngleEntity'],
   ['polygonZonesEnabled', 'polygonZonesEnabledEntity'],
+  ['zone1OccupancyEntity', 'zone1Occupancy'],
+  ['zone2OccupancyEntity', 'zone2Occupancy'],
+  ['zone3OccupancyEntity', 'zone3Occupancy'],
+  ['zone4OccupancyEntity', 'zone4Occupancy'],
+  ['zone1TargetCountEntity', 'zone1TargetCount'],
+  ['zone2TargetCountEntity', 'zone2TargetCount'],
+  ['zone3TargetCountEntity', 'zone3TargetCount'],
+  ['zone4TargetCountEntity', 'zone4TargetCount'],
 ];
 
 export const canonicalKeys = canonicalKeyPairs.map(([, canonical]) => canonical);

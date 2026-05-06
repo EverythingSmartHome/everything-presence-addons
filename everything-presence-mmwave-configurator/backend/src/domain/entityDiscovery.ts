@@ -602,6 +602,10 @@ export class EntityDiscoveryService {
     const category = def.category;
 
     if (category === 'sensor') {
+      if (def.subcategory === 'zoneOccupancy' || def.subcategory === 'zoneTargetCount') {
+        (suggestedMappings as Record<string, unknown>)[entityKey] = entityId;
+        return;
+      }
       // Core sensors go at the root with Entity suffix for legacy compatibility
       const legacyKey = entityKey.endsWith('Entity') ? entityKey : `${entityKey}Entity`;
       (suggestedMappings as Record<string, unknown>)[legacyKey] = entityId;
