@@ -14,7 +14,14 @@ import {
 import { validateZones } from '../api/validate';
 import { getZoneLabels, saveZoneLabels } from '../api/deviceMappings';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, LiveState, ZoneAvailability } from '../api/types';
+import {
+  CanvasBottomToolbar,
+  CanvasMobileSheet,
+  CanvasToolbarButton,
+  CanvasTopBar,
+} from '../components/CanvasLayout';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
+import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
@@ -45,6 +52,8 @@ interface ZoneEditorPageProps {
   onRoomChange?: (roomId: string | null, profileId: string | null) => void;
 }
 
+type MobileZoneSheet = 'navigation' | 'zoom' | null;
+
 export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   onBack,
   onNavigate,
@@ -52,7 +61,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   initialProfileId,
   onWizardZonesReady,
   liveState: propLiveState,
-  targetPositions: propTargetPositions = []
+  targetPositions: propTargetPositions = [],
+  onRoomChange,
 }) => {
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
@@ -76,6 +86,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [isDraggingZone, setIsDraggingZone] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNavMenu, setShowNavMenu] = useState(false);
+  const [activeMobileSheet, setActiveMobileSheet] = useState<MobileZoneSheet>(null);
   // Polygon mode state
   const [polygonModeStatus, setPolygonModeStatus] = useState<PolygonModeStatus>({
     supported: false,
@@ -98,6 +109,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     showTargets, setShowTargets,
     clipRadarToWalls,
   } = useDisplaySettings();
+  const isMobileCanvas = useIsMobileCanvas();
   const loadedRoomRef = useRef<string | null>(null);
   const previousRoomIdRef = useRef<string | null>(null);
   const pendingCeilingSliceConfigRef = useRef<CeilingSliceConfig | null>(null);
@@ -1109,6 +1121,38 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
   }, [selectedRoom?.id, handleAutoZoom]);
 
+  useEffect(() => {
+    if (!isMobileCanvas) {
+      setActiveMobileSheet(null);
+    }
+  }, [isMobileCanvas]);
+
+  const handleRoomSelection = useCallback((roomId: string | null) => {
+    setSelectedRoomId(roomId);
+    const room = rooms.find((candidate) => candidate.id === roomId);
+    setSelectedZoneId(room?.zones?.[0]?.id ?? null);
+    if (room?.profileId) setSelectedProfileId(room.profileId);
+    onRoomChange?.(roomId, room?.profileId ?? selectedProfileId);
+  }, [onRoomChange, rooms, selectedProfileId]);
+
+  const toggleMobileZoneList = () => {
+    setShowSettings(false);
+    setActiveMobileSheet(null);
+    setShowZoneList((current) => !current);
+  };
+
+  const toggleMobileDisplaySettings = () => {
+    setShowZoneList(false);
+    setActiveMobileSheet(null);
+    setShowSettings((current) => !current);
+  };
+
+  const toggleMobileZoomSheet = () => {
+    setShowZoneList(false);
+    setShowSettings(false);
+    setActiveMobileSheet((current) => current === 'zoom' ? null : 'zoom');
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-950 overflow-hidden">
       {/* Error Toast */}
@@ -1184,18 +1228,63 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         </div>
       )}
 
+      <div className="md:hidden">
+        <CanvasTopBar
+          left={onBack && !onNavigate ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
+            >
+              Back
+            </button>
+          ) : onNavigate ? (
+            <button
+              type="button"
+              onClick={() => setActiveMobileSheet('navigation')}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
+            >
+              Menu
+            </button>
+          ) : null}
+          title={rooms.length > 0 ? (
+            <select
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm font-semibold text-slate-100 focus:border-aqua-500 focus:outline-none focus:ring-1 focus:ring-aqua-500/50"
+              value={selectedRoomId ?? ''}
+              onChange={(event) => handleRoomSelection(event.target.value || null)}
+            >
+              {rooms.map((room) => (
+                <option key={room.id} value={room.id}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
+          ) : 'Zone Editor'}
+          right={(
+            <button
+              type="button"
+              onClick={handleSaveZones}
+              disabled={saving || !selectedRoom}
+              className="min-h-[40px] rounded-lg bg-aqua-600 px-3 text-xs font-bold text-white shadow-lg shadow-aqua-500/20 disabled:opacity-50"
+            >
+              {saving ? 'Saving' : 'Save'}
+            </button>
+          )}
+        />
+      </div>
+
       {/* Navigation (top left) */}
       {onBack && !onNavigate && (
         <button
           onClick={onBack}
-          className="absolute top-6 left-6 z-40 group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
+          className="absolute top-6 left-6 z-40 hidden group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95 md:block"
         >
           <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span> Back
         </button>
       )}
 
       {onNavigate && (
-        <div className={`absolute top-6 left-6 ${showNavMenu ? 'z-[60]' : 'z-40'}`}>
+        <div className={`absolute top-6 left-6 hidden md:block ${showNavMenu ? 'z-[60]' : 'z-40'}`}>
           <button
             onClick={() => setShowNavMenu(!showNavMenu)}
             className="group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
@@ -1258,7 +1347,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       )}
 
       {/* Floating Action Button (top right) */}
-      <div className="absolute top-6 right-6 z-40 flex flex-col items-end gap-2">
+      <div className="absolute top-6 right-6 z-40 hidden flex-col items-end gap-2 md:flex">
         <button
           onClick={handleSaveZones}
           disabled={saving}
@@ -1505,17 +1594,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           />
 
           {/* Floating Room Selector (top center) */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl">
+          <div className="absolute top-6 left-1/2 z-40 hidden -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl md:flex">
             <span className="text-slate-400 font-medium">Room:</span>
             <select
               className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-slate-100 transition-colors focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none font-medium"
               value={selectedRoomId ?? ''}
               onChange={(e) => {
-                const id = e.target.value || null;
-                setSelectedRoomId(id);
-                const room = rooms.find((r) => r.id === id);
-                setSelectedZoneId(room?.zones?.[0]?.id ?? null);
-                if (room?.profileId) setSelectedProfileId(room.profileId);
+                handleRoomSelection(e.target.value || null);
               }}
             >
               {rooms.map((r) => (
@@ -1527,7 +1612,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           </div>
 
           {/* Zone List Toggle Button (left side) */}
-          <div className="absolute top-24 left-6 z-40 flex flex-col gap-2">
+          <div className="absolute top-24 left-6 z-40 hidden flex-col gap-2 md:flex">
             <button
               className="rounded-xl border border-aqua-600/50 bg-aqua-600/10 backdrop-blur px-6 py-3 text-sm font-semibold text-aqua-100 shadow-lg transition-all hover:bg-aqua-600/20 hover:shadow-xl active:scale-95"
               onClick={() => setShowZoneList(!showZoneList)}
@@ -1572,7 +1657,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           </div>
 
           {/* Floating Zoom Controls (bottom right) */}
-          <div className="absolute bottom-6 right-6 z-40 flex flex-col gap-2">
+          <div className="absolute bottom-6 right-6 z-40 hidden flex-col gap-2 md:flex">
             <button
               className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
               onClick={() => setZoom((z) => Math.min(5, z + 0.1))}
@@ -1614,9 +1699,18 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
           {/* Settings Panel (appears above zoom controls when toggled) */}
           {showSettings && (
-            <div className="absolute bottom-6 right-6 z-50 mb-[280px] w-64">
+            <div className="absolute bottom-0 left-0 right-0 z-[80] max-h-[82dvh] overflow-y-auto rounded-t-2xl border-t border-slate-700 bg-slate-900/95 p-4 shadow-2xl mobile-safe-bottom md:bottom-6 md:left-auto md:right-6 md:mb-[280px] md:max-h-none md:w-64 md:rounded-xl md:border md:border-slate-700/50 md:bg-transparent md:p-0 md:shadow-none">
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur p-4 shadow-xl">
-                <div className="text-sm font-semibold text-slate-100 mb-3">Display Settings</div>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="text-sm font-semibold text-slate-100">Display Settings</div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings(false)}
+                    className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 md:hidden"
+                  >
+                    Close
+                  </button>
+                </div>
                 <div className="space-y-2.5">
                   {/* Room Element Visibility */}
                   <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Room Elements</div>
@@ -1698,7 +1792,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           )}
 
           {/* Floating Snap Controls (bottom left) */}
-          <div className="absolute bottom-6 left-6 z-40 flex flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl">
+          <div className="absolute bottom-6 left-6 z-40 hidden flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl md:flex">
             <span className="text-xs text-slate-400 font-medium">Snap Grid</span>
             <div className="flex flex-wrap gap-2">
               {[0, 50, 100, 200].map((v) => (
@@ -1723,8 +1817,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
           {/* Floating Zone List Panel (slides in from right) */}
           {showZoneList && (
-            <div className="absolute top-0 right-0 bottom-0 z-50 w-96 border-l border-slate-700 bg-slate-900/95 backdrop-blur shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200 overflow-y-auto">
-              <div className="sticky top-0 z-10 border-b border-slate-700 bg-slate-900/90 backdrop-blur p-4">
+            <div className="absolute bottom-0 left-0 right-0 z-[80] max-h-[82dvh] overflow-y-auto rounded-t-2xl border-t border-slate-700 bg-slate-900/95 shadow-2xl mobile-safe-bottom mobile-sheet-panel md:top-0 md:bottom-0 md:left-auto md:w-96 md:max-h-none md:rounded-none md:border-l md:border-t-0 md:backdrop-blur md:animate-in md:slide-in-from-right-4 md:fade-in md:duration-200">
+              <div className="sticky top-0 z-10 border-b border-slate-700 bg-slate-900/95 backdrop-blur p-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold text-white">
                     {polygonModeStatus.enabled ? (isCeilingSliceMode ? 'Ceiling Slices' : '⬡ Polygon Zones') : 'Zone Slots'}
@@ -2154,8 +2248,157 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
               )}
             </div>
           )}
+
+          <div className="md:hidden">
+            <CanvasBottomToolbar>
+              <CanvasToolbarButton
+                label="Zones"
+                active={showZoneList}
+                badge={polygonModeStatus.enabled ? activePolygonZones.length : enabledZones.length}
+                onClick={toggleMobileZoneList}
+              />
+              {polygonModeStatus.supported && polygonModeControllable && (
+                <CanvasToolbarButton
+                  label={polygonModeStatus.enabled ? (isCeilingSliceMode ? 'Slices' : 'Polygon') : 'Rect'}
+                  active={polygonModeStatus.enabled}
+                  disabled={togglingPolygonMode || (!polygonModeStatus.enabled && polygonZonesAvailable === false)}
+                  onClick={() => {
+                    if (!polygonModeStatus.enabled && polygonZonesAvailable === false) return;
+                    setShowModeChangeConfirm(true);
+                  }}
+                />
+              )}
+              <CanvasToolbarButton
+                label="Display"
+                active={showSettings}
+                onClick={toggleMobileDisplaySettings}
+              />
+              <CanvasToolbarButton
+                label="Zoom"
+                active={activeMobileSheet === 'zoom'}
+                onClick={toggleMobileZoomSheet}
+              />
+            </CanvasBottomToolbar>
+          </div>
         </div>
       )}
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'navigation'}
+        title="Menu"
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-2">
+          {onNavigate && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('liveDashboard');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Live Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('wizard');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Add Device
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('roomBuilder');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Room Builder
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigate('settings');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Settings
+              </button>
+            </>
+          )}
+        </div>
+      </CanvasMobileSheet>
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'zoom'}
+        title="Zoom and Snap"
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-4 text-sm text-slate-200">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold"
+              onClick={() => setZoom((z) => Math.min(5, z + 0.1))}
+            >
+              Zoom In
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold"
+              onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}
+            >
+              Zoom Out
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold"
+              onClick={() => {
+                setZoom(1.1);
+                setPanOffsetMm({ x: 0, y: 0 });
+              }}
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-aqua-600/60 bg-aqua-600/20 px-4 py-3 font-semibold text-aqua-100"
+              onClick={handleAutoZoom}
+            >
+              Auto Fit
+            </button>
+          </div>
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Snap Grid</div>
+            <div className="grid grid-cols-4 gap-2">
+              {[0, 50, 100, 200].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSnapGridMm(value)}
+                  className={`rounded-lg border px-2 py-2 text-xs font-semibold ${
+                    snapGridMm === value
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                      : 'border-slate-700 bg-slate-800 text-slate-200'
+                  }`}
+                >
+                  {value === 0 ? 'Off' : `${value}mm`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
+            Cursor: X {cursorPos ? (cursorPos.x / 1000).toFixed(2) : '--'}m, Y {cursorPos ? (cursorPos.y / 1000).toFixed(2) : '--'}m
+          </div>
+        </div>
+      </CanvasMobileSheet>
     </div>
   );
 };
