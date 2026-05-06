@@ -21,6 +21,13 @@ import { useHeatmap } from '../hooks/useHeatmap';
 import { useDeviceMappings, useDeviceMapping } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import {
+  buildCeilingExclusionZones,
+  buildCeilingSliceZones,
+  getCeilingSliceLineDepth,
+  getCeilingSlicePosition,
+  normalizeCeilingSliceConfig,
+} from '../utils/ceilingSlices';
 
 // Recording mode trail point
 interface RecordedPoint {
@@ -134,6 +141,18 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
 
   const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  const isCeilingSliceMode =
+    selectedProfile?.id === 'everything_presence_pro' &&
+    selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  const isEP1 = selectedRoom?.profileId === 'everything_presence_one';
+  const hasLiveStateForRoom = Boolean(
+    liveState && selectedRoom?.deviceId && liveState.deviceId === selectedRoom.deviceId
+  );
+  const showLiveOverlays = isEP1 ? true : hasLiveStateForRoom;
+  const installationAngle =
+    hasLiveStateForRoom && typeof liveState?.config?.installationAngle === 'number'
+      ? liveState.config.installationAngle
+      : 0;
 
   const heightCoverageConfig = useMemo(() => {
     if (!selectedRoom?.devicePlacement || !isCeilingMount) return null;
@@ -152,29 +171,100 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       maxRangeMeters: coverageFov.maxRangeMeters,
     };
   }, [coverageFov, selectedRoom?.devicePlacement, isCeilingMount]);
+  const ceilingSliceConfig = useMemo(
+    () => normalizeCeilingSliceConfig(
+      selectedRoom?.metadata?.ceilingSliceConfig,
+      (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000,
+      true,
+    ),
+    [selectedProfile?.limits?.maxRangeMeters, selectedRoom?.metadata?.ceilingSliceConfig],
+  );
+  const deviceLocalToRoom = useCallback((deviceX: number, deviceY: number) => {
+    if (!selectedRoom?.devicePlacement) {
+      return { x: deviceX, y: deviceY };
+    }
+    const { x, y, rotationDeg } = selectedRoom.devicePlacement;
+    const angleRad = (((rotationDeg ?? 0) + installationAngle) * Math.PI) / 180;
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+    return {
+      x: deviceX * cos - deviceY * sin + x,
+      y: deviceX * sin + deviceY * cos + y,
+    };
+  }, [installationAngle, selectedRoom?.devicePlacement]);
 
   const showCoverageOverlay = showDeviceRadar;
-
-  // Check if the selected room is using EP1
-  const isEP1 = selectedRoom?.profileId === 'everything_presence_one';
 
   // Check if device supports tracking (EP Lite only for heatmap)
   const supportsHeatmap = selectedProfile?.capabilities &&
     (selectedProfile.capabilities as { tracking?: boolean }).tracking === true && !isEP1;
 
-  const hasLiveStateForRoom = Boolean(
-    liveState && selectedRoom?.deviceId && liveState.deviceId === selectedRoom.deviceId
-  );
-  const showLiveOverlays = isEP1 ? true : hasLiveStateForRoom;
-  const installationAngle =
-    hasLiveStateForRoom && typeof liveState?.config?.installationAngle === 'number'
-      ? liveState.config.installationAngle
-      : 0;
-
   // Device mappings context - used to check if device has valid entity mappings
   // useDeviceMapping triggers loading the mapping into cache, useDeviceMappings provides the check
   const { hasValidMappings } = useDeviceMappings();
   const { mapping: deviceMapping, loading: mappingLoading } = useDeviceMapping(selectedRoom?.deviceId);
+  const lastZonesFetchedRoomId = React.useRef<string | null>(null);
+  const ceilingSliceDisplayZones = useMemo(
+    () => buildCeilingSliceZones(
+      ceilingSliceConfig,
+      {},
+      'display',
+      false,
+      heightCoverageConfig,
+      (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000,
+    ),
+    [ceilingSliceConfig, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
+  );
+  const ceilingExclusionDisplayZones = useMemo(
+    () => buildCeilingExclusionZones(
+      ceilingSliceConfig,
+      {},
+      'display',
+      false,
+      heightCoverageConfig,
+      (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000,
+    ),
+    [ceilingSliceConfig, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
+  );
+  const displayPolygonZones = isCeilingSliceMode ? [...ceilingSliceDisplayZones, ...ceilingExclusionDisplayZones] : polygonZones;
+  const getZoneLabel = useCallback((zoneNum: number): string => {
+    const candidates = [`Zone ${zoneNum}`, `zone${zoneNum}`, `zone_${zoneNum}`, `zone-${zoneNum}`];
+    const source = polygonModeStatus.enabled ? displayPolygonZones : selectedRoom?.zones ?? [];
+    const regularZones = source.filter((zone) => zone.type === 'regular');
+    const matchingZone =
+      source.find((zone) => candidates.includes(zone.id)) ??
+      regularZones[zoneNum - 1];
+
+    if (isCeilingSliceMode) {
+      return matchingZone?.label || `Zone ${zoneNum}`;
+    }
+
+    for (const candidate of candidates) {
+      const label = deviceMapping?.zoneLabels?.[candidate];
+      if (label) return label;
+    }
+
+    if (matchingZone?.id && deviceMapping?.zoneLabels?.[matchingZone.id]) {
+      return deviceMapping.zoneLabels[matchingZone.id];
+    }
+
+    return matchingZone?.label || `Zone ${zoneNum}`;
+  }, [
+    deviceMapping?.zoneLabels,
+    displayPolygonZones,
+    isCeilingSliceMode,
+    polygonModeStatus.enabled,
+    selectedRoom?.zones,
+  ]);
+  const zoneOccupancyNumbers = useMemo(() => {
+    const configuredMax = selectedProfile?.limits?.maxZones ?? 4;
+    const liveMax = Object.keys(liveState?.zoneOccupancy ?? {}).reduce((max, key) => {
+      const match = key.match(/^zone(\d+)$/);
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0);
+    const count = Math.max(configuredMax, liveMax, 1);
+    return Array.from({ length: count }, (_, index) => index + 1);
+  }, [liveState?.zoneOccupancy, selectedProfile?.limits?.maxZones]);
   // Check validity: mapping must be loaded AND schema versions must match
   // If profile has a schemaVersion, the mapping must have a matching profileSchemaVersion
   // This ensures users are prompted to resync when profile schema changes
@@ -468,6 +558,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         if (cancelled) {
           return;
         }
+
+        lastZonesFetchedRoomId.current = selectedRoom.id;
 
         // Avoid replacing known-good stored zones with a transient empty device read.
         if (deviceZones.length === 0 && (selectedRoom.zones?.length ?? 0) > 0) {
@@ -892,7 +984,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             zones={selectedRoom.zones ?? []}
             onZonesChange={() => {}}
             // Polygon zones support - show polygon zones when polygon mode is enabled
-            polygonZones={polygonZones}
+            polygonZones={displayPolygonZones}
             onPolygonZonesChange={() => {}}
             polygonMode={polygonModeStatus.enabled}
             selectedId={null}
@@ -917,7 +1009,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             clipRadarToWalls={clipRadarToWalls}
             furniture={selectedRoom.furniture ?? []}
             doors={selectedRoom.doors ?? []}
-            zoneLabels={deviceMapping?.zoneLabels}
+            zoneLabels={isCeilingSliceMode ? undefined : deviceMapping?.zoneLabels}
             showWalls={showWalls}
             showFurniture={showFurniture}
             showDoors={showDoors}
@@ -1000,8 +1092,83 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 </g>
               ) : null;
 
+              const ceilingTargetElements = showTargets && isCeilingMount && liveState?.targets && liveState.targets.length > 0 ? (
+                <g>
+                  {liveState.targets.map((target) => {
+                    if (target.active === false) return null;
+                    const lateral = getCeilingSlicePosition(target, ceilingSliceConfig);
+                    if (lateral === null) return null;
+                    const depth = getCeilingSliceLineDepth(lateral, ceilingSliceConfig, heightCoverageConfig, (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000);
+                    if (!depth) return null;
+                    const endpoints = ceilingSliceConfig.axis === 'x'
+                      ? [
+                          deviceLocalToRoom(lateral, depth.min),
+                          deviceLocalToRoom(lateral, depth.max),
+                        ]
+                      : [
+                          deviceLocalToRoom(depth.min, lateral),
+                          deviceLocalToRoom(depth.max, lateral),
+                        ];
+                    const start = toCanvas(endpoints[0]);
+                    const end = toCanvas(endpoints[1]);
+                    const label = toCanvas(deviceLocalToRoom(
+                      ceilingSliceConfig.axis === 'x' ? lateral : 0,
+                      ceilingSliceConfig.axis === 'x' ? 0 : lateral,
+                    ));
+                    const colorIndex = (target.id - 1) % targetColors.length;
+                    const color = targetColors[colorIndex];
+
+                    return (
+                      <g key={`ceiling-target-${target.id}`}>
+                        <line
+                          x1={start.x}
+                          y1={start.y}
+                          x2={end.x}
+                          y2={end.y}
+                          stroke="rgba(15, 23, 42, 0.85)"
+                          strokeWidth={8}
+                          strokeLinecap="round"
+                          opacity={0.9}
+                        />
+                        <line
+                          x1={start.x}
+                          y1={start.y}
+                          x2={end.x}
+                          y2={end.y}
+                          stroke={color.fill}
+                          strokeWidth={4}
+                          strokeLinecap="round"
+                          opacity={0.95}
+                          strokeDasharray="10 7"
+                        />
+                        <circle
+                          cx={label.x}
+                          cy={label.y}
+                          r={8}
+                          fill={color.fill}
+                          stroke="white"
+                          strokeWidth={2}
+                        />
+                        <text
+                          x={label.x}
+                          y={label.y - 14}
+                          textAnchor="middle"
+                          fill="white"
+                          fontSize="12"
+                          fontWeight="bold"
+                          className="pointer-events-none"
+                          style={{ filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.9))' }}
+                        >
+                          T{target.id}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </g>
+              ) : null;
+
               // Render live target positions (EP Lite with tracking)
-              const targetElements = showTargets && displayTargetPositions.length > 0 ? (
+              const targetElements = !isCeilingMount && showTargets && displayTargetPositions.length > 0 ? (
                 <g>
                   {/* Render trails first (so they appear behind targets) */}
                   {showTrails && displayTargetPositions.map((target) => {
@@ -1179,6 +1346,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                     {recordedTrailOverlay}
 
                     {/* Targets (if any) */}
+                    {ceilingTargetElements}
                     {targetElements}
 
                     {/* Max Distance Arc */}
@@ -1413,11 +1581,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                     {/* Show polygon zones when polygon mode is enabled, otherwise show rectangle zones */}
                     {polygonModeStatus.enabled ? (
                       // Polygon zones legend
-                      polygonZones.filter(z => z.type === 'regular').length > 0 && (
+                      displayPolygonZones.filter(z => z.type === 'regular').length > 0 && (
                         <div className="flex flex-wrap items-center gap-2 text-[11px]">
                           {(() => {
                             const regularZoneColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4'];
-                            const regularZones = polygonZones.filter(z => z.type === 'regular');
+                            const regularZones = displayPolygonZones.filter(z => z.type === 'regular');
 
                             return regularZones.map((zone, index) => (
                               <div key={zone.id} className="flex items-center gap-1.5">
@@ -1425,7 +1593,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                                   className="w-3 h-3 rounded border border-white/50"
                                   style={{ backgroundColor: regularZoneColors[index % regularZoneColors.length] }}
                                 />
-                                <span className="text-slate-300">{deviceMapping?.zoneLabels?.[zone.id] || zone.label || zone.id}</span>
+                                <span className="text-slate-300">{getZoneLabel(index + 1)}</span>
                               </div>
                             ));
                           })()}
@@ -1445,7 +1613,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                                   className="w-3 h-3 rounded border border-white/50"
                                   style={{ backgroundColor: regularZoneColors[index % regularZoneColors.length] }}
                                 />
-                                <span className="text-slate-300">{deviceMapping?.zoneLabels?.[zone.id] || zone.label || zone.id}</span>
+                                <span className="text-slate-300">{getZoneLabel(index + 1)}</span>
                               </div>
                             ));
                           })()}
@@ -1555,13 +1723,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                     <div>
                       <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Zone Occupancy</div>
                       <div className="grid grid-cols-2 gap-2">
-                        {[1, 2, 3, 4].map((zoneNum) => {
-                          const zoneKey = `zone${zoneNum}` as 'zone1' | 'zone2' | 'zone3' | 'zone4';
-                          const isOccupied = liveState?.zoneOccupancy?.[zoneKey] ?? false;
-                          const regularZoneColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b'];
-                          // Find the matching zone to get its label
-                          const matchingZone = selectedRoom?.zones?.find(z => z.id === `Zone ${zoneNum}` || z.id === `zone${zoneNum}` || z.id === `zone_${zoneNum}`);
-                          const zoneLabel = (matchingZone && deviceMapping?.zoneLabels?.[matchingZone.id]) || matchingZone?.label || `Zone ${zoneNum}`;
+                        {zoneOccupancyNumbers.map((zoneNum) => {
+                          const zoneKey = `zone${zoneNum}`;
+                          const zoneOccupancy = liveState?.zoneOccupancy as Record<string, boolean | undefined> | undefined;
+                          const isOccupied = zoneOccupancy?.[zoneKey] ?? false;
+                          const regularZoneColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4'];
+                          const zoneLabel = getZoneLabel(zoneNum);
 
                           return (
                             <div

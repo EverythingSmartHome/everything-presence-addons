@@ -12,6 +12,8 @@ interface ZoneCanvasProps {
   polygonZones?: ZonePolygon[];
   onPolygonZonesChange?: (zones: ZonePolygon[]) => void;
   polygonMode?: boolean; // Whether we're in polygon editing mode
+  polygonReadOnly?: boolean;
+  polygonLateralOnlyAxis?: 'x' | 'y';
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
   rangeMm?: number;
@@ -67,6 +69,8 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   polygonZones = [],
   onPolygonZonesChange,
   polygonMode = false,
+  polygonReadOnly = false,
+  polygonLateralOnlyAxis,
   selectedId,
   onSelect,
   rangeMm = 6000,
@@ -243,7 +247,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
         }
 
         // Handle polygon vertex dragging
-        if (draggingVertex && onPolygonZonesChange) {
+        if (!polygonReadOnly && draggingVertex && onPolygonZonesChange) {
           const idx = polygonZones.findIndex((z) => z.id === draggingVertex.zoneId);
           if (idx === -1) return;
 
@@ -261,8 +265,28 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
             newY = Math.round(newY / step) * step;
           }
 
-          vertices[draggingVertex.vertexIndex] = { x: newX, y: newY };
-          polygon.vertices = vertices;
+          if (polygonLateralOnlyAxis) {
+            const axis = polygonLateralOnlyAxis;
+            const previousValue = vertices[draggingVertex.vertexIndex][axis];
+            const nextValue = axis === 'x' ? newX : newY;
+            const next = polygonZones.map((candidate) => (
+              candidate.id === polygon.id
+                ? {
+                    ...candidate,
+                    vertices: candidate.vertices.map((vertex) => (
+                      Math.abs(vertex[axis] - previousValue) < 1
+                        ? { ...vertex, [axis]: nextValue }
+                        : vertex
+                    )),
+                  }
+                : candidate
+            ));
+            onPolygonZonesChange(next);
+            return;
+          } else {
+            vertices[draggingVertex.vertexIndex] = { x: newX, y: newY };
+            polygon.vertices = vertices;
+          }
 
           const next = [...polygonZones];
           next[idx] = polygon;
@@ -271,7 +295,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
         }
 
         // Handle moving entire polygon
-        if (draggingPolygonId && onPolygonZonesChange) {
+        if (!polygonReadOnly && draggingPolygonId && onPolygonZonesChange) {
           const idx = polygonZones.findIndex((z) => z.id === draggingPolygonId);
           if (idx === -1) return;
 
@@ -291,6 +315,27 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
             const step = snapGridMm;
             deltaX = Math.round(deltaX / step) * step;
             deltaY = Math.round(deltaY / step) * step;
+          }
+
+          if (polygonLateralOnlyAxis === 'x') {
+            deltaY = 0;
+          } else if (polygonLateralOnlyAxis === 'y') {
+            deltaX = 0;
+          }
+
+          if (polygonLateralOnlyAxis) {
+            const axis = polygonLateralOnlyAxis;
+            const delta = axis === 'x' ? deltaX : deltaY;
+            if (Math.abs(delta) < 0.5) return;
+
+            const nextZones = polygonZones.map((candidate) => ({
+              ...candidate,
+              vertices: candidate.id === polygon.id
+                ? candidate.vertices.map((vertex) => ({ ...vertex, [axis]: vertex[axis] + delta }))
+                : candidate.vertices,
+            }));
+            onPolygonZonesChange(nextZones);
+            return;
           }
 
           // Move all vertices
@@ -560,13 +605,17 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 fill={`${color}33`}
                 stroke={color}
                 strokeWidth={isSelected ? 3 : 1}
-                style={{ cursor: draggingPolygonId === polygon.id ? 'move' : 'pointer' }}
+                style={{ cursor: polygonReadOnly ? 'pointer' : polygonLateralOnlyAxis ? (polygonLateralOnlyAxis === 'x' ? 'ew-resize' : 'ns-resize') : draggingPolygonId === polygon.id ? 'move' : 'pointer' }}
                 onClick={(e) => {
                   e.stopPropagation();
                 }}
                 onMouseDown={(e) => {
                   if ((e as any).button !== 0) return;
                   e.stopPropagation();
+                  if (polygonReadOnly) {
+                    onSelect?.(polygon.id);
+                    return;
+                  }
                   const world = toWorldFromEvent(e);
                   if (!world) return;
                   setDraggingPolygonId(polygon.id);
@@ -593,7 +642,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 {zoneLabels?.[polygon.id] || polygon.label || polygon.id}
               </text>
               {/* Vertex handles (only when selected) */}
-              {isSelected && canvasVertices.map((v, idx) => (
+              {isSelected && !polygonReadOnly && canvasVertices.map((v, idx) => (
                 <circle
                   key={`vertex-${idx}`}
                   cx={v.x}
@@ -602,7 +651,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   fill="white"
                   stroke={color}
                   strokeWidth={2}
-                  style={{ cursor: 'move' }}
+                  style={{ cursor: polygonLateralOnlyAxis === 'x' ? 'ew-resize' : polygonLateralOnlyAxis === 'y' ? 'ns-resize' : 'move' }}
                   onClick={(e) => {
                     e.stopPropagation();
                   }}
@@ -616,7 +665,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 />
               ))}
               {/* Edge midpoints for adding vertices (only when selected) */}
-              {isSelected && canvasVertices.map((v, idx) => {
+              {isSelected && !polygonReadOnly && !polygonLateralOnlyAxis && canvasVertices.map((v, idx) => {
                 const nextIdx = (idx + 1) % canvasVertices.length;
                 const nextV = canvasVertices[nextIdx];
                 const midX = (v.x + nextV.x) / 2;

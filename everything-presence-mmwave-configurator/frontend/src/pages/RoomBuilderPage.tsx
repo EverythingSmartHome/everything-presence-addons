@@ -13,6 +13,11 @@ import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import {
+  getCeilingSliceLineDepth,
+  getCeilingSlicePosition,
+  normalizeCeilingSliceConfig,
+} from '../utils/ceilingSlices';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -128,6 +133,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
 
   const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  const isCeilingSliceMode =
+    selectedProfile?.id === 'everything_presence_pro' &&
+    selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  const trackingMaxRangeMm = (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000;
+  const ceilingSliceConfig = useMemo(
+    () => normalizeCeilingSliceConfig(selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm, true),
+    [selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm],
+  );
 
   const heightCoverageConfig = useMemo(() => {
     if (!selectedRoom?.devicePlacement || !isCeilingMount) return null;
@@ -189,6 +202,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const currentInstallationAngle =
     typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : null;
+  const deviceLocalToRoom = useCallback((deviceX: number, deviceY: number) => {
+    if (!selectedRoom?.devicePlacement) {
+      return { x: deviceX, y: deviceY };
+    }
+    const { x, y, rotationDeg } = selectedRoom.devicePlacement;
+    const angleRad = (((rotationDeg ?? 0) + (currentInstallationAngle ?? 0)) * Math.PI) / 180;
+    const cos = Math.cos(angleRad);
+    const sin = Math.sin(angleRad);
+    return {
+      x: deviceX * cos - deviceY * sin + x,
+      y: deviceX * sin + deviceY * cos + y,
+    };
+  }, [currentInstallationAngle, selectedRoom?.devicePlacement]);
 
   const isEplDevice = useMemo(() => {
     const caps = selectedProfile?.capabilities as { tracking?: boolean; distanceOnlyTracking?: boolean } | undefined;
@@ -1196,13 +1222,90 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   showDoors={showDoors}
                   showDevice={showDeviceIcon}
                   renderOverlay={({ toCanvas }) => {
-                    if (!showTargets || !targetPositions?.length) return null;
+                    if (!showTargets) return null;
 
                     const targetColors = [
                       { fill: '#3b82f6', fillOpacity: 'rgba(59, 130, 246, 0.2)' },
                       { fill: '#10b981', fillOpacity: 'rgba(16, 185, 129, 0.2)' },
                       { fill: '#f59e0b', fillOpacity: 'rgba(245, 158, 11, 0.2)' },
                     ];
+
+                    if (isCeilingSliceMode && liveState?.targets?.length) {
+                      return (
+                        <g style={{ pointerEvents: 'none' }}>
+                          {liveState.targets.map((target, idx) => {
+                            if (target.active === false) return null;
+                            const lateral = getCeilingSlicePosition(target, ceilingSliceConfig);
+                            if (lateral === null) return null;
+                            const depth = getCeilingSliceLineDepth(lateral, ceilingSliceConfig, heightCoverageConfig, trackingMaxRangeMm);
+                            if (!depth) return null;
+                            const endpoints = ceilingSliceConfig.axis === 'x'
+                              ? [
+                                  deviceLocalToRoom(lateral, depth.min),
+                                  deviceLocalToRoom(lateral, depth.max),
+                                ]
+                              : [
+                                  deviceLocalToRoom(depth.min, lateral),
+                                  deviceLocalToRoom(depth.max, lateral),
+                                ];
+                            const start = toCanvas(endpoints[0]);
+                            const end = toCanvas(endpoints[1]);
+                            const label = toCanvas(deviceLocalToRoom(
+                              ceilingSliceConfig.axis === 'x' ? lateral : 0,
+                              ceilingSliceConfig.axis === 'x' ? 0 : lateral,
+                            ));
+                            const colors = targetColors[idx % targetColors.length];
+                            return (
+                              <g key={target.id}>
+                                <line
+                                  x1={start.x}
+                                  y1={start.y}
+                                  x2={end.x}
+                                  y2={end.y}
+                                  stroke="rgba(15, 23, 42, 0.85)"
+                                  strokeWidth={8}
+                                  strokeLinecap="round"
+                                  opacity={0.9}
+                                />
+                                <line
+                                  x1={start.x}
+                                  y1={start.y}
+                                  x2={end.x}
+                                  y2={end.y}
+                                  stroke={colors.fill}
+                                  strokeWidth={4}
+                                  strokeLinecap="round"
+                                  opacity={0.95}
+                                  strokeDasharray="10 7"
+                                />
+                                <circle
+                                  cx={label.x}
+                                  cy={label.y}
+                                  r={8}
+                                  fill={colors.fill}
+                                  stroke="white"
+                                  strokeWidth={2}
+                                />
+                                <text
+                                  x={label.x}
+                                  y={label.y - 14}
+                                  textAnchor="middle"
+                                  fill="white"
+                                  fontSize="12"
+                                  fontWeight="bold"
+                                  className="pointer-events-none"
+                                  style={{ filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.9))' }}
+                                >
+                                  T{target.id}
+                                </text>
+                              </g>
+                            );
+                          })}
+                        </g>
+                      );
+                    }
+
+                    if (!targetPositions?.length) return null;
 
                     return (
                       <g style={{ pointerEvents: 'none' }}>
