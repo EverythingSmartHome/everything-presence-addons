@@ -8,7 +8,14 @@ import { FurnitureLibrary } from '../components/FurnitureLibrary';
 import { FurnitureEditor } from '../components/FurnitureEditor';
 import { DoorEditor } from '../components/DoorEditor';
 import { FLOOR_MATERIALS } from '../components/FloorMaterials';
+import {
+  CanvasBottomToolbar,
+  CanvasMobileSheet,
+  CanvasToolbarButton,
+  CanvasTopBar,
+} from '../components/CanvasLayout';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
+import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
@@ -35,6 +42,8 @@ interface RoomBuilderPageProps {
     angle: number | null;
   }>;
 }
+
+type MobileRoomBuilderSheet = 'navigation' | 'tools' | 'zoom' | null;
 
 const clampNumber = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 
@@ -77,6 +86,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNavMenu, setShowNavMenu] = useState(false);
+  const [activeMobileSheet, setActiveMobileSheet] = useState<MobileRoomBuilderSheet>(null);
   // Display settings (persisted to localStorage)
   const {
     showWalls, setShowWalls,
@@ -86,6 +96,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     showTargets, setShowTargets,
     clipRadarToWalls,
   } = useDisplaySettings();
+  const isMobileCanvas = useIsMobileCanvas();
   const [panOffsetMm, setPanOffsetMm] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showFurnitureLibrary, setShowFurnitureLibrary] = useState(false);
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
@@ -941,6 +952,33 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setPanOffsetMm({ x: 0, y: 0 });
   }, [selectedRoom?.id, handleAutoZoom]);
 
+  useEffect(() => {
+    if (!isMobileCanvas) {
+      setActiveMobileSheet(null);
+    }
+  }, [isMobileCanvas]);
+
+  const handleRoomSelection = useCallback((roomId: string | null) => {
+    setSelectedRoomId(roomId);
+    const room = rooms.find((candidate) => candidate.id === roomId);
+    if (room?.profileId) setSelectedProfileId(room.profileId);
+  }, [rooms]);
+
+  const toggleMobileToolsSheet = () => {
+    setShowSettings(false);
+    setActiveMobileSheet((current) => current === 'tools' ? null : 'tools');
+  };
+
+  const toggleMobileSettingsSheet = () => {
+    setActiveMobileSheet(null);
+    setShowSettings((current) => !current);
+  };
+
+  const toggleMobileZoomSheet = () => {
+    setShowSettings(false);
+    setActiveMobileSheet((current) => current === 'zoom' ? null : 'zoom');
+  };
+
   const isSuggestionApplied =
     currentInstallationAngle !== null &&
     rotationSuggestion &&
@@ -1016,18 +1054,64 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         </div>
       )}
 
+      <div className="md:hidden">
+        <CanvasTopBar
+          left={onBack && !onNavigate ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
+            >
+              Back
+            </button>
+          ) : onNavigate ? (
+            <button
+              type="button"
+              onClick={() => setActiveMobileSheet('navigation')}
+              className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
+            >
+              Menu
+            </button>
+          ) : null}
+          title={rooms.length > 0 ? (
+            <select
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm font-semibold text-slate-100 focus:border-aqua-500 focus:outline-none focus:ring-1 focus:ring-aqua-500/50"
+              value={selectedRoomId ?? ''}
+              onChange={(event) => handleRoomSelection(event.target.value || null)}
+            >
+              <option value="">Select room</option>
+              {rooms.map((room) => (
+                <option key={room.id} value={room.id}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
+          ) : 'Room Builder'}
+          right={(
+            <button
+              type="button"
+              onClick={handleSaveRoom}
+              disabled={saving || !selectedRoom}
+              className="min-h-[40px] rounded-lg bg-aqua-600 px-3 text-xs font-bold text-white shadow-lg shadow-aqua-500/20 disabled:opacity-50"
+            >
+              {saving ? 'Saving' : 'Save'}
+            </button>
+          )}
+        />
+      </div>
+
       {/* Navigation (top left) */}
       {onBack && !onNavigate && (
         <button
           onClick={onBack}
-          className="absolute top-6 left-6 z-40 group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
+          className="absolute top-6 left-6 z-40 hidden group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95 md:block"
         >
           <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span> Back
         </button>
       )}
 
       {onNavigate && (
-        <div className={`absolute top-6 left-6 ${showNavMenu ? 'z-[60]' : 'z-40'}`}>
+        <div className={`absolute top-6 left-6 hidden md:block ${showNavMenu ? 'z-[60]' : 'z-40'}`}>
           <button
             onClick={() => setShowNavMenu(!showNavMenu)}
             className="group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
@@ -1093,7 +1177,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       <button
         onClick={handleSaveRoom}
         disabled={saving}
-        className="absolute top-6 right-6 z-40 rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95"
+        className="absolute top-6 right-6 z-40 hidden rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95 md:block"
       >
         {saving ? 'Saving...' : 'Save Room'}
       </button>
@@ -1349,16 +1433,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   }}
                 />
           {/* Floating Room Selector (top center) */}
-          <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl">
+          <div className="absolute top-6 left-1/2 z-40 hidden -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl md:flex">
             <span className="text-slate-400 font-medium">Room:</span>
             <select
               className="rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-1.5 text-slate-100 transition-colors focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none font-medium"
               value={selectedRoomId ?? ''}
               onChange={(e) => {
-                const roomId = e.target.value || null;
-                setSelectedRoomId(roomId);
-                const room = rooms.find((r) => r.id === roomId);
-                if (room?.profileId) setSelectedProfileId(room.profileId);
+                handleRoomSelection(e.target.value || null);
               }}
             >
               <option value="">Select room</option>
@@ -1371,7 +1452,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
           </div>
 
           {/* Drawing Controls (left side) */}
-          <div className="absolute top-24 left-6 z-40 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-3 shadow-xl">
+          <div className="absolute top-24 left-6 z-40 hidden rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-3 shadow-xl md:block">
             <div className="flex flex-col gap-2 text-sm">
               <button
                 className={`rounded-xl border px-4 py-2.5 font-semibold shadow-lg transition-all active:scale-95 ${
@@ -1448,7 +1529,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
           </div>
 
           {/* Floating Zoom Controls (bottom right) */}
-          <div className="absolute bottom-6 right-6 z-40 flex flex-col gap-2">
+          <div className="absolute bottom-6 right-6 z-40 hidden flex-col gap-2 md:flex">
             <button
               className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
               onClick={() => setZoom((z) => Math.min(5, z + 0.1))}
@@ -1477,7 +1558,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
           {/* Settings Panel */}
           {showSettings && (
-            <div className="absolute top-24 right-6 z-50 w-96 max-w-full rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur p-4 text-sm text-slate-100 shadow-2xl space-y-3 animate-in slide-in-from-right-4 fade-in duration-200">
+            <div className="absolute bottom-0 left-0 right-0 z-[80] max-h-[82dvh] overflow-y-auto rounded-t-2xl border-t border-slate-700 bg-slate-900/95 p-4 text-sm text-slate-100 shadow-2xl mobile-safe-bottom mobile-sheet-panel md:top-24 md:bottom-auto md:left-auto md:right-6 md:w-96 md:max-h-[calc(100vh-8rem)] md:max-w-full md:rounded-xl md:border md:border-slate-700/50 md:backdrop-blur md:animate-in md:slide-in-from-right-4 md:fade-in md:duration-200">
                       <div className="flex items-center justify-between">
                         <span className="font-semibold text-slate-100">Settings</span>
                         <button
@@ -1879,7 +1960,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   )}
 
           {/* Floating Info Bar (bottom left) */}
-          <div className="absolute bottom-6 left-6 z-40 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl max-w-xl">
+          <div className="absolute bottom-6 left-6 z-40 hidden rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl max-w-xl md:block">
             <div className="flex flex-col gap-2 text-xs text-slate-200">
               <div className="flex items-center gap-4">
                 <span className="text-slate-400 font-medium">Cursor:</span>
@@ -2091,8 +2172,214 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               validation={doorValidation}
             />
           )}
+
+          <div className="md:hidden">
+            <CanvasBottomToolbar>
+              <CanvasToolbarButton
+                label="Tools"
+                active={activeMobileSheet === 'tools'}
+                onClick={toggleMobileToolsSheet}
+              />
+              <CanvasToolbarButton
+                label="Settings"
+                active={showSettings}
+                onClick={toggleMobileSettingsSheet}
+              />
+              <CanvasToolbarButton
+                label="Zoom"
+                active={activeMobileSheet === 'zoom'}
+                onClick={toggleMobileZoomSheet}
+              />
+              <CanvasToolbarButton
+                label="Furniture"
+                active={showFurnitureLibrary}
+                onClick={() => {
+                  setActiveMobileSheet(null);
+                  setShowSettings(false);
+                  setShowFurnitureLibrary((current) => !current);
+                  setSelectedFurnitureId(null);
+                }}
+              />
+            </CanvasBottomToolbar>
+          </div>
         </div>
       )}
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'navigation'}
+        title="Menu"
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-2">
+          {onNavigate && (
+            <>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigateWithSave('liveDashboard');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Live Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigateWithSave('wizard');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Add Device
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigateWithSave('zoneEditor');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Zone Editor
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigateWithSave('settings');
+                  setActiveMobileSheet(null);
+                }}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+              >
+                Settings
+              </button>
+            </>
+          )}
+        </div>
+      </CanvasMobileSheet>
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'tools'}
+        title="Tools"
+        description={selectedRoom?.name}
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <button
+            type="button"
+            className={`rounded-lg border px-3 py-3 font-semibold ${
+              isDrawingWall
+                ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                : 'border-slate-700 bg-slate-800 text-slate-100'
+            }`}
+            onClick={() => setIsDrawingWall((prev) => !prev)}
+          >
+            {isDrawingWall ? 'Stop Drawing' : 'Add Wall'}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-emerald-600/60 bg-emerald-600/20 px-3 py-3 font-semibold text-emerald-100 disabled:opacity-40"
+            onClick={handleCloseLoop}
+            disabled={!selectedRoom || (selectedRoom.roomShell?.points?.length ?? 0) < 2}
+          >
+            Finish
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-amber-600/60 bg-amber-600/20 px-3 py-3 font-semibold text-amber-100 disabled:opacity-40"
+            onClick={removeLastPoint}
+            disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-rose-600/60 bg-rose-600/20 px-3 py-3 font-semibold text-rose-100 disabled:opacity-40"
+            onClick={handleClear}
+            disabled={!selectedRoom}
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            className={`rounded-lg border px-3 py-3 font-semibold ${
+              isDoorPlacementMode
+                ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                : 'border-slate-700 bg-slate-800 text-slate-100'
+            } disabled:opacity-40`}
+            onClick={handleAddDoor}
+            disabled={!selectedRoom || !selectedRoom.roomShell?.points || selectedRoom.roomShell.points.length < 3}
+          >
+            {isDoorPlacementMode ? 'Cancel Door' : 'Add Door'}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-3 font-semibold text-slate-100"
+            onClick={() => {
+              setActiveMobileSheet(null);
+              setShowFurnitureLibrary(true);
+              setSelectedFurnitureId(null);
+            }}
+            disabled={!selectedRoom}
+          >
+            Furniture
+          </button>
+        </div>
+      </CanvasMobileSheet>
+
+      <CanvasMobileSheet
+        open={activeMobileSheet === 'zoom'}
+        title="Zoom and Snap"
+        onClose={() => setActiveMobileSheet(null)}
+      >
+        <div className="space-y-4 text-sm text-slate-200">
+          <div className="grid grid-cols-2 gap-2">
+            <button className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold" onClick={() => setZoom((z) => Math.min(5, z + 0.1))}>Zoom In</button>
+            <button className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold" onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}>Zoom Out</button>
+            <button className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 font-semibold" onClick={() => setZoom(1)}>Reset</button>
+            <button className="rounded-lg border border-aqua-600/60 bg-aqua-600/20 px-4 py-3 font-semibold text-aqua-100" onClick={() => handleAutoZoom(selectedRoom)}>Auto Fit</button>
+          </div>
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Snap Grid</div>
+            <div className="grid grid-cols-4 gap-2">
+              {[0, 50, 100, 200].map((value) => (
+                <button
+                  key={value}
+                  onClick={() => setSnapGridMm(value)}
+                  className={`rounded-lg border px-2 py-2 text-xs font-semibold ${
+                    snapGridMm === value
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                      : 'border-slate-700 bg-slate-800 text-slate-200'
+                  }`}
+                >
+                  {value === 0 ? 'Off' : `${value}mm`}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                angleSnapEnabled ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100' : 'border-slate-700 bg-slate-800 text-slate-200'
+              }`}
+              onClick={() => setAngleSnapEnabled(true)}
+            >
+              45 deg
+            </button>
+            <button
+              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+                !angleSnapEnabled ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100' : 'border-slate-700 bg-slate-800 text-slate-200'
+              }`}
+              onClick={() => setAngleSnapEnabled(false)}
+            >
+              Free angle
+            </button>
+          </div>
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
+            Cursor: X {cursorPos ? (cursorPos.x / (displayUnits === 'imperial' ? 304.8 : 1000)).toFixed(2) : '--'} {displayUnits === 'imperial' ? 'ft' : 'm'}, Y {cursorPos ? (cursorPos.y / (displayUnits === 'imperial' ? 304.8 : 1000)).toFixed(2) : '--'} {displayUnits === 'imperial' ? 'ft' : 'm'}
+          </div>
+        </div>
+      </CanvasMobileSheet>
 
       {/* Furniture Library Modal - outside canvas wrapper to prevent scroll interference */}
       {showFurnitureLibrary && (
