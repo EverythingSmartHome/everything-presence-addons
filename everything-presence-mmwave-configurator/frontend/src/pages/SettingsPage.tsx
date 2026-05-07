@@ -39,10 +39,17 @@ interface SettingsPageProps {
   onRoomUpdated?: (room: RoomConfig) => void;
 }
 
-type SettingsTab = 'general' | 'firmware';
+type SettingsTab = 'rooms' | 'backups' | 'assets' | 'firmware';
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: 'rooms', label: 'Rooms' },
+  { id: 'backups', label: 'Backups' },
+  { id: 'assets', label: 'Assets' },
+  { id: 'firmware', label: 'Firmware' },
+];
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDeleted, onRoomUpdated }) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('rooms');
   const [rooms, setRooms] = useState<RoomConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -777,26 +784,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
 
         {/* Tab Navigation */}
         <div className="mb-6 flex gap-2 overflow-x-auto border-b border-slate-700/50 pb-2">
-          <button
-            onClick={() => setActiveTab('general')}
-            className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'general'
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-800/50 text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            General
-          </button>
-          <button
-            onClick={() => setActiveTab('firmware')}
-            className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'firmware'
-                ? 'bg-cyan-600 text-white'
-                : 'bg-slate-800/50 text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            Firmware Updates
-          </button>
+          {SETTINGS_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                activeTab === tab.id
+                  ? 'bg-cyan-600 text-white'
+                  : 'bg-slate-800/50 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* Error Toast */}
@@ -823,8 +824,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
           </div>
         ) : (
           <>
-            {/* General Tab */}
-            {activeTab === 'general' && (
+            {/* Rooms Tab */}
+            {activeTab === 'rooms' && (
               <div className="space-y-6">
                 {/* Room Management Section */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
@@ -990,7 +991,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
               </div>
             )}
               </div>
+              </div>
+            )}
 
+            {/* Backups Tab */}
+            {activeTab === 'backups' && (
+              <div className="space-y-6">
                 {/* Zone Backups Section */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1154,7 +1160,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                 )}
               </div>
             </div>
+              </div>
+            )}
 
+            {/* Assets Tab */}
+            {activeTab === 'assets' && (
+              <div className="space-y-6">
                 {/* Custom Floor Materials Section */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
