@@ -8,6 +8,12 @@ import { FurnitureEditor } from '../components/FurnitureEditor';
 import { DoorEditor } from '../components/DoorEditor';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import { EntityDiscovery } from '../components/EntityDiscovery';
+import {
+  CanvasBottomToolbar,
+  CanvasMobileSheet,
+  CanvasToolbarButton,
+  CanvasTopBar,
+} from '../components/CanvasLayout';
 import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
@@ -15,6 +21,7 @@ import { fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
+import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
 
@@ -61,6 +68,8 @@ type StepKey =
   | 'placement'
   | 'zones'
   | 'finish';
+
+type MobileCanvasSheet = 'tools' | 'zoom' | 'display' | 'zones' | 'device' | null;
 
 export const WizardPage: React.FC<WizardPageProps> = ({
   devices,
@@ -136,6 +145,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [rotationSuggestion, setRotationSuggestion] = useState<{ suggestedAngle: number; targetAxis: number } | null>(null);
   const [applyingInstallationAngle, setApplyingInstallationAngle] = useState(false);
   const [rotationSuggestionError, setRotationSuggestionError] = useState<string | null>(null);
+  const [activeMobileCanvasSheet, setActiveMobileCanvasSheet] = useState<MobileCanvasSheet>(null);
   const lastRotationSuggestionRef = useRef<number | null>(null);
 
   // Track which rooms have had zones loaded to prevent redundant fetches
@@ -210,6 +220,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Device mappings context - used for entity resolution and validation
   const { hasValidMappings, getEntityId, getMapping } = useDeviceMappings();
+  const isMobileCanvas = useIsMobileCanvas();
 
   // Pre-load device mapping into cache when device is selected
   // This ensures getEntityId works for installation angle resolution
@@ -511,6 +522,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       await updateRoom(selectedRoom.id, updatedRoom);
       setSelectedFurnitureId(newFurniture.id);
       setShowFurnitureLibrary(false);
+      setActiveMobileCanvasSheet(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add furniture');
       onRoomUpdate?.(selectedRoom);
@@ -1295,6 +1307,12 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
   }, [currentStep]);
 
+  useEffect(() => {
+    if (!isMobileCanvas) {
+      setActiveMobileCanvasSheet(null);
+    }
+  }, [isMobileCanvas]);
+
   // If canvas step, render full-page canvas mode
   if (isCanvasStep) {
     const getStepInfo = () => {
@@ -1313,6 +1331,19 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     const stepInfo = getStepInfo();
+    const openMobileSheet = (sheet: MobileCanvasSheet) => {
+      setActiveMobileCanvasSheet((current) => current === sheet ? null : sheet);
+    };
+    const resetCanvasView = () => {
+      setCanvasZoom(1);
+      setCanvasPan({ x: 0, y: 0 });
+    };
+    const showDisplaySheet = currentStep === 'doors' || currentStep === 'furniture' || currentStep === 'placement' || currentStep === 'zones';
+    const showToolsSheet = currentStep === 'outline' || currentStep === 'doors' || currentStep === 'furniture';
+    const showDeviceSheet = currentStep === 'placement';
+    const showZonesSheet = currentStep === 'zones';
+    const mobileZonesBadge = polygonModeStatus.enabled ? polygonZones.length : `${enabledZones.length}/${displayZones.length}`;
+    const currentRoomName = selectedRoom?.name ?? 'Setup Wizard';
 
     return (
       <div className="fixed inset-0 bg-slate-950 overflow-hidden">
@@ -1388,8 +1419,44 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           </div>
         )}
 
+        <div className="md:hidden">
+          <CanvasTopBar
+            left={
+              <button
+                type="button"
+                onClick={prevStep}
+                disabled={stepIndex === 0}
+                className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100 disabled:opacity-40"
+              >
+                Back
+              </button>
+            }
+            title={stepInfo.title}
+            subtitle={`${currentRoomName} · Step ${stepIndex + 1} of ${steps.length}`}
+            right={
+              canNext ? (
+                <button
+                  type="button"
+                  onClick={nextStep}
+                  className="min-h-[40px] rounded-lg bg-aqua-600 px-4 text-sm font-bold text-white"
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowWelcomePopup(true)}
+                  className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
+                >
+                  Info
+                </button>
+              )
+            }
+          />
+        </div>
+
         {/* Floating Navigation Controls */}
-        <div className="absolute top-6 left-6 z-40 flex items-center gap-3">
+        <div className="absolute top-6 left-6 z-40 hidden items-center gap-3 md:flex">
           <button
             onClick={prevStep}
             disabled={stepIndex === 0}
@@ -1403,7 +1470,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         </div>
 
         {/* Floating Exit & Restart Buttons (top right) */}
-        <div className="absolute top-6 right-6 z-40 flex items-center gap-3">
+        <div className="absolute top-6 right-6 z-40 hidden items-center gap-3 md:flex">
           {onBack && (
             <button
               onClick={onBack}
@@ -1463,6 +1530,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onZoomChange={setCanvasZoom}
+              touchPanEnabled={!isDrawingWall}
               displayUnits={units}
             />
           )}
@@ -1478,6 +1547,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onZoomChange={setCanvasZoom}
+              touchPanEnabled={!isDoorPlacementMode}
               onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
               doors={selectedRoom?.doors ?? []}
@@ -1533,6 +1604,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onZoomChange={setCanvasZoom}
+              touchPanEnabled
               onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
               doors={selectedRoom?.doors ?? []}
@@ -1601,6 +1674,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               zoom={canvasZoom}
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
+              onZoomChange={setCanvasZoom}
+              touchPanEnabled
               displayUnits={units}
               furniture={selectedRoom?.furniture ?? []}
               showFurniture={true}
@@ -1685,6 +1760,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 zoom={canvasZoom}
                 panOffsetMm={canvasPan}
                 onPanChange={setCanvasPan}
+                onZoomChange={setCanvasZoom}
+                touchPanEnabled={!isCanvasDragging}
                 onCanvasMove={(pt) => setCursorPos(pt)}
                 clipRadarToWalls={clipRadarToWalls}
                 furniture={selectedRoom?.furniture}
@@ -1717,7 +1794,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           )}
 
           {/* Floating Zoom Controls (bottom right) */}
-          <div className="absolute bottom-6 right-6 z-40 flex flex-col gap-2">
+          <div className="absolute bottom-6 right-6 z-40 hidden flex-col gap-2 md:flex">
             <button
               onClick={() => setCanvasZoom((z) => Math.min(5, z + 0.2))}
               className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
@@ -1750,7 +1827,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           </div>
 
           {/* Floating Snap Controls (bottom left) */}
-          <div className="absolute bottom-6 left-6 z-40 flex flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl">
+          <div className="absolute bottom-6 left-6 z-40 hidden flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl md:flex">
             <span className="text-xs text-slate-400 font-medium">Snap Grid</span>
             <div className="flex flex-wrap gap-2">
               {[0, 50, 100, 200].map((v) => (
@@ -1777,7 +1854,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Wall Drawing Controls (outline step only) */}
           {currentStep === 'outline' && (
-            <div className="absolute top-24 left-6 z-40 flex flex-col gap-2">
+            <div className="absolute top-24 left-6 z-40 hidden flex-col gap-2 md:flex">
               <button
                 className={`rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition-all active:scale-95 ${
                   isDrawingWall
@@ -1814,7 +1891,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Door Controls (doors step only) */}
           {currentStep === 'doors' && (
-            <div className="absolute top-24 left-6 z-40 flex flex-col gap-2">
+            <div className="absolute top-24 left-6 z-40 hidden flex-col gap-2 md:flex">
               <button
                 className={`rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition-all active:scale-95 ${
                   isDoorPlacementMode
@@ -1869,7 +1946,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Furniture Controls (furniture step only) */}
           {currentStep === 'furniture' && (
-            <div className="absolute top-24 left-6 z-40 flex flex-col gap-2">
+            <div className="absolute top-24 left-6 z-40 hidden flex-col gap-2 md:flex">
               <button
                 className={`rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition-all active:scale-95 ${
                   showFurnitureLibrary
@@ -1922,7 +1999,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Zone List Toggle Button (zones step only) */}
           {currentStep === 'zones' && (
-            <div className="absolute top-24 left-6 z-40 space-y-3">
+            <div className="absolute top-24 left-6 z-40 hidden space-y-3 md:block">
               <button
                 className={`rounded-xl border backdrop-blur px-6 py-3 text-sm font-semibold shadow-lg transition-all hover:shadow-xl active:scale-95 ${
                   polygonModeStatus.enabled
@@ -2002,7 +2079,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Rotation Control (placement step only) */}
           {currentStep === 'placement' && selectedRoom?.devicePlacement && (
-            <div className="absolute top-24 left-6 z-40 space-y-3">
+            <div className="absolute top-24 left-6 z-40 hidden space-y-3 md:block">
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-4 shadow-lg">
                 <label className="flex items-center gap-3 text-xs text-slate-200">
                   <span className="font-semibold text-slate-300">Rotation:</span>
@@ -2046,7 +2123,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           {canNext && (
             <button
               onClick={nextStep}
-              className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 group rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-8 py-3 text-sm font-bold text-white shadow-xl shadow-aqua-500/30 transition-all hover:shadow-2xl hover:shadow-aqua-500/40 active:scale-95"
+              className="absolute bottom-6 left-1/2 z-40 hidden -translate-x-1/2 rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-8 py-3 text-sm font-bold text-white shadow-xl shadow-aqua-500/30 transition-all hover:shadow-2xl hover:shadow-aqua-500/40 active:scale-95 md:block"
             >
               <span className="flex items-center gap-2">
                 Next <span className="inline-block transition-transform group-hover:translate-x-1">→</span>
@@ -2054,9 +2131,398 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             </button>
           )}
 
+          <div className="md:hidden">
+            <CanvasBottomToolbar>
+              <CanvasToolbarButton
+                label="Info"
+                icon="i"
+                active={showWelcomePopup}
+                onClick={() => setShowWelcomePopup(true)}
+              />
+              {showToolsSheet && (
+                <CanvasToolbarButton
+                  label="Tools"
+                  icon="T"
+                  active={activeMobileCanvasSheet === 'tools'}
+                  onClick={() => openMobileSheet('tools')}
+                />
+              )}
+              {showDeviceSheet && (
+                <CanvasToolbarButton
+                  label="Device"
+                  icon="D"
+                  active={activeMobileCanvasSheet === 'device'}
+                  onClick={() => openMobileSheet('device')}
+                />
+              )}
+              {showZonesSheet && (
+                <CanvasToolbarButton
+                  label="Zones"
+                  icon="Z"
+                  badge={mobileZonesBadge}
+                  active={activeMobileCanvasSheet === 'zones'}
+                  onClick={() => openMobileSheet('zones')}
+                />
+              )}
+              {showDisplaySheet && (
+                <CanvasToolbarButton
+                  label="Display"
+                  icon="V"
+                  active={activeMobileCanvasSheet === 'display'}
+                  onClick={() => openMobileSheet('display')}
+                />
+              )}
+              <CanvasToolbarButton
+                label="Zoom"
+                icon="+"
+                active={activeMobileCanvasSheet === 'zoom'}
+                onClick={() => openMobileSheet('zoom')}
+              />
+            </CanvasBottomToolbar>
+
+            <CanvasMobileSheet
+              open={activeMobileCanvasSheet === 'tools'}
+              title={`${stepInfo.title} Tools`}
+              onClose={() => setActiveMobileCanvasSheet(null)}
+            >
+              {currentStep === 'outline' && (
+                <div className="space-y-3">
+                  <button
+                    className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold ${
+                      isDrawingWall
+                        ? 'border-rose-600/50 bg-rose-600/20 text-rose-100'
+                        : 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100'
+                    }`}
+                    onClick={() => setIsDrawingWall((prev) => !prev)}
+                  >
+                    {isDrawingWall ? 'Stop Drawing' : 'Add Wall'}
+                  </button>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      className="rounded-lg border border-emerald-600/50 bg-emerald-600/20 px-3 py-3 text-sm font-semibold text-emerald-100 disabled:opacity-40"
+                      onClick={handleCloseLoop}
+                      disabled={!selectedRoom || (selectedRoom.roomShell?.points?.length ?? 0) < 2}
+                    >
+                      Finish
+                    </button>
+                    <button
+                      className="rounded-lg border border-amber-600/50 bg-amber-600/20 px-3 py-3 text-sm font-semibold text-amber-100 disabled:opacity-40"
+                      onClick={removeLastPoint}
+                      disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+                    >
+                      Undo
+                    </button>
+                    <button
+                      className="rounded-lg border border-rose-600/50 bg-rose-600/20 px-3 py-3 text-sm font-semibold text-rose-100 disabled:opacity-40"
+                      onClick={handleClear}
+                      disabled={!selectedRoom}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-xs text-slate-300">
+                    Points: {selectedRoom?.roomShell?.points?.length ?? 0}
+                  </div>
+                </div>
+              )}
+              {currentStep === 'doors' && (
+                <div className="space-y-3">
+                  <button
+                    className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold ${
+                      isDoorPlacementMode
+                        ? 'border-rose-600/50 bg-rose-600/20 text-rose-100'
+                        : 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100'
+                    }`}
+                    onClick={handleAddDoor}
+                    disabled={!selectedRoom || !selectedRoom.roomShell?.points || selectedRoom.roomShell.points.length < 3}
+                  >
+                    {isDoorPlacementMode ? 'Cancel Door Placement' : 'Add Door'}
+                  </button>
+                  <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-xs text-slate-300">
+                    {selectedRoom?.doors?.length ?? 0} door{(selectedRoom?.doors?.length ?? 0) === 1 ? '' : 's'} placed
+                  </div>
+                </div>
+              )}
+              {currentStep === 'furniture' && (
+                <div className="space-y-3">
+                  <button
+                    className="w-full rounded-lg border border-aqua-600/50 bg-aqua-600/20 px-4 py-3 text-sm font-semibold text-aqua-100 disabled:opacity-40"
+                    onClick={() => {
+                      setShowFurnitureLibrary((v) => !v);
+                      setSelectedFurnitureId(null);
+                    }}
+                    disabled={!selectedRoom}
+                  >
+                    {showFurnitureLibrary ? 'Close Furniture Library' : 'Add Furniture'}
+                  </button>
+                  <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-xs text-slate-300">
+                    {selectedRoom?.furniture?.length ?? 0} item{(selectedRoom?.furniture?.length ?? 0) === 1 ? '' : 's'} placed
+                  </div>
+                  {selectedFurniture && (
+                    <div className="space-y-3 rounded-lg border border-purple-600/40 bg-purple-600/10 p-3 text-sm text-slate-200">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-white">Selected furniture</div>
+                          <div className="text-xs text-slate-400">{selectedFurniture.typeId}</div>
+                        </div>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100"
+                          onClick={() => setSelectedFurnitureId(null)}
+                        >
+                          Deselect
+                        </button>
+                      </div>
+                      <label className="block">
+                        <span className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          <span>Rotation</span>
+                          <span className="font-mono text-aqua-300">{Math.round(selectedFurniture.rotationDeg ?? 0)} deg</span>
+                        </span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="359"
+                          value={selectedFurniture.rotationDeg ?? 0}
+                          onChange={(e) => handleFurnitureChange({ ...selectedFurniture, rotationDeg: Number(e.target.value) })}
+                          className="w-full"
+                        />
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="block text-xs font-semibold text-slate-400">
+                          Width (m)
+                          <input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={(selectedFurniture.width / 1000).toFixed(2)}
+                            onChange={(e) => {
+                              const width = Number(e.target.value) * 1000;
+                              if (Number.isFinite(width) && width > 0) {
+                                handleFurnitureChange({ ...selectedFurniture, width });
+                              }
+                            }}
+                            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-100"
+                          />
+                        </label>
+                        <label className="block text-xs font-semibold text-slate-400">
+                          Depth (m)
+                          <input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={(selectedFurniture.depth / 1000).toFixed(2)}
+                            onChange={(e) => {
+                              const depth = Number(e.target.value) * 1000;
+                              if (Number.isFinite(depth) && depth > 0) {
+                                handleFurnitureChange({ ...selectedFurniture, depth });
+                              }
+                            }}
+                            className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-100"
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className="w-full rounded-lg border border-rose-600/60 bg-rose-600/20 px-3 py-3 font-semibold text-rose-100"
+                        onClick={handleFurnitureDelete}
+                      >
+                        Delete Furniture
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CanvasMobileSheet>
+
+            <CanvasMobileSheet
+              open={activeMobileCanvasSheet === 'device'}
+              title="Device Placement"
+              onClose={() => setActiveMobileCanvasSheet(null)}
+            >
+              {selectedRoom?.devicePlacement && (
+                <div className="space-y-4">
+                  <label className="block text-sm text-slate-200">
+                    <span className="mb-2 flex items-center justify-between">
+                      <span className="font-semibold">Rotation</span>
+                      <span className="font-mono text-aqua-300">{selectedRoom.devicePlacement.rotationDeg ?? 0} deg</span>
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="359"
+                      value={selectedRoom.devicePlacement.rotationDeg ?? 0}
+                      onChange={(e) => {
+                        handleDevicePlacementChange({
+                          ...selectedRoom.devicePlacement!,
+                          rotationDeg: parseInt(e.target.value),
+                        });
+                      }}
+                      onTouchEnd={(e) => {
+                        handleRotationSuggestion(Number((e.currentTarget as HTMLInputElement).value) || 0);
+                      }}
+                      className="w-full"
+                    />
+                  </label>
+                  <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={clipRadarToWalls}
+                      onChange={(e) => setClipRadarToWalls(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-700 bg-slate-800 text-aqua-500"
+                    />
+                    <span className="font-semibold">Clip radar to walls</span>
+                  </label>
+                </div>
+              )}
+            </CanvasMobileSheet>
+
+            <CanvasMobileSheet
+              open={activeMobileCanvasSheet === 'display'}
+              title="Display"
+              onClose={() => setActiveMobileCanvasSheet(null)}
+            >
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={showTargets}
+                    onChange={(e) => setShowTargets(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-800 text-blue-500"
+                  />
+                  <span className="font-semibold">Live Tracking</span>
+                  {!liveState?.deviceId && <span className="ml-auto text-xs text-slate-500">No device</span>}
+                </label>
+                <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={showDeviceIcon}
+                    onChange={(e) => setShowDeviceIcon(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-800 text-emerald-500"
+                  />
+                  <span className="font-semibold">Device Icon</span>
+                </label>
+                <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={clipRadarToWalls}
+                    onChange={(e) => setClipRadarToWalls(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-800 text-aqua-500"
+                  />
+                  <span className="font-semibold">Clip radar to walls</span>
+                </label>
+              </div>
+            </CanvasMobileSheet>
+
+            <CanvasMobileSheet
+              open={activeMobileCanvasSheet === 'zoom'}
+              title="Zoom And Snap"
+              onClose={() => setActiveMobileCanvasSheet(null)}
+            >
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-2">
+                  <button className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-3 text-sm font-semibold" onClick={() => setCanvasZoom((z) => Math.min(5, z + 0.2))}>Zoom In</button>
+                  <button className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-3 text-sm font-semibold" onClick={() => setCanvasZoom((z) => Math.max(0.1, z - 0.2))}>Zoom Out</button>
+                  <button className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-3 text-sm font-semibold" onClick={resetCanvasView}>Reset</button>
+                </div>
+                {currentStep === 'zones' && (
+                  <button className="w-full rounded-lg border border-aqua-600/50 bg-aqua-600/20 px-3 py-3 text-sm font-semibold text-aqua-100" onClick={handleAutoZoom}>Auto Zoom</button>
+                )}
+                <div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Snap Grid</div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[0, 50, 100, 200].map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => setCanvasSnap(v)}
+                        className={`rounded-lg border px-2 py-3 text-sm font-semibold ${
+                          canvasSnap === v
+                            ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                            : 'border-slate-700 bg-slate-800 text-slate-200'
+                        }`}
+                      >
+                        {v === 0 ? 'Off' : `${v}mm`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CanvasMobileSheet>
+
+            <CanvasMobileSheet
+              open={activeMobileCanvasSheet === 'zones'}
+              title={polygonModeStatus.enabled ? 'Polygon Zones' : 'Zone Slots'}
+              description={polygonModeStatus.enabled ? `${polygonZones.length} polygon zones configured` : `${enabledZones.length} of ${displayZones.length} slots active`}
+              onClose={() => setActiveMobileCanvasSheet(null)}
+            >
+              <div className="space-y-3">
+                {showPolygonPrompt && !polygonModeStatus.enabled && (
+                  <div className="rounded-lg border border-violet-500/50 bg-violet-500/15 p-3">
+                    <div className="mb-2 text-sm font-semibold text-violet-100">Enable Polygon Zones?</div>
+                    <div className="flex gap-2">
+                      <button className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50" onClick={handleEnablePolygonMode} disabled={togglingPolygonMode}>
+                        {togglingPolygonMode ? 'Enabling...' : 'Enable'}
+                      </button>
+                      <button className="rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200" onClick={handleKeepRectangularZones}>
+                        Keep Rectangular
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {polygonModeStatus.enabled ? (
+                  polygonZones.length === 0 ? (
+                    <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4 text-sm text-slate-400">No polygon zones configured.</div>
+                  ) : (
+                    polygonZones.map((zone) => (
+                      <button
+                        key={zone.id}
+                        type="button"
+                        onClick={() => setSelectedZoneId(zone.id)}
+                        className={`w-full rounded-lg border p-3 text-left text-sm ${
+                          selectedZoneId === zone.id ? 'border-violet-500 bg-violet-500/20 text-white' : 'border-slate-700 bg-slate-800/50 text-slate-200'
+                        }`}
+                      >
+                        <span className="font-bold">{zone.id}</span>
+                        <span className="ml-2 text-xs text-slate-400">{zone.vertices.length} vertices</span>
+                      </button>
+                    ))
+                  )
+                ) : (
+                  displayZones.map((zone) => (
+                    <div key={zone.id} className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-bold text-white">{zone.id}</div>
+                          <div className="text-xs text-slate-400">{zone.type}{zone.enabled ? ' enabled' : ' disabled'}</div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (!zone.enabled && zone.type === 'entry' && entryZonesAvailable === false) return;
+                            if (zone.enabled) {
+                              disableZoneSlot(zone.id);
+                            } else {
+                              enableZoneSlot(zone.id);
+                            }
+                          }}
+                          disabled={!zone.enabled && zone.type === 'entry' && entryZonesAvailable === false}
+                          className={`rounded-lg px-3 py-2 text-xs font-semibold ${
+                            zone.enabled
+                              ? 'border border-slate-600 bg-slate-700 text-slate-200'
+                              : 'border border-emerald-600 bg-emerald-600/20 text-emerald-100 disabled:opacity-50'
+                          }`}
+                        >
+                          {zone.enabled ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CanvasMobileSheet>
+          </div>
+
           {/* Floating Zone List Panel (zones step only - slides in from right) */}
           {currentStep === 'zones' && showZoneList && (
-            <div className="absolute top-0 right-0 bottom-0 z-50 w-96 border-l border-slate-700 bg-slate-900/95 backdrop-blur shadow-2xl animate-in slide-in-from-right-4 fade-in overflow-y-auto">
+            <div className="absolute top-0 right-0 bottom-0 z-50 hidden w-96 overflow-y-auto border-l border-slate-700 bg-slate-900/95 shadow-2xl backdrop-blur animate-in slide-in-from-right-4 fade-in md:block">
               <div className="sticky top-0 z-10 border-b border-slate-700 bg-slate-900/90 backdrop-blur p-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold text-white">
@@ -2207,12 +2673,14 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Furniture Editor Panel (furniture step only) */}
           {currentStep === 'furniture' && selectedFurniture && (
-            <FurnitureEditor
-              furniture={selectedFurniture}
-              onChange={handleFurnitureChange}
-              onDelete={() => handleFurnitureDelete(selectedFurniture.id)}
-              onClose={() => setSelectedFurnitureId(null)}
-            />
+            <div className="hidden md:block">
+              <FurnitureEditor
+                furniture={selectedFurniture}
+                onChange={handleFurnitureChange}
+                onDelete={() => handleFurnitureDelete(selectedFurniture.id)}
+                onClose={() => setSelectedFurnitureId(null)}
+              />
+            </div>
           )}
         </div>
       </div>

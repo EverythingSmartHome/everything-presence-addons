@@ -1537,6 +1537,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
+                    if (e.cancelable) e.preventDefault();
                     capturePointer(e);
                     const worldPos = toWorldFromEvent(e as any);
                     if (!worldPos) return;
@@ -1545,6 +1546,9 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     onDragStateChange?.(true);
                     onFurnitureSelect?.(item.id);
                   }}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
                 />
               </g>
 
@@ -1575,6 +1579,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                         style={{ transformOrigin: '0 0', cursor: handle.cursor }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
                           capturePointer(e);
                           const worldPos = toWorldFromEvent(e as any);
                           if (!worldPos) return;
@@ -1588,6 +1593,9 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                           });
                           onDragStateChange?.(true);
                         }}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp}
+                        onPointerCancel={handlePointerUp}
                       />
                     ))}
                     {/* Rotation handle (at top center) */}
@@ -1602,17 +1610,15 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                         strokeWidth={2}
                         strokeDasharray="3 3"
                       />
-                      {/* Rotation handle circle */}
                       <circle
                         cx={0}
                         cy={-canvasHeight / 2 - 20}
-                        r={10}
-                        fill="#a855f7"
-                        stroke="#ffffff"
-                        strokeWidth={1.5}
-                        style={{ cursor: 'grab' }}
+                        r={24}
+                        fill="transparent"
+                        style={{ cursor: 'grab', pointerEvents: 'all' }}
                         onPointerDown={(e) => {
                           e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
                           capturePointer(e);
                           const worldPos = toWorldFromEvent(e as any);
                           if (!worldPos) return;
@@ -1625,6 +1631,37 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                           });
                           onDragStateChange?.(true);
                         }}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp}
+                        onPointerCancel={handlePointerUp}
+                      />
+                      {/* Rotation handle circle */}
+                      <circle
+                        cx={0}
+                        cy={-canvasHeight / 2 - 20}
+                        r={10}
+                        fill="#a855f7"
+                        stroke="#ffffff"
+                        strokeWidth={1.5}
+                        style={{ cursor: 'grab', pointerEvents: 'all' }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          if (e.cancelable) e.preventDefault();
+                          capturePointer(e);
+                          const worldPos = toWorldFromEvent(e as any);
+                          if (!worldPos) return;
+                          suppressClickRef.current = true;
+                          setFurnitureRotate({
+                            id: item.id,
+                            start: worldPos,
+                            centerPos: { x: item.x, y: item.y },
+                            baseRotation: item.rotationDeg,
+                          });
+                          onDragStateChange?.(true);
+                        }}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp}
+                        onPointerCancel={handlePointerUp}
                       />
                     </g>
                   </>
