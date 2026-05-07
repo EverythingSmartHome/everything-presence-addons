@@ -761,26 +761,25 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
 
   return (
     <div className="min-h-screen bg-slate-950">
-      <div className="mx-auto max-w-4xl px-6 py-6">
+      <div className="mx-auto max-w-4xl px-4 py-4 sm:px-6 sm:py-6">
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
+        <div className="mb-5 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
           {onBack && (
             <button
               onClick={onBack}
-              className="group flex items-center gap-2 rounded-lg bg-slate-800/50 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800"
+              className="group flex w-fit items-center gap-2 rounded-lg bg-slate-800/50 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-800 sm:px-4"
             >
               <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span> Back
             </button>
           )}
           <h1 className="text-2xl font-bold text-white">Settings</h1>
-          <div className="w-20" /> {/* Spacer for alignment */}
         </div>
 
         {/* Tab Navigation */}
-        <div className="mb-6 flex gap-2 border-b border-slate-700/50 pb-2">
+        <div className="mb-6 flex gap-2 overflow-x-auto border-b border-slate-700/50 pb-2">
           <button
             onClick={() => setActiveTab('general')}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
               activeTab === 'general'
                 ? 'bg-cyan-600 text-white'
                 : 'bg-slate-800/50 text-slate-300 hover:bg-slate-800 hover:text-white'
@@ -790,7 +789,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
           </button>
           <button
             onClick={() => setActiveTab('firmware')}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
               activeTab === 'firmware'
                 ? 'bg-cyan-600 text-white'
                 : 'bg-slate-800/50 text-slate-300 hover:bg-slate-800 hover:text-white'
@@ -828,21 +827,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
             {activeTab === 'general' && (
               <div className="space-y-6">
                 {/* Room Management Section */}
-            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
-              <div className="mb-4 flex items-center justify-between">
+            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-lg font-semibold text-white">Room Management</h2>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:flex">
                   <button
                     onClick={handleBackupAllRooms}
                     disabled={rooms.length === 0}
-                    className="rounded-lg border border-purple-600/50 bg-purple-600/10 px-4 py-2 text-sm font-semibold text-purple-100 transition-all hover:bg-purple-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="min-w-0 rounded-lg border border-purple-600/50 bg-purple-600/10 px-4 py-2 text-sm font-semibold text-purple-100 transition-all hover:bg-purple-600/20 disabled:cursor-not-allowed disabled:opacity-50"
                     title="Export all rooms to a single backup file"
                   >
                     💾 Backup All
                   </button>
                   <button
                     onClick={handleImportRoom}
-                    className="rounded-lg border border-blue-600/50 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-100 transition-all hover:bg-blue-600/20"
+                    className="min-w-0 rounded-lg border border-blue-600/50 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-100 transition-all hover:bg-blue-600/20"
                     title="Import room configuration from JSON file"
                   >
                     📤 Import
@@ -850,7 +849,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                   <button
                     onClick={handleClearDefaultRoom}
                     disabled={!defaultRoomId || clearingDefaultRoom}
-                    className="rounded-lg border border-amber-600/50 bg-amber-600/10 px-4 py-2 text-sm font-semibold text-amber-100 transition-all hover:bg-amber-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="min-w-0 rounded-lg border border-amber-600/50 bg-amber-600/10 px-4 py-2 text-sm font-semibold text-amber-100 transition-all hover:bg-amber-600/20 disabled:cursor-not-allowed disabled:opacity-50"
                     title="Clear the default room selection"
                   >
                     {clearingDefaultRoom ? 'Clearing...' : 'Clear Default'}
@@ -867,12 +866,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                 {rooms.map((room) => (
                   <div
                     key={room.id}
-                    className="flex items-center justify-between rounded-lg border border-slate-700/50 bg-slate-800/50 p-4"
+                    className="flex flex-col gap-4 rounded-lg border border-slate-700/50 bg-slate-800/50 p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 font-semibold text-white">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 font-semibold text-white">
                         {renamingRoomId === room.id ? (
-                          <div className="flex items-center gap-2">
+                          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
                             <input
                               type="text"
                               value={renameValue}
@@ -885,7 +884,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                                 }
                               }}
                               autoFocus
-                              className="rounded border border-cyan-500 bg-slate-700 px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                              className="col-span-2 min-w-0 rounded border border-cyan-500 bg-slate-700 px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cyan-500 sm:col-span-1"
                             />
                             <button
                               onClick={() => handleSaveRename(room.id)}
@@ -902,7 +901,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                           </div>
                         ) : (
                           <>
-                            <span>{room.name}</span>
+                            <span className="min-w-0 truncate">{room.name}</span>
                             <button
                               onClick={() => handleStartRename(room)}
                               className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white"
@@ -939,11 +938,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                         </div>
                       ) : null}
                     </div>
-                    <div className="flex flex-wrap gap-2 justify-end">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end">
                       <button
                         onClick={() => handleSetDefaultRoom(room)}
                         disabled={defaultRoomId === room.id || updatingDefaultRoomId === room.id}
-                        className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="min-w-0 rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-3 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4"
                         title="Set this room as the default for the live dashboard"
                       >
                         {defaultRoomId === room.id
@@ -955,7 +954,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       {room.deviceId && room.profileId && (
                         <button
                           onClick={() => handleStartSync(room)}
-                          className="rounded-lg border border-cyan-600/50 bg-cyan-600/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition-all hover:bg-cyan-600/20"
+                          className="min-w-0 rounded-lg border border-cyan-600/50 bg-cyan-600/10 px-3 py-2 text-sm font-semibold text-cyan-100 transition-all hover:bg-cyan-600/20 sm:px-4"
                           title="Re-discover and sync entity mappings"
                         >
                           🔄 Re-sync Entities
@@ -965,7 +964,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                         <button
                           onClick={() => handleUnlinkDevice(room)}
                           disabled={unlinkingDeviceRoomId === room.id}
-                          className="rounded-lg border border-amber-600/50 bg-amber-600/10 px-4 py-2 text-sm font-semibold text-amber-100 transition-all hover:bg-amber-600/20 disabled:opacity-50"
+                          className="min-w-0 rounded-lg border border-amber-600/50 bg-amber-600/10 px-3 py-2 text-sm font-semibold text-amber-100 transition-all hover:bg-amber-600/20 disabled:opacity-50 sm:px-4"
                           title="Remove device from room while preserving room geometry and furniture"
                         >
                           {unlinkingDeviceRoomId === room.id ? 'Unlinking...' : '🔗 Unlink Device'}
@@ -973,7 +972,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       )}
                       <button
                         onClick={() => handleExportRoom(room)}
-                        className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20"
+                        className="min-w-0 rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-3 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20 sm:px-4"
                         title="Export room configuration to JSON file"
                       >
                         📥 Export
@@ -981,7 +980,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       <button
                         onClick={() => handleDeleteRoom(room.id, room.name)}
                         disabled={deletingRoomId === room.id}
-                        className="rounded-lg border border-rose-600 bg-rose-600/10 px-4 py-2 text-sm font-semibold text-rose-100 transition-all hover:bg-rose-600/20 disabled:opacity-50"
+                        className="min-w-0 rounded-lg border border-rose-600 bg-rose-600/10 px-3 py-2 text-sm font-semibold text-rose-100 transition-all hover:bg-rose-600/20 disabled:opacity-50 sm:px-4"
                       >
                         {deletingRoomId === room.id ? 'Deleting...' : 'Delete'}
                       </button>
@@ -993,19 +992,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
               </div>
 
                 {/* Zone Backups Section */}
-            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
-              <div className="mb-4 flex items-center justify-between">
-                <div>
+            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
                   <h2 className="text-lg font-semibold text-white">Zone Backups</h2>
                   <p className="text-sm text-slate-400">
                     Back up rectangular zones and restore them as polygons after firmware updates.
                   </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:flex">
                   <button
                     onClick={handleImportBackups}
                     disabled={importingBackups}
-                    className="rounded-lg border border-blue-600/50 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-100 transition-all hover:bg-blue-600/20 disabled:opacity-50"
+                    className="min-w-0 rounded-lg border border-blue-600/50 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-100 transition-all hover:bg-blue-600/20 disabled:opacity-50"
                     title="Import zone backups from JSON file"
                   >
                     {importingBackups ? 'Importing...' : 'Import'}
@@ -1013,7 +1012,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                   <button
                     onClick={handleDownloadAllBackups}
                     disabled={zoneBackups.length === 0}
-                    className="rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="min-w-0 rounded-lg border border-emerald-600/50 bg-emerald-600/10 px-4 py-2 text-sm font-semibold text-emerald-100 transition-all hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-50"
                     title="Download all backups for the selected device"
                   >
                     Download All
@@ -1059,18 +1058,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                 </div>
               </div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 <button
                   onClick={handleCreateZoneBackup}
                   disabled={creatingBackup || !selectedBackupDeviceId}
-                  className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="min-w-0 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {creatingBackup ? 'Backing up...' : 'Create Backup'}
                 </button>
                 <button
                   onClick={() => selectedBackupDeviceId && reloadZoneBackups(selectedBackupDeviceId)}
                   disabled={!selectedBackupDeviceId || loadingBackups}
-                  className="rounded-lg border border-slate-600/70 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="min-w-0 rounded-lg border border-slate-600/70 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {loadingBackups ? 'Refreshing...' : 'Refresh'}
                 </button>
@@ -1105,8 +1104,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                           key={backup.id}
                           className="rounded-lg border border-slate-700/50 bg-slate-800/50 p-4"
                         >
-                          <div className="flex items-center justify-between">
-                            <div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
                               <div className="text-sm font-semibold text-slate-100">
                                 {new Date(backup.createdAt).toLocaleString()}
                               </div>
@@ -1126,24 +1125,24 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                             <span>· {counts.entry} entry</span>
                             <span>· {backup.zones.length} total</span>
                           </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
+                          <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                             <button
                               onClick={() => handleRestoreZoneBackup(backup)}
                               disabled={restoringBackupId === backup.id}
-                              className="rounded-lg bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-600/30 disabled:opacity-50"
+                              className="min-w-0 rounded-lg bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-600/30 disabled:opacity-50"
                             >
                               {restoringBackupId === backup.id ? 'Restoring...' : 'Restore as Polygon'}
                             </button>
                             <button
                               onClick={() => handleDownloadBackup(backup)}
-                              className="rounded-lg border border-slate-600/70 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:bg-slate-700"
+                              className="min-w-0 rounded-lg border border-slate-600/70 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all hover:bg-slate-700"
                             >
                               Download
                             </button>
                             <button
                               onClick={() => handleDeleteZoneBackup(backup.id)}
                               disabled={deletingBackupId === backup.id}
-                              className="rounded-lg border border-rose-600/50 bg-rose-600/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/20 disabled:opacity-50"
+                              className="min-w-0 rounded-lg border border-rose-600/50 bg-rose-600/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/20 disabled:opacity-50"
                             >
                               {deletingBackupId === backup.id ? 'Deleting...' : 'Delete'}
                             </button>
@@ -1157,8 +1156,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
             </div>
 
                 {/* Custom Floor Materials Section */}
-            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
-              <div className="mb-4 flex items-center justify-between">
+            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-lg font-semibold text-white">Custom Floor Materials</h2>
                 <button
                   onClick={() => setShowFloorForm(!showFloorForm)}
@@ -1169,8 +1168,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
               </div>
 
               {showFloorForm && (
-                <div className="mb-4 rounded-lg border border-slate-600/50 bg-slate-800/50 p-4 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="mb-4 space-y-3 rounded-lg border border-slate-600/50 bg-slate-800/50 p-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
                       <input
@@ -1234,10 +1233,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       </select>
                     </div>
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex justify-stretch sm:justify-end">
                     <button
                       onClick={handleCreateFloor}
-                      className="rounded-lg bg-cyan-600 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-cyan-500"
+                      className="w-full rounded-lg bg-cyan-600 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-cyan-500 sm:w-auto"
                     >
                       Create Floor
                     </button>
@@ -1254,14 +1253,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                   {customFloors.map((floor) => (
                     <div
                       key={floor.id}
-                      className="flex items-center justify-between rounded-lg border border-slate-700/50 bg-slate-800/50 p-3"
+                      className="flex flex-col gap-3 rounded-lg border border-slate-700/50 bg-slate-800/50 p-3 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div
                           className="h-8 w-8 rounded"
                           style={{ backgroundColor: floor.color }}
                         />
-                        <div>
+                        <div className="min-w-0">
                           <div className="font-medium text-white">
                             {floor.emoji} {floor.label}
                           </div>
@@ -1272,7 +1271,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       </div>
                       <button
                         onClick={() => handleDeleteFloor(floor.id, floor.label)}
-                        className="rounded-lg border border-rose-600/50 bg-rose-600/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/20"
+                        className="w-full rounded-lg border border-rose-600/50 bg-rose-600/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/20 sm:w-auto"
                       >
                         Delete
                       </button>
@@ -1283,8 +1282,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
             </div>
 
             {/* Custom Furniture Types Section */}
-            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
-              <div className="mb-4 flex items-center justify-between">
+            <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
+              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-lg font-semibold text-white">Custom Furniture Types</h2>
                 <button
                   onClick={() => setShowFurnitureForm(!showFurnitureForm)}
@@ -1295,8 +1294,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
               </div>
 
               {showFurnitureForm && (
-                <div className="mb-4 rounded-lg border border-slate-600/50 bg-slate-800/50 p-4 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="mb-4 space-y-3 rounded-lg border border-slate-600/50 bg-slate-800/50 p-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
                       <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
                       <input
@@ -1367,7 +1366,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                         <option value="lshaped">L-Shaped</option>
                       </select>
                     </div>
-                    <div className="col-span-2">
+                    <div className="sm:col-span-2">
                       <label className="block text-sm font-medium text-slate-300 mb-1">Color</label>
                       <div className="flex gap-2">
                         <input
@@ -1385,10 +1384,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       </div>
                     </div>
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex justify-stretch sm:justify-end">
                     <button
                       onClick={handleCreateFurniture}
-                      className="rounded-lg bg-amber-600 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-amber-500"
+                      className="w-full rounded-lg bg-amber-600 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-amber-500 sm:w-auto"
                     >
                       Create Furniture
                     </button>
@@ -1405,9 +1404,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                   {customFurniture.map((furniture) => (
                     <div
                       key={furniture.id}
-                      className="flex items-center justify-between rounded-lg border border-slate-700/50 bg-slate-800/50 p-3"
+                      className="flex flex-col gap-3 rounded-lg border border-slate-700/50 bg-slate-800/50 p-3 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div
                           className="h-8 w-8 rounded flex items-center justify-center"
                           style={{ backgroundColor: furniture.color }}
@@ -1416,7 +1415,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                             {furniture.shape === 'circle' ? '●' : furniture.shape === 'lshaped' ? 'L' : '■'}
                           </span>
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <div className="font-medium text-white">{furniture.label}</div>
                           <div className="text-xs text-slate-400">
                             {furniture.category} · {furniture.defaultWidth}×{furniture.defaultDepth}mm · {furniture.shape}
@@ -1425,7 +1424,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                       </div>
                       <button
                         onClick={() => handleDeleteFurniture(furniture.id, furniture.label)}
-                        className="rounded-lg border border-rose-600/50 bg-rose-600/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/20"
+                        className="w-full rounded-lg border border-rose-600/50 bg-rose-600/10 px-3 py-1.5 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/20 sm:w-auto"
                       >
                         Delete
                       </button>
@@ -1440,7 +1439,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
             {/* Firmware Tab */}
             {activeTab === 'firmware' && (
               <div className="space-y-6">
-                <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-6">
+                <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4 sm:p-6">
                   <h2 className="mb-4 text-lg font-semibold text-white">Firmware Updates</h2>
                   <p className="mb-4 text-sm text-slate-400">
                     Update your Everything Presence devices with firmware downloaded through this local proxy.
@@ -1462,8 +1461,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
 
       {/* Entity Re-sync Modal */}
       {isSyncing && syncingRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-2xl h-[85vh] max-h-[700px] rounded-xl shadow-2xl flex flex-col bg-slate-900 overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4">
+          <div className="flex h-[88dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-slate-900 shadow-2xl sm:h-[85vh] sm:max-h-[700px] sm:rounded-xl">
             <EntityDiscovery
               deviceId={syncingRoom.deviceId!}
               profileId={syncingRoom.profileId!}
