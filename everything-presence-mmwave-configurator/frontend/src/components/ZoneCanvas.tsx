@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { ZoneRect, ZonePolygon, Point, FurnitureInstance, Door, isZonePolygon } from '../api/types';
 import { RoomCanvas } from './RoomCanvas';
 import { DevicePlacement, Point as RoomPoint } from './RoomCanvas';
@@ -22,6 +22,8 @@ interface ZoneCanvasProps {
   zoom?: number;
   panOffsetMm?: { x: number; y: number };
   onPanChange?: (offset: { x: number; y: number }) => void;
+  onZoomChange?: (zoom: number) => void;
+  touchPanEnabled?: boolean;
   onCanvasMove?: (point: { x: number; y: number }) => void;
   roomShell?: { points: RoomPoint[] };
   roomShellFillMode?: 'overlay' | 'material';
@@ -57,7 +59,7 @@ interface ZoneCanvasProps {
   renderOverlay?: (params: {
     toCanvas: (point: { x: number; y: number }) => { x: number; y: number };
     fromCanvas: (point: { x: number; y: number }) => { x: number; y: number };
-    toWorldFromEvent: (e: React.MouseEvent<SVGElement>) => { x: number; y: number } | null;
+    toWorldFromEvent: (e: { clientX: number; clientY: number }) => { x: number; y: number } | null;
     svgRef: React.RefObject<SVGSVGElement>;
     rangeMm: number;
   }) => React.ReactNode;
@@ -79,6 +81,8 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   zoom = 1,
   panOffsetMm = { x: 0, y: 0 },
   onPanChange,
+  onZoomChange,
+  touchPanEnabled = true,
   onCanvasMove,
   roomShell,
   roomShellFillMode,
@@ -114,6 +118,19 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   const [draggingPolygonId, setDraggingPolygonId] = useState<string | null>(null);
   const [polygonDragOffset, setPolygonDragOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const [draggingVertex, setDraggingVertex] = useState<{ zoneId: string; vertexIndex: number } | null>(null);
+  const polygonPointerDragRef = useRef<
+    | { type: 'polygon'; zoneId: string; offset: { dx: number; dy: number } }
+    | { type: 'vertex'; zoneId: string; vertexIndex: number }
+    | null
+  >(null);
+
+  const capturePointer = (e: React.PointerEvent<SVGElement>) => {
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Older embedded webviews can reject capture on SVG nodes.
+    }
+  };
 
   const effectiveRotationDeg =
     devicePlacement ? (devicePlacement.rotationDeg ?? 0) + (installationAngle ?? 0) : 0;
@@ -159,6 +176,114 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       x: translatedX * cos - translatedY * sin,
       y: translatedX * sin + translatedY * cos,
     };
+  };
+
+  const applyPolygonPointerDrag = (pt: { x: number; y: number }) => {
+    const active = polygonPointerDragRef.current;
+    if (!active || polygonReadOnly || !onPolygonZonesChange) return false;
+
+    if (active.type === 'vertex') {
+      const idx = polygonZones.findIndex((z) => z.id === active.zoneId);
+      if (idx === -1) return false;
+
+      const polygon = { ...polygonZones[idx] };
+      const vertices = [...polygon.vertices];
+      if (!vertices[active.vertexIndex]) return false;
+
+      const deviceCoords = roomToDevice(pt.x, pt.y);
+      let newX = deviceCoords.x;
+      let newY = deviceCoords.y;
+
+      if (snapGridMm && snapGridMm > 0) {
+        const step = snapGridMm;
+        newX = Math.round(newX / step) * step;
+        newY = Math.round(newY / step) * step;
+      }
+
+      if (polygonLateralOnlyAxis) {
+        const axis = polygonLateralOnlyAxis;
+        const previousValue = vertices[active.vertexIndex][axis];
+        const nextValue = axis === 'x' ? newX : newY;
+        onPolygonZonesChange(polygonZones.map((candidate) => (
+          candidate.id === polygon.id
+            ? {
+                ...candidate,
+                vertices: candidate.vertices.map((vertex) => (
+                  Math.abs(vertex[axis] - previousValue) < 1
+                    ? { ...vertex, [axis]: nextValue }
+                    : vertex
+                )),
+              }
+            : candidate
+        )));
+        return true;
+      }
+
+      vertices[active.vertexIndex] = { x: newX, y: newY };
+      polygon.vertices = vertices;
+      const next = [...polygonZones];
+      next[idx] = polygon;
+      onPolygonZonesChange(next);
+      return true;
+    }
+
+    const idx = polygonZones.findIndex((z) => z.id === active.zoneId);
+    if (idx === -1) return false;
+
+    const polygon = { ...polygonZones[idx] };
+    const deviceCoords = roomToDevice(pt.x - active.offset.dx, pt.y - active.offset.dy);
+    const centroid = polygon.vertices.reduce(
+      (acc, v) => ({ x: acc.x + v.x / polygon.vertices.length, y: acc.y + v.y / polygon.vertices.length }),
+      { x: 0, y: 0 }
+    );
+
+    let deltaX = deviceCoords.x - centroid.x;
+    let deltaY = deviceCoords.y - centroid.y;
+
+    if (snapGridMm && snapGridMm > 0) {
+      const step = snapGridMm;
+      deltaX = Math.round(deltaX / step) * step;
+      deltaY = Math.round(deltaY / step) * step;
+    }
+
+    if (polygonLateralOnlyAxis === 'x') {
+      deltaY = 0;
+    } else if (polygonLateralOnlyAxis === 'y') {
+      deltaX = 0;
+    }
+
+    if (polygonLateralOnlyAxis) {
+      const axis = polygonLateralOnlyAxis;
+      const delta = axis === 'x' ? deltaX : deltaY;
+      if (Math.abs(delta) < 0.5) return true;
+
+      onPolygonZonesChange(polygonZones.map((candidate) => ({
+        ...candidate,
+        vertices: candidate.id === polygon.id
+          ? candidate.vertices.map((vertex) => ({ ...vertex, [axis]: vertex[axis] + delta }))
+          : candidate.vertices,
+      })));
+      return true;
+    }
+
+    polygon.vertices = polygon.vertices.map((v) => ({
+      x: v.x + deltaX,
+      y: v.y + deltaY,
+    }));
+
+    const next = [...polygonZones];
+    next[idx] = polygon;
+    onPolygonZonesChange(next);
+    return true;
+  };
+
+  const finishPolygonPointerDrag = () => {
+    if (!polygonPointerDragRef.current) return false;
+    polygonPointerDragRef.current = null;
+    setDraggingVertex(null);
+    setDraggingPolygonId(null);
+    onDragStateChange?.(false);
+    return true;
   };
 
   return (
@@ -367,6 +492,8 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       zoom={zoom}
       panOffsetMm={panOffsetMm}
       onPanChange={onPanChange}
+      onZoomChange={onZoomChange}
+      touchPanEnabled={touchPanEnabled}
       devicePlacement={devicePlacement}
       fieldOfViewDeg={fieldOfViewDeg}
       maxRangeMeters={maxRangeMeters}
@@ -382,7 +509,68 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       deviceInteractive={false}
       lockShell
       renderOverlay={(params) => {
-        const { toCanvas, toWorldFromEvent } = params;
+        const { toCanvas, toWorldFromEvent, onCanvasPointerMove, onCanvasPointerRelease } = params;
+        const forwardCanvasPointerMove = (e: React.PointerEvent<SVGElement>) => {
+          onCanvasPointerMove(e);
+          e.stopPropagation();
+        };
+        const forwardCanvasPointerRelease = (e: React.PointerEvent<SVGElement>) => {
+          onCanvasPointerRelease(e);
+          e.stopPropagation();
+        };
+        const handlePolygonPointerMove = (e: React.PointerEvent<SVGElement>) => {
+          const world = toWorldFromEvent(e);
+          if (world && applyPolygonPointerDrag(world)) {
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
+            return;
+          }
+          forwardCanvasPointerMove(e);
+        };
+        const handlePolygonPointerRelease = (e: React.PointerEvent<SVGElement>) => {
+          if (finishPolygonPointerDrag()) {
+            e.stopPropagation();
+            if (e.cancelable) e.preventDefault();
+            return;
+          }
+          forwardCanvasPointerRelease(e);
+        };
+        const startPolygonDrag = (
+          e: React.PointerEvent<SVGElement>,
+          polygon: ZonePolygon,
+          roomCentroid: { x: number; y: number },
+        ) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          if (e.cancelable) e.preventDefault();
+          capturePointer(e);
+          if (polygonReadOnly) {
+            onSelect?.(polygon.id);
+            return;
+          }
+          const world = toWorldFromEvent(e);
+          if (!world) return;
+          const offset = { dx: world.x - roomCentroid.x, dy: world.y - roomCentroid.y };
+          polygonPointerDragRef.current = { type: 'polygon', zoneId: polygon.id, offset };
+          setDraggingPolygonId(polygon.id);
+          setPolygonDragOffset(offset);
+          onDragStateChange?.(true);
+          onSelect?.(polygon.id);
+        };
+        const startPolygonVertexDrag = (
+          e: React.PointerEvent<SVGElement>,
+          polygon: ZonePolygon,
+          vertexIndex: number,
+        ) => {
+          if (e.button !== 0) return;
+          e.stopPropagation();
+          if (e.cancelable) e.preventDefault();
+          capturePointer(e);
+          polygonPointerDragRef.current = { type: 'vertex', zoneId: polygon.id, vertexIndex };
+          setDraggingVertex({ zoneId: polygon.id, vertexIndex });
+          onDragStateChange?.(true);
+          onSelect?.(polygon.id);
+        };
 
         // Render furniture (before zones, so zones appear on top)
         const furnitureElements = showFurniture ? furniture.map((item) => {
@@ -492,9 +680,10 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 onClick={(e) => {
                   e.stopPropagation(); // Prevent canvas click from deselecting
                 }}
-                onMouseDown={(e) => {
-                  if ((e as any).button !== 0) return; // only left click selects/drags
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return; // only primary click/touch selects/drags
                   e.stopPropagation();
+                  capturePointer(e);
                   const world = toWorldFromEvent(e);
                   if (!world) return;
                   setDraggingId(zone.id);
@@ -503,6 +692,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   setDragOffset({ dx: world.x - roomTopLeft.x, dy: world.y - roomTopLeft.y });
                   onSelect?.(zone.id);
                 }}
+                onPointerMove={forwardCanvasPointerMove}
+                onPointerUp={forwardCanvasPointerRelease}
+                onPointerCancel={forwardCanvasPointerRelease}
               />
               {/* Zone label with better visibility */}
               <text
@@ -527,7 +719,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   key={handle.name}
                   cx={handle.x}
                   cy={handle.y}
-                  r={6}
+                  r={11}
                   fill="white"
                   stroke={color}
                   strokeWidth={2}
@@ -539,9 +731,10 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   onClick={(e) => {
                     e.stopPropagation(); // Prevent canvas click from deselecting
                   }}
-                  onMouseDown={(e) => {
-                    if ((e as any).button !== 0) return;
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
                     e.stopPropagation();
+                    capturePointer(e);
                     const world = toWorldFromEvent(e);
                     if (!world) return;
                     setResizingHandle({ zoneId: zone.id, handle: handle.name });
@@ -549,6 +742,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                     onDragStateChange?.(true);
                     onSelect?.(zone.id);
                   }}
+                  onPointerMove={forwardCanvasPointerMove}
+                  onPointerUp={forwardCanvasPointerRelease}
+                  onPointerCancel={forwardCanvasPointerRelease}
                 />
               ))}
             </g>
@@ -596,6 +792,15 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
             { x: 0, y: 0 }
           );
           const roomCentroid = deviceToRoom(deviceCentroid.x, deviceCentroid.y);
+          const lateralDragEdges = polygonLateralOnlyAxis
+            ? canvasVertices
+                .map((v, idx) => ({ start: v, end: canvasVertices[(idx + 1) % canvasVertices.length], idx }))
+                .filter(({ start, end }) => (
+                  polygonLateralOnlyAxis === 'x'
+                    ? Math.abs(start.x - end.x) < 1
+                    : Math.abs(start.y - end.y) < 1
+                ))
+            : [];
 
           return (
             <g key={polygon.id}>
@@ -608,22 +813,33 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 style={{ cursor: polygonReadOnly ? 'pointer' : polygonLateralOnlyAxis ? (polygonLateralOnlyAxis === 'x' ? 'ew-resize' : 'ns-resize') : draggingPolygonId === polygon.id ? 'move' : 'pointer' }}
                 onClick={(e) => {
                   e.stopPropagation();
-                }}
-                onMouseDown={(e) => {
-                  if ((e as any).button !== 0) return;
-                  e.stopPropagation();
-                  if (polygonReadOnly) {
-                    onSelect?.(polygon.id);
-                    return;
-                  }
-                  const world = toWorldFromEvent(e);
-                  if (!world) return;
-                  setDraggingPolygonId(polygon.id);
-                  onDragStateChange?.(true);
-                  setPolygonDragOffset({ dx: world.x - roomCentroid.x, dy: world.y - roomCentroid.y });
                   onSelect?.(polygon.id);
                 }}
+                pointerEvents="all"
+                onPointerDown={(e) => startPolygonDrag(e, polygon, roomCentroid)}
+                onPointerMove={handlePolygonPointerMove}
+                onPointerUp={handlePolygonPointerRelease}
+                onPointerCancel={handlePolygonPointerRelease}
               />
+              {polygonLateralOnlyAxis && (
+                <polygon
+                  points={pointsStr}
+                  fill="transparent"
+                  stroke="transparent"
+                  strokeWidth={24}
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="all"
+                  style={{ cursor: polygonLateralOnlyAxis === 'x' ? 'ew-resize' : 'ns-resize' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelect?.(polygon.id);
+                  }}
+                  onPointerDown={(e) => startPolygonDrag(e, polygon, roomCentroid)}
+                  onPointerMove={handlePolygonPointerMove}
+                  onPointerUp={handlePolygonPointerRelease}
+                  onPointerCancel={handlePolygonPointerRelease}
+                />
+              )}
               {/* Zone label */}
               <text
                 x={centroid.x}
@@ -647,21 +863,38 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   key={`vertex-${idx}`}
                   cx={v.x}
                   cy={v.y}
-                  r={7}
+                  r={11}
                   fill="white"
                   stroke={color}
                   strokeWidth={2}
                   style={{ cursor: polygonLateralOnlyAxis === 'x' ? 'ew-resize' : polygonLateralOnlyAxis === 'y' ? 'ns-resize' : 'move' }}
                   onClick={(e) => {
                     e.stopPropagation();
-                  }}
-                  onMouseDown={(e) => {
-                    if ((e as any).button !== 0) return;
-                    e.stopPropagation();
-                    setDraggingVertex({ zoneId: polygon.id, vertexIndex: idx });
-                    onDragStateChange?.(true);
                     onSelect?.(polygon.id);
                   }}
+                  pointerEvents="all"
+                  onPointerDown={(e) => startPolygonVertexDrag(e, polygon, idx)}
+                  onPointerMove={handlePolygonPointerMove}
+                  onPointerUp={handlePolygonPointerRelease}
+                  onPointerCancel={handlePolygonPointerRelease}
+                />
+              ))}
+              {isSelected && !polygonReadOnly && polygonLateralOnlyAxis && lateralDragEdges.map(({ start, end, idx }) => (
+                <line
+                  key={`lateral-edge-${idx}`}
+                  x1={start.x}
+                  y1={start.y}
+                  x2={end.x}
+                  y2={end.y}
+                  stroke="transparent"
+                  strokeWidth={28}
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="stroke"
+                  style={{ cursor: polygonLateralOnlyAxis === 'x' ? 'ew-resize' : 'ns-resize' }}
+                  onPointerDown={(e) => startPolygonVertexDrag(e, polygon, idx)}
+                  onPointerMove={handlePolygonPointerMove}
+                  onPointerUp={handlePolygonPointerRelease}
+                  onPointerCancel={handlePolygonPointerRelease}
                 />
               ))}
               {/* Edge midpoints for adding vertices (only when selected) */}
@@ -676,7 +909,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                     key={`midpoint-${idx}`}
                     cx={midX}
                     cy={midY}
-                    r={5}
+                    r={8}
                     fill={color}
                     fillOpacity={0.5}
                     stroke="white"
@@ -702,8 +935,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                       const next = polygonZones.map(p => p.id === polygon.id ? updatedPolygon : p);
                       onPolygonZonesChange(next);
                     }}
-                    onMouseDown={(e) => {
+                    onPointerDown={(e) => {
                       e.stopPropagation();
+                      capturePointer(e);
                     }}
                   />
                 );

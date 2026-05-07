@@ -29,6 +29,7 @@ import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
   CeilingSliceConfig,
+  getCeilingSliceBands,
   getCeilingSliceLineDepth,
   getCeilingSlicePosition,
   normalizeCeilingSliceConfig,
@@ -680,37 +681,46 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
   const handlePolygonZonesChange = (nextZones: ZonePolygon[]) => {
     if (isCeilingSliceMode) {
-      const regularZones = nextZones
-        .filter((zone) => zone.type === 'regular')
-        .slice(0, ceilingSliceConfig.sliceCount);
-      const lateralRangesMm = regularZones.map((zone) => {
+      const getPolygonLateralRange = (zone: ZonePolygon) => {
         const values = zone.vertices
           .map((vertex) => ceilingSliceConfig.axis === 'x' ? vertex.x : vertex.y)
           .filter((value) => Number.isFinite(value));
+        if (!values.length) return null;
         const min = Math.min(...values);
         const max = Math.max(...values);
         return { min: Math.min(min, max - 100), max: Math.max(max, min + 100) };
-      });
+      };
 
-      if (lateralRangesMm.length === ceilingSliceConfig.sliceCount) {
-        const exclusionRangesMm = nextZones
-          .filter((zone) => zone.type === 'exclusion')
-          .map((zone) => {
-            const values = zone.vertices
-              .map((vertex) => ceilingSliceConfig.axis === 'x' ? vertex.x : vertex.y)
-              .filter((value) => Number.isFinite(value));
-            const min = Math.min(...values);
-            const max = Math.max(...values);
-            return { min: Math.min(min, max - 100), max: Math.max(max, min + 100) };
-          });
-        updateCeilingSliceConfig({
-          lateralMinMm: Math.min(...lateralRangesMm.map((range) => range.min)),
-          lateralMaxMm: Math.max(...lateralRangesMm.map((range) => range.max)),
-          lateralBreakpointsMm: undefined,
-          lateralRangesMm,
-          exclusionRangesMm,
-        }, { persist: false });
+      const existingRanges = getCeilingSliceBands(ceilingSliceConfig)
+        .slice(0, ceilingSliceConfig.sliceCount)
+        .map((band) => ({ min: band.min, max: band.max }));
+      const lateralRangesMm = [...existingRanges];
+
+      for (const zone of nextZones.filter((zone) => zone.type === 'regular')) {
+        const index = Number(zone.id.match(/\d+/)?.[0] ?? '0') - 1;
+        const range = getPolygonLateralRange(zone);
+        if (index >= 0 && index < lateralRangesMm.length && range) {
+          lateralRangesMm[index] = range;
+        }
       }
+
+      const existingExclusions = ceilingSliceConfig.exclusionRangesMm ?? [];
+      const exclusionRangesMm = [...existingExclusions];
+      for (const zone of nextZones.filter((zone) => zone.type === 'exclusion')) {
+        const index = Number(zone.id.match(/\d+/)?.[0] ?? '0') - 1;
+        const range = getPolygonLateralRange(zone);
+        if (index >= 0 && range) {
+          exclusionRangesMm[index] = range;
+        }
+      }
+
+      updateCeilingSliceConfig({
+        lateralMinMm: Math.min(...lateralRangesMm.map((range) => range.min)),
+        lateralMaxMm: Math.max(...lateralRangesMm.map((range) => range.max)),
+        lateralBreakpointsMm: undefined,
+        lateralRangesMm,
+        exclusionRangesMm: exclusionRangesMm.slice(0, selectedProfile?.limits.maxExclusionZones ?? 2),
+      }, { persist: false });
       return;
     }
     setPolygonZones(nextZones);
@@ -1432,6 +1442,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             zoom={zoom}
             panOffsetMm={panOffsetMm}
             onPanChange={(next) => setPanOffsetMm(next)}
+            onZoomChange={setZoom}
+            touchPanEnabled={!isDraggingZone}
             onCanvasMove={(pt) => setCursorPos(pt)}
             roomShell={selectedRoom.roomShell}
             roomShellFillMode={selectedRoom.roomShellFillMode}
