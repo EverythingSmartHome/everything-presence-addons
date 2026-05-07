@@ -14,6 +14,7 @@ import {
   CanvasToolbarButton,
   CanvasTopBar,
 } from '../components/CanvasLayout';
+import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
@@ -118,11 +119,20 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   // Zone selection for embedded zone drawing
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
 
-  // Radar overlay clipping toggle
-  const [clipRadarToWalls, setClipRadarToWalls] = useState(true);
-
   // Display settings for live tracking and device icon
-  const { showTargets, setShowTargets, showDeviceIcon, setShowDeviceIcon } = useDisplaySettings();
+  const {
+    showWalls, setShowWalls,
+    showFurniture, setShowFurniture,
+    showDoors, setShowDoors,
+    showZones, setShowZones,
+    showTargets, setShowTargets,
+    showDeviceIcon, setShowDeviceIcon,
+    showDeviceRadar, setShowDeviceRadar,
+    targetMarkerScale, setTargetMarkerScale,
+    showZoneLabels, setShowZoneLabels,
+    zoneLabelScale, setZoneLabelScale,
+    clipRadarToWalls, setClipRadarToWalls,
+  } = useDisplaySettings();
 
   // Cursor position tracking
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
@@ -1533,6 +1543,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onZoomChange={setCanvasZoom}
               touchPanEnabled={!isDrawingWall}
               displayUnits={units}
+              showWalls={showWalls}
             />
           )}
 
@@ -1560,12 +1571,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onDoorDragStart={handleDoorDragStart}
               onDoorDragMove={handleDoorDragMove}
               onDoorDragEnd={handleDoorDragEnd}
-              showDoors={true}
+              showWalls={showWalls}
+              showDoors={showDoors}
               devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar
+                showRadar={showDeviceRadar}
               clipRadarToWalls={clipRadarToWalls}
               renderOverlay={({ toCanvas }) => {
                 if (!showTargets || !targetPositions?.length) return null;
@@ -1581,9 +1593,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       const colors = targetColors[idx % targetColors.length];
                       return (
                         <g key={target.id}>
-                          <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
-                          <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
-                          <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                          <circle cx={pos.x} cy={pos.y} r={25 * targetMarkerScale} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5 * targetMarkerScale} />
+                          <circle cx={pos.x} cy={pos.y} r={10 * targetMarkerScale} fill={colors.fill} />
+                          <text x={pos.x} y={pos.y - (35 * targetMarkerScale)} fill={colors.fill} fontSize={12 * targetMarkerScale} fontWeight="600" textAnchor="middle">T{target.id}</text>
                         </g>
                       );
                     })}
@@ -1609,7 +1621,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onDragStateChange={setIsCanvasDragging}
               displayUnits={units}
               doors={selectedRoom?.doors ?? []}
-              showDoors={true}
+              showWalls={showWalls}
+              showDoors={showDoors}
               furniture={selectedRoom?.furniture ?? []}
               selectedFurnitureId={selectedFurnitureId}
               onFurnitureSelect={(id) => {
@@ -1617,12 +1630,12 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 setShowFurnitureLibrary(false);
               }}
               onFurnitureChange={handleFurnitureChange}
-              showFurniture={true}
+              showFurniture={showFurniture}
               devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar
+              showRadar={showDeviceRadar}
               clipRadarToWalls={clipRadarToWalls}
               renderOverlay={({ toCanvas }) => {
                 if (!showTargets || !targetPositions?.length) return null;
@@ -1638,9 +1651,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       const colors = targetColors[idx % targetColors.length];
                       return (
                         <g key={target.id}>
-                          <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
-                          <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
-                          <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                          <circle cx={pos.x} cy={pos.y} r={25 * targetMarkerScale} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5 * targetMarkerScale} />
+                          <circle cx={pos.x} cy={pos.y} r={10 * targetMarkerScale} fill={colors.fill} />
+                          <text x={pos.x} y={pos.y - (35 * targetMarkerScale)} fill={colors.fill} fontSize={12 * targetMarkerScale} fontWeight="600" textAnchor="middle">T{target.id}</text>
                         </g>
                       );
                     })}
@@ -1666,7 +1679,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar
+              showRadar={showDeviceRadar}
               clipRadarToWalls={clipRadarToWalls}
               rangeMm={15000}
               snapGridMm={canvasSnap}
@@ -1678,9 +1691,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               touchPanEnabled
               displayUnits={units}
               furniture={selectedRoom?.furniture ?? []}
-              showFurniture={true}
+              showWalls={showWalls}
+              showFurniture={showFurniture}
               doors={selectedRoom?.doors ?? []}
-              showDoors={true}
+              showDoors={showDoors}
               renderOverlay={({ toCanvas }) => {
                 if (!showTargets || !targetPositions?.length) return null;
                 const targetColors = [
@@ -1695,9 +1709,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       const colors = targetColors[idx % targetColors.length];
                       return (
                         <g key={target.id}>
-                          <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
-                          <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
-                          <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                          <circle cx={pos.x} cy={pos.y} r={25 * targetMarkerScale} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5 * targetMarkerScale} />
+                          <circle cx={pos.x} cy={pos.y} r={10 * targetMarkerScale} fill={colors.fill} />
+                          <text x={pos.x} y={pos.y - (35 * targetMarkerScale)} fill={colors.fill} fontSize={12 * targetMarkerScale} fontWeight="600" textAnchor="middle">T{target.id}</text>
                         </g>
                       );
                     })}
@@ -1753,7 +1767,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 fieldOfViewDeg={trackingFieldOfViewDeg}
                 maxRangeMeters={trackingMaxRangeMeters}
                 deviceIconUrl={deviceIconUrl}
-              showRadar
+              showRadar={showDeviceRadar}
                 rangeMm={15000}
                 snapGridMm={canvasSnap}
                 height="100%"
@@ -1766,6 +1780,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 clipRadarToWalls={clipRadarToWalls}
                 furniture={selectedRoom?.furniture}
                 doors={selectedRoom?.doors}
+                showWalls={showWalls}
+                showFurniture={showFurniture}
+                showDoors={showDoors}
+                showZones={showZones}
+                showDevice={showDeviceIcon}
+                showZoneLabels={showZoneLabels}
+                zoneLabelScale={zoneLabelScale}
                 renderOverlay={({ toCanvas }) => {
                   if (!showTargets || !targetPositions?.length) return null;
                   const targetColors = [
@@ -1780,9 +1801,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                         const colors = targetColors[idx % targetColors.length];
                         return (
                           <g key={target.id}>
-                            <circle cx={pos.x} cy={pos.y} r={25} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5} />
-                            <circle cx={pos.x} cy={pos.y} r={10} fill={colors.fill} />
-                            <text x={pos.x} y={pos.y - 35} fill={colors.fill} fontSize="12" fontWeight="600" textAnchor="middle">T{target.id}</text>
+                            <circle cx={pos.x} cy={pos.y} r={25 * targetMarkerScale} fill={colors.fillOpacity} stroke={colors.fill} strokeWidth={1.5 * targetMarkerScale} />
+                            <circle cx={pos.x} cy={pos.y} r={10 * targetMarkerScale} fill={colors.fill} />
+                            <text x={pos.x} y={pos.y - (35 * targetMarkerScale)} fill={colors.fill} fontSize={12 * targetMarkerScale} fontWeight="600" textAnchor="middle">T{target.id}</text>
                           </g>
                         );
                       })}
@@ -2383,36 +2404,28 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               title="Display"
               onClose={() => setActiveMobileCanvasSheet(null)}
             >
-              <div className="space-y-3">
-                <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={showTargets}
-                    onChange={(e) => setShowTargets(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-700 bg-slate-800 text-blue-500"
-                  />
-                  <span className="font-semibold">Live Tracking</span>
-                  {!liveState?.deviceId && <span className="ml-auto text-xs text-slate-500">No device</span>}
-                </label>
-                <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={showDeviceIcon}
-                    onChange={(e) => setShowDeviceIcon(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-700 bg-slate-800 text-emerald-500"
-                  />
-                  <span className="font-semibold">Device Icon</span>
-                </label>
-                <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
-                  <input
-                    type="checkbox"
-                    checked={clipRadarToWalls}
-                    onChange={(e) => setClipRadarToWalls(e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-700 bg-slate-800 text-aqua-500"
-                  />
-                  <span className="font-semibold">Clip radar to walls</span>
-                </label>
-              </div>
+              <DisplaySettingsControls
+                overlayOptions={[
+                  { label: 'Device coverage', checked: showDeviceRadar, onChange: setShowDeviceRadar },
+                  { label: 'Clip radar to walls', checked: clipRadarToWalls, onChange: setClipRadarToWalls },
+                ]}
+                roomOptions={[
+                  { label: 'Walls', checked: showWalls, onChange: setShowWalls },
+                  { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
+                  { label: 'Doors', checked: showDoors, onChange: setShowDoors },
+                  { label: 'Zones', checked: showZones, onChange: setShowZones },
+                  { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                  { label: 'Targets', checked: showTargets, onChange: setShowTargets, note: !liveState?.deviceId ? 'No device' : undefined },
+                ]}
+                appearance={{
+                  targetMarkerScale,
+                  setTargetMarkerScale,
+                  showZoneLabels,
+                  setShowZoneLabels,
+                  zoneLabelScale,
+                  setZoneLabelScale,
+                }}
+              />
             </CanvasMobileSheet>
 
             <CanvasMobileSheet
@@ -3164,6 +3177,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
               displayUnits={units}
+              showWalls={showWalls}
             />
 
             {/* Zoom controls */}
@@ -3259,7 +3273,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar
+              showRadar={showDeviceRadar}
               clipRadarToWalls={clipRadarToWalls}
               rangeMm={15000}
               snapGridMm={canvasSnap}
@@ -3268,6 +3282,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               panOffsetMm={canvasPan}
               onPanChange={setCanvasPan}
               displayUnits={units}
+              showWalls={showWalls}
             />
 
             {/* Zoom controls */}
@@ -3584,7 +3599,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar
+              showRadar={showDeviceRadar}
               rangeMm={15000}
               snapGridMm={canvasSnap}
               height="100%"
@@ -3593,6 +3608,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onPanChange={setCanvasPan}
               furniture={selectedRoom?.furniture}
               doors={selectedRoom?.doors}
+              showWalls={showWalls}
+              showFurniture={showFurniture}
+              showDoors={showDoors}
+              showZones={showZones}
+              showDevice={showDeviceIcon}
+              showZoneLabels={showZoneLabels}
+              zoneLabelScale={zoneLabelScale}
             />
 
             {/* Zoom controls */}

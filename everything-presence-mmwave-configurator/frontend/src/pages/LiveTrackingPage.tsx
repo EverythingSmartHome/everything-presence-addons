@@ -16,6 +16,7 @@ import { HeatmapOverlay } from '../components/HeatmapOverlay';
 import { ZoneStatsPanel } from '../components/ZoneStatsPanel';
 import { HourlyActivityChart } from '../components/HourlyActivityChart';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
+import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import {
   CanvasBottomToolbar,
   CanvasMobileSheet,
@@ -92,8 +93,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const [zoom, setZoom] = useState(1.1);
   const [panOffsetMm, setPanOffsetMm] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
-  const [showMaxDistanceOverlay, setShowMaxDistanceOverlay] = useState(true);
-  const [showTriggerDistanceOverlay, setShowTriggerDistanceOverlay] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [smoothTracking, setSmoothTracking] = useState(true);
   const [showTrails, setShowTrails] = useState(false);
@@ -121,7 +120,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    showMaxDistanceOverlay, setShowMaxDistanceOverlay,
+    showTriggerDistanceOverlay, setShowTriggerDistanceOverlay,
     showTargets, setShowTargets,
+    targetMarkerScale, setTargetMarkerScale,
+    showZoneLabels, setShowZoneLabels,
+    zoneLabelScale, setZoneLabelScale,
     showAlignedDirection, setShowAlignedDirection,
     clipRadarToWalls, setClipRadarToWalls,
     heatmapEnabled, setHeatmapEnabled,
@@ -1095,6 +1099,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             showFurniture={showFurniture}
             showDoors={showDoors}
             showZones={showZones && showLiveOverlays}
+            showZoneLabels={showZoneLabels}
+            zoneLabelScale={zoneLabelScale}
             showDevice={showDeviceIcon}
             renderOverlay={({ toCanvas, roomShellPoints, devicePlacement: devicePlacementFromCanvas, fieldOfViewDeg }) => {
               // Heatmap overlay (renders behind everything else)
@@ -1207,7 +1213,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                           x2={end.x}
                           y2={end.y}
                           stroke="rgba(15, 23, 42, 0.85)"
-                          strokeWidth={8}
+                          strokeWidth={8 * targetMarkerScale}
                           strokeLinecap="round"
                           opacity={0.9}
                         />
@@ -1217,7 +1223,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                           x2={end.x}
                           y2={end.y}
                           stroke={color.fill}
-                          strokeWidth={4}
+                          strokeWidth={4 * targetMarkerScale}
                           strokeLinecap="round"
                           opacity={0.95}
                           strokeDasharray="10 7"
@@ -1225,17 +1231,17 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         <circle
                           cx={label.x}
                           cy={label.y}
-                          r={8}
+                          r={8 * targetMarkerScale}
                           fill={color.fill}
                           stroke="white"
-                          strokeWidth={2}
+                          strokeWidth={2 * targetMarkerScale}
                         />
                         <text
                           x={label.x}
-                          y={label.y - 14}
+                          y={label.y - (14 * targetMarkerScale)}
                           textAnchor="middle"
                           fill="white"
-                          fontSize="12"
+                          fontSize={12 * targetMarkerScale}
                           fontWeight="bold"
                           className="pointer-events-none"
                           style={{ filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.9))' }}
@@ -1316,28 +1322,28 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         <circle
                           cx={cx}
                           cy={cy}
-                          r={25}
+                          r={25 * targetMarkerScale}
                           fill={color.fillOpacity}
                           stroke={color.fill}
-                          strokeWidth={2}
+                          strokeWidth={2 * targetMarkerScale}
                           className="animate-pulse"
                         />
                         {/* Inner solid dot */}
                         <circle
                           cx={cx}
                           cy={cy}
-                          r={10}
+                          r={10 * targetMarkerScale}
                           fill={color.fill}
                           stroke="white"
-                          strokeWidth={2}
+                          strokeWidth={2 * targetMarkerScale}
                         />
                         {/* Target ID label */}
                         <text
                           x={cx}
-                          y={cy - 35}
+                          y={cy - (35 * targetMarkerScale)}
                           textAnchor="middle"
                           fill="white"
-                          fontSize="12"
+                          fontSize={12 * targetMarkerScale}
                           fontWeight="bold"
                           className="pointer-events-none"
                         >
@@ -2258,6 +2264,19 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                     </div>
                   </div>
 
+                  <div className="mt-3 border-t border-slate-700/50 pt-3">
+                    <DisplaySettingsControls
+                      appearance={{
+                        targetMarkerScale,
+                        setTargetMarkerScale,
+                        showZoneLabels,
+                        setShowZoneLabels,
+                        zoneLabelScale,
+                        setZoneLabelScale,
+                      }}
+                    />
+                  </div>
+
                   {/* Theme Switcher */}
                   <div className="mt-3 pt-3 border-t border-slate-700/50">
                     <ThemeSwitcher />
@@ -2746,72 +2765,48 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         title="Display"
         onClose={() => setActiveMobileSheet(null)}
       >
-        <div className="space-y-3 text-sm text-slate-200">
-          {[
-            ['Max Distance', showMaxDistanceOverlay, setShowMaxDistanceOverlay],
-            ['Device Coverage', showDeviceRadar, setShowDeviceRadar],
-            ['Walls', showWalls, setShowWalls],
-            ['Furniture', showFurniture, setShowFurniture],
-            ['Doors', showDoors, setShowDoors],
-            ['Device Icon', showDeviceIcon, setShowDeviceIcon],
-            ['Targets', showTargets, setShowTargets],
-          ].map(([label, checked, setter]) => (
-            <label key={String(label)} className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
-              <span>{label}</span>
-              <input
-                type="checkbox"
-                checked={Boolean(checked)}
-                onChange={(event) => (setter as (value: boolean) => void)(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
-              />
-            </label>
-          ))}
-          {!isEP1 && (
-            <>
-              <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
-                <span>Zones</span>
+        <DisplaySettingsControls
+          overlayOptions={[
+            { label: 'Max distance', checked: showMaxDistanceOverlay, onChange: setShowMaxDistanceOverlay },
+            ...(isEP1 ? [{ label: 'Trigger distance', checked: showTriggerDistanceOverlay, onChange: setShowTriggerDistanceOverlay }] : []),
+            { label: 'Device coverage', checked: showDeviceRadar, onChange: setShowDeviceRadar },
+            ...(!isEP1 ? [{ label: 'Aligned direction', checked: showAlignedDirection, onChange: setShowAlignedDirection }] : []),
+            ...(!isEP1 ? [{ label: 'Movement trails', checked: showTrails, onChange: setShowTrails }] : []),
+            ...(!isEP1 ? [{ label: 'Smooth tracking', checked: smoothTracking, onChange: setSmoothTracking }] : []),
+            { label: 'Clip radar to walls', checked: clipRadarToWalls, onChange: setClipRadarToWalls },
+          ]}
+          roomOptions={[
+            { label: 'Walls', checked: showWalls, onChange: setShowWalls },
+            { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
+            { label: 'Doors', checked: showDoors, onChange: setShowDoors },
+            ...(!isEP1 ? [{ label: 'Zones', checked: showZones, onChange: setShowZones }] : []),
+            { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+            { label: 'Targets', checked: showTargets, onChange: setShowTargets },
+          ]}
+          appearance={{
+            targetMarkerScale,
+            setTargetMarkerScale,
+            showZoneLabels,
+            setShowZoneLabels,
+            zoneLabelScale,
+            setZoneLabelScale,
+          }}
+          extraSections={supportsHeatmap && !isEP1 ? (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Heatmap</div>
+              <label className="flex min-h-[40px] cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/50 px-3 text-sm text-slate-200">
+                <span className="font-medium">Show heatmap</span>
                 <input
                   type="checkbox"
-                  checked={showZones}
-                  onChange={(event) => setShowZones(event.target.checked)}
+                  checked={heatmapEnabled}
+                  onChange={(event) => setHeatmapEnabled(event.target.checked)}
                   className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
                 />
               </label>
-              <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
-                <span>Movement Trails</span>
-                <input
-                  type="checkbox"
-                  checked={showTrails}
-                  onChange={(event) => setShowTrails(event.target.checked)}
-                  className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
-                />
-              </label>
-              {supportsHeatmap && (
-                <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
-                  <span>Heatmap</span>
-                  <input
-                    type="checkbox"
-                    checked={heatmapEnabled}
-                    onChange={(event) => setHeatmapEnabled(event.target.checked)}
-                    className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
-                  />
-                </label>
-              )}
-            </>
-          )}
-          <label className="flex min-h-[40px] items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 px-3">
-            <span>Clip Radar To Walls</span>
-            <input
-              type="checkbox"
-              checked={clipRadarToWalls}
-              onChange={(event) => setClipRadarToWalls(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-600 bg-slate-800 text-aqua-500 focus:ring-aqua-500 focus:ring-offset-0"
-            />
-          </label>
-          <div className="border-t border-slate-700 pt-3">
-            <ThemeSwitcher />
-          </div>
-        </div>
+            </div>
+          ) : undefined}
+          footer={<ThemeSwitcher />}
+        />
       </CanvasMobileSheet>
 
       <CanvasMobileSheet

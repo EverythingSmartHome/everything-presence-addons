@@ -55,6 +55,8 @@ interface ZoneCanvasProps {
   showFurniture?: boolean;
   showDoors?: boolean;
   showZones?: boolean;
+  showZoneLabels?: boolean;
+  zoneLabelScale?: number;
   showDevice?: boolean;
   renderOverlay?: (params: {
     toCanvas: (point: { x: number; y: number }) => { x: number; y: number };
@@ -105,6 +107,8 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   showFurniture = true,
   showDoors = true,
   showZones = true,
+  showZoneLabels = true,
+  zoneLabelScale = 1,
   showDevice = true,
   renderOverlay,
 }) => {
@@ -134,6 +138,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
 
   const effectiveRotationDeg =
     devicePlacement ? (devicePlacement.rotationDeg ?? 0) + (installationAngle ?? 0) : 0;
+  const effectiveZoneLabelScale = Math.min(1.75, Math.max(0.5, zoneLabelScale));
 
   // Transform device-relative coordinates to room coordinates
   const deviceToRoom = (deviceX: number, deviceY: number): { x: number; y: number } => {
@@ -696,23 +701,24 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 onPointerUp={forwardCanvasPointerRelease}
                 onPointerCancel={forwardCanvasPointerRelease}
               />
-              {/* Zone label with better visibility */}
-              <text
-                x={canvasWidth / 2}
-                y={20}
-                fill="white"
-                fontSize="13"
-                fontWeight="600"
-                textAnchor="middle"
-                pointerEvents="none"
-                transform={`translate(${canvasTopLeft.x}, ${canvasTopLeft.y}) rotate(${rotationDeg})`}
-                style={{
-                  filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.8))',
-                  textShadow: '0 1px 3px rgba(0,0,0,0.8)'
-                }}
-              >
-                {zoneLabels?.[zone.id] || zone.label || zone.id}
-              </text>
+              {showZoneLabels && (
+                <text
+                  x={canvasWidth / 2}
+                  y={20 * effectiveZoneLabelScale}
+                  fill="white"
+                  fontSize={13 * effectiveZoneLabelScale}
+                  fontWeight="600"
+                  textAnchor="middle"
+                  pointerEvents="none"
+                  transform={`translate(${canvasTopLeft.x}, ${canvasTopLeft.y}) rotate(${rotationDeg})`}
+                  style={{
+                    filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.8))',
+                    textShadow: '0 1px 3px rgba(0,0,0,0.8)'
+                  }}
+                >
+                  {zoneLabels?.[zone.id] || zone.label || zone.id}
+                </text>
+              )}
               {/* Resize handles */}
               {handles.map((handle) => (
                 <circle
@@ -840,23 +846,24 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   onPointerCancel={handlePolygonPointerRelease}
                 />
               )}
-              {/* Zone label */}
-              <text
-                x={centroid.x}
-                y={centroid.y}
-                fill="white"
-                fontSize="13"
-                fontWeight="600"
-                textAnchor="middle"
-                dominantBaseline="middle"
-                pointerEvents="none"
-                style={{
-                  filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.8))',
-                  textShadow: '0 1px 3px rgba(0,0,0,0.8)'
-                }}
-              >
-                {zoneLabels?.[polygon.id] || polygon.label || polygon.id}
-              </text>
+              {showZoneLabels && (
+                <text
+                  x={centroid.x}
+                  y={centroid.y}
+                  fill="white"
+                  fontSize={13 * effectiveZoneLabelScale}
+                  fontWeight="600"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  pointerEvents="none"
+                  style={{
+                    filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.8))',
+                    textShadow: '0 1px 3px rgba(0,0,0,0.8)'
+                  }}
+                >
+                  {zoneLabels?.[polygon.id] || polygon.label || polygon.id}
+                </text>
+              )}
               {/* Vertex handles (only when selected) */}
               {isSelected && !polygonReadOnly && canvasVertices.map((v, idx) => (
                 <circle
