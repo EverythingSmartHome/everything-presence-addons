@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 
 const joinClasses = (...classes: Array<string | false | null | undefined>) => (
   classes.filter(Boolean).join(' ')
@@ -56,6 +56,8 @@ export const CanvasBottomToolbar: React.FC<CanvasBottomToolbarProps> = ({ childr
       'pointer-events-auto absolute bottom-0 left-0 right-0 z-50 border-t border-slate-700/60 bg-slate-950/95 px-3 py-2 shadow-2xl backdrop-blur mobile-safe-bottom',
       className,
     )}
+    role="toolbar"
+    aria-label="Canvas actions"
   >
     <div className="flex items-center justify-around gap-2">
       {children}
@@ -84,11 +86,12 @@ export const CanvasToolbarButton: React.FC<CanvasToolbarButtonProps> = ({
 }) => (
   <button
     type="button"
+    aria-label={label}
     aria-pressed={active}
     disabled={disabled}
     onClick={onClick}
     className={joinClasses(
-      'relative flex min-h-[44px] min-w-[56px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-40',
+      'relative flex min-h-[44px] min-w-[56px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aqua-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40',
       active
         ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100 shadow-lg shadow-aqua-500/10'
         : 'border-slate-700/70 bg-slate-900/80 text-slate-200 hover:border-slate-600 hover:bg-slate-800',
@@ -124,6 +127,31 @@ export const CanvasMobileSheet: React.FC<CanvasMobileSheetProps> = ({
   onClose,
   className,
 }) => {
+  const titleId = useId();
+  const descriptionId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const closeTimer = window.setTimeout(() => {
+      closeButtonRef.current?.focus();
+    }, 0);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(closeTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose, open]);
+
   if (!open) return null;
 
   return (
@@ -141,17 +169,24 @@ export const CanvasMobileSheet: React.FC<CanvasMobileSheetProps> = ({
         )}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
       >
         <div className="sticky top-0 z-10 border-b border-slate-700/70 bg-slate-900/95 px-4 py-3 backdrop-blur">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="truncate text-base font-bold text-white">{title}</h2>
-              {description && <div className="mt-0.5 text-xs text-slate-400">{description}</div>}
+              <h2 id={titleId} className="truncate text-base font-bold text-white">{title}</h2>
+              {description && (
+                <div id={descriptionId} className="mt-0.5 text-xs text-slate-400">
+                  {description}
+                </div>
+              )}
             </div>
             <button
+              ref={closeButtonRef}
               type="button"
               onClick={onClose}
-              className="min-h-[36px] rounded-lg border border-slate-700 bg-slate-800 px-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-slate-700"
+              className="min-h-[36px] rounded-lg border border-slate-700 bg-slate-800 px-3 text-sm font-semibold text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aqua-400"
             >
               Close
             </button>
