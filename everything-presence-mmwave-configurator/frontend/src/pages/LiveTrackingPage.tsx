@@ -2619,8 +2619,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
       <CanvasMobileSheet
         open={activeMobileSheet === 'details'}
-        title={isEP1 ? 'EP1 Status' : 'Live Tracking'}
-        description={selectedRoom?.name}
+        title="Details"
+        description={selectedRoom?.name ? `${isEP1 ? 'EP1 Status' : 'Live Tracking'} - ${selectedRoom.name}` : (isEP1 ? 'EP1 Status' : 'Live Tracking')}
         onClose={() => setActiveMobileSheet(null)}
       >
         <div className="space-y-4 text-sm text-slate-200">
@@ -2810,7 +2810,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
       <CanvasMobileSheet
         open={activeMobileSheet === 'zoom'}
-        title="Zoom and Snap"
+        title="Zoom & Snap"
         onClose={() => setActiveMobileSheet(null)}
       >
         <div className="space-y-4 text-sm text-slate-200">

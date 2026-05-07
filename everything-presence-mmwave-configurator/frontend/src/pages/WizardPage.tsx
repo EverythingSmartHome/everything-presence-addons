@@ -2182,7 +2182,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
             <CanvasMobileSheet
               open={activeMobileCanvasSheet === 'tools'}
-              title={`${stepInfo.title} Tools`}
+              title="Tools"
+              description={stepInfo.title}
               onClose={() => setActiveMobileCanvasSheet(null)}
             >
               {currentStep === 'outline' && (
@@ -2336,7 +2337,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
             <CanvasMobileSheet
               open={activeMobileCanvasSheet === 'device'}
-              title="Device Placement"
+              title="Device"
+              description="Placement"
               onClose={() => setActiveMobileCanvasSheet(null)}
             >
               {selectedRoom?.devicePlacement && (
@@ -2415,7 +2417,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
             <CanvasMobileSheet
               open={activeMobileCanvasSheet === 'zoom'}
-              title="Zoom And Snap"
+              title="Zoom & Snap"
               onClose={() => setActiveMobileCanvasSheet(null)}
             >
               <div className="space-y-4">
@@ -2450,7 +2452,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
             <CanvasMobileSheet
               open={activeMobileCanvasSheet === 'zones'}
-              title={polygonModeStatus.enabled ? 'Polygon Zones' : 'Zone Slots'}
+              title="Zones"
               description={polygonModeStatus.enabled ? `${polygonZones.length} polygon zones configured` : `${enabledZones.length} of ${displayZones.length} slots active`}
               onClose={() => setActiveMobileCanvasSheet(null)}
             >

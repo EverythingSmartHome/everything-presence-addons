@@ -2406,7 +2406,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
       <CanvasMobileSheet
         open={activeMobileSheet === 'zoom'}
-        title="Zoom and Snap"
+        title="Zoom & Snap"
         onClose={() => setActiveMobileSheet(null)}
       >
         <div className="space-y-4 text-sm text-slate-200">
