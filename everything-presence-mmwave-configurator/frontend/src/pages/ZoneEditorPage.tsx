@@ -2271,7 +2271,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
               />
               {polygonModeStatus.supported && polygonModeControllable && (
                 <CanvasToolbarButton
-                  label={polygonModeStatus.enabled ? (isCeilingSliceMode ? 'Slices' : 'Polygon') : 'Rect'}
+                  label="Mode"
+                  badge={polygonModeStatus.enabled ? (isCeilingSliceMode ? 'Slices' : 'Poly') : 'Rect'}
                   active={polygonModeStatus.enabled}
                   disabled={togglingPolygonMode || (!polygonModeStatus.enabled && polygonZonesAvailable === false)}
                   onClick={() => {
@@ -2350,7 +2351,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
       <CanvasMobileSheet
         open={activeMobileSheet === 'zoom'}
-        title="Zoom and Snap"
+        title="Zoom & Snap"
         onClose={() => setActiveMobileSheet(null)}
       >
         <div className="space-y-4 text-sm text-slate-200">
