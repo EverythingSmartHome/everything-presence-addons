@@ -14,6 +14,7 @@ import {
   CanvasToolbarButton,
   CanvasTopBar,
 } from '../components/CanvasLayout';
+import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
@@ -44,6 +45,7 @@ interface RoomBuilderPageProps {
 }
 
 type MobileRoomBuilderSheet = 'navigation' | 'tools' | 'zoom' | null;
+type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor';
 
 const clampNumber = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
 
@@ -85,6 +87,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [zoom, setZoom] = useState(1.1);
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<RoomBuilderSettingsTab>('display');
   const [showNavMenu, setShowNavMenu] = useState(false);
   const [activeMobileSheet, setActiveMobileSheet] = useState<MobileRoomBuilderSheet>(null);
   // Display settings (persisted to localStorage)
@@ -93,8 +96,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     showFurniture, setShowFurniture,
     showDoors, setShowDoors,
     showDeviceIcon, setShowDeviceIcon,
+    showDeviceRadar, setShowDeviceRadar,
     showTargets, setShowTargets,
-    clipRadarToWalls,
+    targetMarkerScale, setTargetMarkerScale,
+    showZoneLabels, setShowZoneLabels,
+    zoneLabelScale, setZoneLabelScale,
+    clipRadarToWalls, setClipRadarToWalls,
   } = useDisplaySettings();
   const isMobileCanvas = useIsMobileCanvas();
   const [panOffsetMm, setPanOffsetMm] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -1249,7 +1256,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   deviceIconUrl={deviceIconUrl}
                   clipRadarToWalls={clipRadarToWalls}
                   heightCoverage={heightCoverageConfig ?? undefined}
-                  showRadar={!isCeilingMount}
+                  showRadar={showDeviceRadar && !isCeilingMount}
                   previewFrom={pendingStart}
                   previewTo={pendingStart && previewPoint ? previewPoint : null}
                   hoveredSegment={hoveredSegment}
@@ -1350,7 +1357,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                                   x2={end.x}
                                   y2={end.y}
                                   stroke="rgba(15, 23, 42, 0.85)"
-                                  strokeWidth={8}
+                                  strokeWidth={8 * targetMarkerScale}
                                   strokeLinecap="round"
                                   opacity={0.9}
                                 />
@@ -1360,7 +1367,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                                   x2={end.x}
                                   y2={end.y}
                                   stroke={colors.fill}
-                                  strokeWidth={4}
+                                  strokeWidth={4 * targetMarkerScale}
                                   strokeLinecap="round"
                                   opacity={0.95}
                                   strokeDasharray="10 7"
@@ -1368,17 +1375,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                                 <circle
                                   cx={label.x}
                                   cy={label.y}
-                                  r={8}
+                                  r={8 * targetMarkerScale}
                                   fill={colors.fill}
                                   stroke="white"
-                                  strokeWidth={2}
+                                  strokeWidth={2 * targetMarkerScale}
                                 />
                                 <text
                                   x={label.x}
-                                  y={label.y - 14}
+                                  y={label.y - (14 * targetMarkerScale)}
                                   textAnchor="middle"
                                   fill="white"
-                                  fontSize="12"
+                                  fontSize={12 * targetMarkerScale}
                                   fontWeight="bold"
                                   className="pointer-events-none"
                                   style={{ filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.9))' }}
@@ -1405,24 +1412,24 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               <circle
                                 cx={pos.x}
                                 cy={pos.y}
-                                r={25}
+                                r={25 * targetMarkerScale}
                                 fill={colors.fillOpacity}
                                 stroke={colors.fill}
-                                strokeWidth={1.5}
+                                strokeWidth={1.5 * targetMarkerScale}
                               />
                               {/* Inner solid dot */}
                               <circle
                                 cx={pos.x}
                                 cy={pos.y}
-                                r={10}
+                                r={10 * targetMarkerScale}
                                 fill={colors.fill}
                               />
                               {/* Label */}
                               <text
                                 x={pos.x}
-                                y={pos.y - 35}
+                                y={pos.y - (35 * targetMarkerScale)}
                                 fill={colors.fill}
-                                fontSize="12"
+                                fontSize={12 * targetMarkerScale}
                                 fontWeight="600"
                                 textAnchor="middle"
                               >
@@ -1572,6 +1579,29 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </button>
                       </div>
 
+                      <div className="grid grid-cols-4 gap-1 rounded-lg border border-slate-700/60 bg-slate-950/50 p-1">
+                        {[
+                          ['display', 'Display'],
+                          ['device', 'Device'],
+                          ['canvas', 'Canvas'],
+                          ['floor', 'Floor'],
+                        ].map(([tab, label]) => (
+                          <button
+                            key={tab}
+                            type="button"
+                            onClick={() => setSettingsTab(tab as RoomBuilderSettingsTab)}
+                            className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+                              settingsTab === tab
+                                ? 'bg-aqua-600/20 text-aqua-100'
+                                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {settingsTab === 'canvas' && (
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Canvas</div>
                         <label className="flex items-center gap-2">
@@ -1618,7 +1648,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </button>
                         </div>
                       </div>
+                      )}
 
+                      {settingsTab === 'device' && (
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Device placement</div>
                         <div className="grid grid-cols-2 gap-2">
@@ -1853,7 +1885,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           )}
                         </div>
                       </div>
+                      )}
 
+                      {settingsTab === 'floor' && (
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Floor Material</div>
                         <label className="flex items-center gap-2">
@@ -1893,72 +1927,31 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </label>
                         )}
                       </div>
+                      )}
 
-                      {/* Room Element Visibility */}
-                      <div className="space-y-2">
-                        <div className="font-semibold text-slate-200">Room Elements</div>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={showWalls}
-                            onChange={(e) => setShowWalls(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
-                          />
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-3 h-3 rounded border border-cyan-400 bg-cyan-500/30"></span>
-                            Walls
-                          </span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={showFurniture}
-                            onChange={(e) => setShowFurniture(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-0"
-                          />
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-3 h-3 rounded bg-amber-600"></span>
-                            Furniture
-                          </span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={showDoors}
-                            onChange={(e) => setShowDoors(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-orange-500 focus:ring-orange-500 focus:ring-offset-0"
-                          />
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-3 h-3 rounded bg-orange-700"></span>
-                            Doors
-                          </span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={showDeviceIcon}
-                            onChange={(e) => setShowDeviceIcon(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-green-500 focus:ring-green-500 focus:ring-offset-0"
-                          />
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-3 h-3 rounded-full bg-green-500"></span>
-                            Device Icon
-                          </span>
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={showTargets}
-                            onChange={(e) => setShowTargets(e.target.checked)}
-                            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
-                          />
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-3 h-3 rounded-full bg-blue-500"></span>
-                            Live Tracking
-                            {!liveState?.deviceId && <span className="text-slate-500 text-xs ml-1">(No device)</span>}
-                          </span>
-                        </label>
-                      </div>
+                      {settingsTab === 'display' && (
+                      <DisplaySettingsControls
+                        overlayOptions={[
+                          { label: 'Device coverage', checked: showDeviceRadar, onChange: setShowDeviceRadar },
+                          { label: 'Clip radar to walls', checked: clipRadarToWalls, onChange: setClipRadarToWalls },
+                        ]}
+                        roomOptions={[
+                          { label: 'Walls', checked: showWalls, onChange: setShowWalls },
+                          { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
+                          { label: 'Doors', checked: showDoors, onChange: setShowDoors },
+                          { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                          { label: 'Targets', checked: showTargets, onChange: setShowTargets, note: !liveState?.deviceId ? 'No device' : undefined },
+                        ]}
+                        appearance={{
+                          targetMarkerScale,
+                          setTargetMarkerScale,
+                          showZoneLabels,
+                          setShowZoneLabels,
+                          zoneLabelScale,
+                          setZoneLabelScale,
+                        }}
+                      />
+                      )}
                     </div>
                   )}
 

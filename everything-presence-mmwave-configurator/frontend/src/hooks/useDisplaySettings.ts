@@ -7,7 +7,12 @@ export interface DisplaySettings {
   showZones: boolean;
   showDeviceIcon: boolean;
   showDeviceRadar: boolean;
+  showMaxDistanceOverlay: boolean;
+  showTriggerDistanceOverlay: boolean;
   showTargets: boolean;
+  targetMarkerScale: number;
+  showZoneLabels: boolean;
+  zoneLabelScale: number;
   showAlignedDirection: boolean;
   clipRadarToWalls: boolean;
   // Heatmap settings
@@ -25,7 +30,12 @@ const defaultSettings: DisplaySettings = {
   showZones: true,
   showDeviceIcon: true,
   showDeviceRadar: false,
+  showMaxDistanceOverlay: true,
+  showTriggerDistanceOverlay: false,
   showTargets: true,
+  targetMarkerScale: 1,
+  showZoneLabels: true,
+  zoneLabelScale: 1,
   showAlignedDirection: false,
   clipRadarToWalls: true,
   // Heatmap defaults
@@ -89,9 +99,28 @@ export const useDisplaySettings = () => {
     setSettings((prev) => ({ ...prev, showDeviceRadar: value }));
   }, []);
 
+  const setShowMaxDistanceOverlay = useCallback((value: boolean) => {
+    setSettings((prev) => ({ ...prev, showMaxDistanceOverlay: value }));
+  }, []);
+
+  const setShowTriggerDistanceOverlay = useCallback((value: boolean) => {
+    setSettings((prev) => ({ ...prev, showTriggerDistanceOverlay: value }));
+  }, []);
 
   const setShowTargets = useCallback((value: boolean) => {
     setSettings((prev) => ({ ...prev, showTargets: value }));
+  }, []);
+
+  const setTargetMarkerScale = useCallback((value: number) => {
+    setSettings((prev) => ({ ...prev, targetMarkerScale: Math.min(1.75, Math.max(0.5, value)) }));
+  }, []);
+
+  const setShowZoneLabels = useCallback((value: boolean) => {
+    setSettings((prev) => ({ ...prev, showZoneLabels: value }));
+  }, []);
+
+  const setZoneLabelScale = useCallback((value: number) => {
+    setSettings((prev) => ({ ...prev, zoneLabelScale: Math.min(1.75, Math.max(0.5, value)) }));
   }, []);
 
   const setShowAlignedDirection = useCallback((value: boolean) => {
@@ -122,7 +151,12 @@ export const useDisplaySettings = () => {
     showZones: settings.showZones,
     showDeviceIcon: settings.showDeviceIcon,
     showDeviceRadar: settings.showDeviceRadar,
+    showMaxDistanceOverlay: settings.showMaxDistanceOverlay,
+    showTriggerDistanceOverlay: settings.showTriggerDistanceOverlay,
     showTargets: settings.showTargets,
+    targetMarkerScale: settings.targetMarkerScale,
+    showZoneLabels: settings.showZoneLabels,
+    zoneLabelScale: settings.zoneLabelScale,
     showAlignedDirection: settings.showAlignedDirection,
     clipRadarToWalls: settings.clipRadarToWalls,
     heatmapEnabled: settings.heatmapEnabled,
@@ -135,7 +169,12 @@ export const useDisplaySettings = () => {
     setShowZones,
     setShowDeviceIcon,
     setShowDeviceRadar,
+    setShowMaxDistanceOverlay,
+    setShowTriggerDistanceOverlay,
     setShowTargets,
+    setTargetMarkerScale,
+    setShowZoneLabels,
+    setZoneLabelScale,
     setShowAlignedDirection,
     setClipRadarToWalls,
     setHeatmapEnabled,

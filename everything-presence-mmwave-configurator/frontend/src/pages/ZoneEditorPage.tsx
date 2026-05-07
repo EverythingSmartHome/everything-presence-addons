@@ -20,6 +20,7 @@ import {
   CanvasToolbarButton,
   CanvasTopBar,
 } from '../components/CanvasLayout';
+import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
@@ -107,8 +108,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     showDoors, setShowDoors,
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
+    showDeviceRadar, setShowDeviceRadar,
     showTargets, setShowTargets,
-    clipRadarToWalls,
+    targetMarkerScale, setTargetMarkerScale,
+    showZoneLabels, setShowZoneLabels,
+    zoneLabelScale, setZoneLabelScale,
+    clipRadarToWalls, setClipRadarToWalls,
   } = useDisplaySettings();
   const isMobileCanvas = useIsMobileCanvas();
   const loadedRoomRef = useRef<string | null>(null);
@@ -1458,11 +1463,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             deviceIconUrl={deviceIconUrl}
             clipRadarToWalls={clipRadarToWalls}
             heightCoverage={heightCoverageConfig ?? undefined}
-            showRadar
+            showRadar={showDeviceRadar}
             showWalls={showWalls}
             showFurniture={showFurniture}
             showDoors={showDoors}
             showZones={showZones}
+            showZoneLabels={showZoneLabels}
+            zoneLabelScale={zoneLabelScale}
             showDevice={showDeviceIcon}
             onDragStateChange={handleZoneCanvasDragStateChange}
             renderOverlay={({ toCanvas }) => {
@@ -1514,7 +1521,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                             x2={end.x}
                             y2={end.y}
                             stroke="rgba(15, 23, 42, 0.85)"
-                            strokeWidth={8}
+                            strokeWidth={8 * targetMarkerScale}
                             strokeLinecap="round"
                             opacity={0.9}
                           />
@@ -1524,7 +1531,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                             x2={end.x}
                             y2={end.y}
                             stroke={color.fill}
-                            strokeWidth={4}
+                            strokeWidth={4 * targetMarkerScale}
                             strokeLinecap="round"
                             opacity={0.95}
                             strokeDasharray="10 7"
@@ -1532,17 +1539,17 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                           <circle
                             cx={labelPoint.x}
                             cy={labelPoint.y}
-                            r={8}
+                            r={8 * targetMarkerScale}
                             fill={color.fill}
                             stroke="white"
-                            strokeWidth={2}
+                            strokeWidth={2 * targetMarkerScale}
                           />
                           <text
                             x={labelPoint.x}
-                            y={labelPoint.y - 14}
+                            y={labelPoint.y - (14 * targetMarkerScale)}
                             textAnchor="middle"
                             fill="white"
-                            fontSize="12"
+                            fontSize={12 * targetMarkerScale}
                             fontWeight="bold"
                             className="pointer-events-none"
                             style={{ filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.9))' }}
@@ -1569,26 +1576,26 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                           <circle
                             cx={canvasPos.x}
                             cy={canvasPos.y}
-                            r={12}
+                            r={12 * targetMarkerScale}
                             fill={color.fill}
                             fillOpacity={0.3}
                             stroke={color.fill}
-                            strokeWidth={2}
+                            strokeWidth={2 * targetMarkerScale}
                           />
                           <circle
                             cx={canvasPos.x}
                             cy={canvasPos.y}
-                            r={5}
+                            r={5 * targetMarkerScale}
                             fill={color.fill}
                             stroke="white"
-                            strokeWidth={2}
+                            strokeWidth={2 * targetMarkerScale}
                           />
                           <text
                             x={canvasPos.x}
-                            y={canvasPos.y - 18}
+                            y={canvasPos.y - (18 * targetMarkerScale)}
                             textAnchor="middle"
                             fill="white"
-                            fontSize="12"
+                            fontSize={12 * targetMarkerScale}
                             fontWeight="bold"
                             className="pointer-events-none"
                           >
@@ -1723,82 +1730,28 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     Close
                   </button>
                 </div>
-                <div className="space-y-2.5">
-                  {/* Room Element Visibility */}
-                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Room Elements</div>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={showWalls}
-                      onChange={(e) => setShowWalls(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
-                    />
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded border border-cyan-400 bg-cyan-500/30"></span>
-                      Walls
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={showFurniture}
-                      onChange={(e) => setShowFurniture(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-0"
-                    />
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded bg-amber-600"></span>
-                      Furniture
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={showDoors}
-                      onChange={(e) => setShowDoors(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-orange-500 focus:ring-orange-500 focus:ring-offset-0"
-                    />
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded bg-orange-700"></span>
-                      Doors
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={showZones}
-                      onChange={(e) => setShowZones(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
-                    />
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded bg-blue-500/50 border border-blue-400"></span>
-                      Zones
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={showDeviceIcon}
-                      onChange={(e) => setShowDeviceIcon(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-green-500 focus:ring-green-500 focus:ring-offset-0"
-                    />
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-green-500"></span>
-                      Device Icon
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={showTargets}
-                      onChange={(e) => setShowTargets(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-0"
-                    />
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-full bg-cyan-500"></span>
-                      Targets
-                    </span>
-                  </label>
-                </div>
+                <DisplaySettingsControls
+                  overlayOptions={[
+                    { label: 'Device coverage', checked: showDeviceRadar, onChange: setShowDeviceRadar },
+                    { label: 'Clip radar to walls', checked: clipRadarToWalls, onChange: setClipRadarToWalls },
+                  ]}
+                  roomOptions={[
+                    { label: 'Walls', checked: showWalls, onChange: setShowWalls },
+                    { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
+                    { label: 'Doors', checked: showDoors, onChange: setShowDoors },
+                    { label: 'Zones', checked: showZones, onChange: setShowZones },
+                    { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                    { label: 'Targets', checked: showTargets, onChange: setShowTargets },
+                  ]}
+                  appearance={{
+                    targetMarkerScale,
+                    setTargetMarkerScale,
+                    showZoneLabels,
+                    setShowZoneLabels,
+                    zoneLabelScale,
+                    setZoneLabelScale,
+                  }}
+                />
               </div>
             </div>
           )}
