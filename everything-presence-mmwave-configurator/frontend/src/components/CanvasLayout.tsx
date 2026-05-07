@@ -59,7 +59,7 @@ export const CanvasBottomToolbar: React.FC<CanvasBottomToolbarProps> = ({ childr
     role="toolbar"
     aria-label="Canvas actions"
   >
-    <div className="flex items-center justify-around gap-2">
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
       {children}
     </div>
   </div>
@@ -91,7 +91,7 @@ export const CanvasToolbarButton: React.FC<CanvasToolbarButtonProps> = ({
     disabled={disabled}
     onClick={onClick}
     className={joinClasses(
-      'relative flex min-h-[44px] min-w-[56px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aqua-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40',
+      'relative flex min-h-[44px] min-w-[64px] flex-1 shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aqua-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40',
       active
         ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100 shadow-lg shadow-aqua-500/10'
         : 'border-slate-700/70 bg-slate-900/80 text-slate-200 hover:border-slate-600 hover:bg-slate-800',
@@ -101,7 +101,7 @@ export const CanvasToolbarButton: React.FC<CanvasToolbarButtonProps> = ({
     {icon && <span className="text-base leading-none">{icon}</span>}
     <span className="max-w-full truncate leading-tight">{label}</span>
     {badge && (
-      <span className="absolute -right-1 -top-1 rounded-full bg-aqua-500 px-1.5 py-0.5 text-[9px] font-bold leading-none text-slate-950">
+      <span className="absolute right-1 top-1 rounded-full bg-aqua-500 px-1.5 py-0.5 text-[9px] font-bold leading-none text-slate-950">
         {badge}
       </span>
     )}
