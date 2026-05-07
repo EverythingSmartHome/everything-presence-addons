@@ -1518,16 +1518,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 {isDoorPlacementMode ? '✕ Cancel' : '🚪 Add Door'}
               </button>
 
-              <button
-                className={`rounded-xl border px-4 py-2.5 font-semibold shadow-lg transition-all active:scale-95 ${
-                  showSettings
-                    ? 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100'
-                    : 'border-slate-700/50 bg-slate-800/50 text-slate-200 hover:border-slate-600'
-                }`}
-                onClick={() => setShowSettings((v) => !v)}
-              >
-                ⚙️ Settings
-              </button>
             </div>
           </div>
 
@@ -1556,6 +1546,16 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               onClick={() => handleAutoZoom(selectedRoom)}
             >
               Auto Zoom
+            </button>
+            <button
+              className={`rounded-xl border backdrop-blur px-4 py-2.5 text-sm font-semibold shadow-lg transition-all hover:shadow-xl active:scale-95 ${
+                showSettings
+                  ? 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100'
+                  : 'border-slate-700/50 bg-slate-900/90 text-slate-100 hover:border-slate-600 hover:bg-slate-800'
+              }`}
+              onClick={() => setShowSettings((v) => !v)}
+            >
+              Settings
             </button>
           </div>
 
