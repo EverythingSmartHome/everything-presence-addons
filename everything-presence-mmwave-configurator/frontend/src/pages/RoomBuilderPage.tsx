@@ -346,6 +346,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
     setSelectedFurnitureId(newFurniture.id);
     setShowFurnitureLibrary(false);
+    setActiveMobileSheet(null);
   }, [selectedRoom]);
 
   const handleFurnitureChange = useCallback((updatedFurniture: FurnitureInstance) => {
@@ -2155,12 +2156,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
           {/* Furniture Editor Panel */}
           {selectedFurniture && (
-            <FurnitureEditor
-              furniture={selectedFurniture}
-              onChange={handleFurnitureChange}
-              onDelete={handleFurnitureDelete}
-              onClose={() => setSelectedFurnitureId(null)}
-            />
+            <div className="hidden md:block">
+              <FurnitureEditor
+                furniture={selectedFurniture}
+                onChange={handleFurnitureChange}
+                onDelete={handleFurnitureDelete}
+                onClose={() => setSelectedFurnitureId(null)}
+              />
+            </div>
           )}
 
           {/* Door Editor Panel */}
@@ -2327,6 +2330,78 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             Furniture
           </button>
         </div>
+        {selectedFurniture && (
+          <div className="mt-4 space-y-3 rounded-lg border border-purple-600/40 bg-purple-600/10 p-3 text-sm text-slate-200">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold text-white">Selected furniture</div>
+                <div className="text-xs text-slate-400">{selectedFurniture.typeId}</div>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100"
+                onClick={() => setSelectedFurnitureId(null)}
+              >
+                Deselect
+              </button>
+            </div>
+            <label className="block">
+              <span className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <span>Rotation</span>
+                <span className="font-mono text-aqua-300">{Math.round(selectedFurniture.rotationDeg ?? 0)} deg</span>
+              </span>
+              <input
+                type="range"
+                min="0"
+                max="359"
+                value={selectedFurniture.rotationDeg ?? 0}
+                onChange={(e) => handleFurnitureChange({ ...selectedFurniture, rotationDeg: Number(e.target.value) })}
+                className="w-full"
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-xs font-semibold text-slate-400">
+                Width (m)
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={(selectedFurniture.width / 1000).toFixed(2)}
+                  onChange={(e) => {
+                    const width = Number(e.target.value) * 1000;
+                    if (Number.isFinite(width) && width > 0) {
+                      handleFurnitureChange({ ...selectedFurniture, width });
+                    }
+                  }}
+                  className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-100"
+                />
+              </label>
+              <label className="block text-xs font-semibold text-slate-400">
+                Depth (m)
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={(selectedFurniture.depth / 1000).toFixed(2)}
+                  onChange={(e) => {
+                    const depth = Number(e.target.value) * 1000;
+                    if (Number.isFinite(depth) && depth > 0) {
+                      handleFurnitureChange({ ...selectedFurniture, depth });
+                    }
+                  }}
+                  className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-100"
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              className="w-full rounded-lg border border-rose-600/60 bg-rose-600/20 px-3 py-3 font-semibold text-rose-100"
+              onClick={handleFurnitureDelete}
+            >
+              Delete Furniture
+            </button>
+          </div>
+        )}
       </CanvasMobileSheet>
 
       <CanvasMobileSheet
