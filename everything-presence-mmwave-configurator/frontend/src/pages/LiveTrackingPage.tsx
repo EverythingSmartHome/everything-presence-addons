@@ -1074,6 +1074,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             zoom={zoom}
             panOffsetMm={panOffsetMm}
             onPanChange={(next) => setPanOffsetMm(next)}
+            onZoomChange={setZoom}
+            touchPanEnabled
             onCanvasMove={(pt) => setCursorPos(pt)}
             roomShell={selectedRoom.roomShell}
             roomShellFillMode={selectedRoom.roomShellFillMode}

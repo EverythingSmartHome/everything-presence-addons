@@ -52,6 +52,8 @@ interface RoomCanvasProps {
   };
   panOffsetMm?: { x: number; y: number };
   onPanChange?: (offset: { x: number; y: number }) => void;
+  onZoomChange?: (zoom: number) => void;
+  touchPanEnabled?: boolean;
   onDragStateChange?: (isDragging: boolean) => void;
   previewFrom?: Point | null;
   previewTo?: Point | null;
@@ -65,12 +67,14 @@ interface RoomCanvasProps {
   renderOverlay?: (ctx: {
     toCanvas: (p: Point) => { x: number; y: number };
     fromCanvas: (x: number, y: number) => Point;
-    toWorldFromEvent: (e: React.MouseEvent<SVGSVGElement | SVGElement, MouseEvent>) => Point | null;
+    toWorldFromEvent: (e: { clientX: number; clientY: number }) => Point | null;
     svgRef: React.RefObject<SVGSVGElement>;
     rangeMm: number;
     roomShellPoints: Point[];
     devicePlacement: DevicePlacement | undefined;
     fieldOfViewDeg: number;
+    onCanvasPointerMove: (e: React.PointerEvent<SVGElement>) => void;
+    onCanvasPointerRelease: (e: React.PointerEvent<SVGElement>) => void;
     /** Device element to render (when deviceInteractive is false) - render at desired z-order */
     deviceElement?: React.ReactNode;
   }) => React.ReactNode;
@@ -278,7 +282,7 @@ const buildHeightCoveragePolygon = (params: {
 };
 
 const getSvgPoint = (
-  e: React.MouseEvent<SVGSVGElement, MouseEvent>,
+  e: { clientX: number; clientY: number },
   svgEl: SVGSVGElement | null,
 ): { x: number; y: number } | null => {
   if (!svgEl) return null;
@@ -514,6 +518,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   heightCoverage,
   panOffsetMm = { x: 0, y: 0 },
   onPanChange,
+  onZoomChange,
+  touchPanEnabled = false,
   onDragStateChange,
   previewFrom = null,
   previewTo = null,
@@ -590,6 +596,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     currentRotation?: number;
   } | null>(null);
   const suppressClickRef = useRef<boolean>(false);
+  const activePointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
 
   const effectiveRangeMm = Number.isFinite(rangeMm) && rangeMm > 0 ? rangeMm : 6000;
   const effectiveGrid = Number.isFinite(gridSpacingMm) && gridSpacingMm > 0 ? gridSpacingMm : 1000;
@@ -634,7 +642,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     return pathPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
   };
 
-  const toWorldFromEvent = (e: React.MouseEvent<SVGSVGElement | SVGElement, MouseEvent>) => {
+  const toWorldFromEvent = (e: { clientX: number; clientY: number }) => {
     const svgPoint = getSvgPoint(e as any, svgRef.current);
     if (!svgPoint) return null;
     const cx = svgPoint.x - HALF;
@@ -674,14 +682,56 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     onCanvasClick?.(point);
   };
 
-  const handleDragStart = (idx: number) => (e: React.MouseEvent<SVGCircleElement, MouseEvent>) => {
+  const capturePointer = (e: React.PointerEvent<SVGElement>) => {
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Some SVG elements in older webviews can reject capture; dragging still works through bubbling.
+    }
+  };
+
+  const updatePointer = (e: React.PointerEvent<SVGElement>) => {
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  };
+
+  const getPinchDistance = () => {
+    const pointers = Array.from(activePointersRef.current.values());
+    if (pointers.length < 2) return null;
+    return Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
+  };
+
+  const beginPan = (e: React.PointerEvent<SVGElement>) => {
+    const svgPoint = getSvgPoint(e as any, svgRef.current);
+    if (!svgPoint || !onPanChange) return false;
+    e.preventDefault();
+    capturePointer(e);
+    const world = fromCanvasWithOffset(svgPoint.x - HALF, svgPoint.y - HALF, panOffsetMm);
+    setPanDrag({ start: world, base: panOffsetMm });
+    onDragStateChange?.(true);
+    suppressClickRef.current = true;
+    return true;
+  };
+
+  const handleDragStart = (idx: number) => (e: React.PointerEvent<SVGCircleElement>) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     if (e.cancelable) e.preventDefault();
+    capturePointer(e);
     suppressClickRef.current = true;
     setDragIdx(idx);
     onDragStateChange?.(true);
   };
-  const handleMouseUp = () => {
+  const handlePointerUp = (e?: React.PointerEvent<SVGElement>) => {
+    if (e) {
+      activePointersRef.current.delete(e.pointerId);
+      if (activePointersRef.current.size < 2) {
+        pinchRef.current = null;
+      }
+    } else {
+      activePointersRef.current.clear();
+      pinchRef.current = null;
+    }
+
     // Finalize furniture drag
     if (furnitureDrag && onFurnitureChange) {
       const furnitureItem = furniture.find((f) => f.id === furnitureDrag.id);
@@ -746,7 +796,18 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     onCanvasRelease?.();
   };
 
-  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
+  const handlePointerMove = (e: React.PointerEvent<SVGElement>) => {
+    updatePointer(e);
+    if (pinchRef.current && onZoomChange) {
+      const distance = getPinchDistance();
+      if (distance && pinchRef.current.distance > 0) {
+        e.preventDefault();
+        const nextZoom = Math.min(5, Math.max(0.1, pinchRef.current.zoom * (distance / pinchRef.current.distance)));
+        onZoomChange(nextZoom);
+      }
+      return;
+    }
+
     const svgPoint = getSvgPoint(e, svgRef.current);
         if (!svgPoint) return;
         const cx = svgPoint.x - HALF;
@@ -901,6 +962,71 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     }
   };
 
+  const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    updatePointer(e);
+
+    if (activePointersRef.current.size === 2 && onZoomChange) {
+      const distance = getPinchDistance();
+      if (distance) {
+        e.preventDefault();
+        capturePointer(e);
+        pinchRef.current = { distance, zoom: effectiveZoom };
+        setPanDrag(null);
+        onDragStateChange?.(true);
+      }
+      return;
+    }
+
+    if (e.button === 2) {
+      beginPan(e);
+      return;
+    }
+
+    if (e.pointerType !== 'mouse' && touchPanEnabled && onPanChange) {
+      beginPan(e);
+      return;
+    }
+
+    if (e.button !== 0 || !safePoints.length) return;
+    if (lockShell) return;
+    const svgPoint = getSvgPoint(e as any, svgRef.current);
+    if (!svgPoint) return;
+    const cx = svgPoint.x - HALF;
+    const cy = svgPoint.y - HALF;
+    const world = fromCanvasCoord(cx, cy);
+    let best: number | null = null;
+    let bestDist = 250;
+    let bestProj: Point | null = null;
+    safePoints.forEach((p, idx) => {
+      const next = safePoints[(idx + 1) % safePoints.length];
+      const dx = next.x - p.x;
+      const dy = next.y - p.y;
+      const len2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((world.x - p.x) * dx + (world.y - p.y) * dy) / len2));
+      const projX = p.x + t * dx;
+      const projY = p.y + t * dy;
+      const dist = Math.hypot(world.x - projX, world.y - projY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = idx;
+        bestProj = { x: projX, y: projY };
+      }
+    });
+    if (!isDoorPlacementMode && e.shiftKey && onSegmentInsert && best !== null && bestProj) {
+      e.preventDefault();
+      e.stopPropagation();
+      onSegmentInsert(best, bestProj);
+      suppressClickRef.current = true;
+      return;
+    }
+    onSegmentSelect?.(best);
+    if (best !== null && onSegmentDragStart) {
+      onSegmentDragStart(best, world);
+      suppressClickRef.current = true;
+      onDragStateChange?.(true);
+    }
+  };
+
   return (
     <div className="w-full h-full">
       <svg
@@ -909,11 +1035,15 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
         viewBox={`${viewMin} ${viewMin} ${viewSize} ${viewSize}`}
         height={height}
         className="bg-slate-900"
+        style={{ touchAction: 'none' }}
         onClick={handleSvgClick}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onMouseOver={(e) => {
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={(e) => {
+          if (e.pointerType === 'mouse') handlePointerUp(e);
+        }}
+        onPointerOver={(e) => {
         if (!safePoints.length || lockShell) return;
         const svgPoint = getSvgPoint(e as any, svgRef.current);
         if (!svgPoint) return;
@@ -938,58 +1068,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           });
           onSegmentHover?.(best);
         }}
-        onMouseOut={() => onSegmentHover?.(null)}
-        onMouseDown={(e) => {
-          if ((e as any).button === 2) {
-            // right-drag to pan
-            const svgPoint = getSvgPoint(e as any, svgRef.current);
-            if (!svgPoint || !onPanChange) return;
-            e.preventDefault();
-            const world = fromCanvasWithOffset(svgPoint.x - HALF, svgPoint.y - HALF, panOffsetMm);
-            setPanDrag({ start: world, base: panOffsetMm });
-            onDragStateChange?.(true);
-            suppressClickRef.current = true;
-            return;
-          }
-          if ((e as any).button !== 0 || !safePoints.length) return;
-          if (lockShell) return;
-          const svgPoint = getSvgPoint(e as any, svgRef.current);
-          if (!svgPoint) return;
-          const cx = svgPoint.x - HALF;
-          const cy = svgPoint.y - HALF;
-          const world = fromCanvasCoord(cx, cy);
-          let best: number | null = null;
-          let bestDist = 250;
-          let bestProj: Point | null = null;
-          safePoints.forEach((p, idx) => {
-            const next = safePoints[(idx + 1) % safePoints.length];
-            const dx = next.x - p.x;
-            const dy = next.y - p.y;
-            const len2 = dx * dx + dy * dy || 1;
-            const t = Math.max(0, Math.min(1, ((world.x - p.x) * dx + (world.y - p.y) * dy) / len2));
-            const projX = p.x + t * dx;
-            const projY = p.y + t * dy;
-            const dist = Math.hypot(world.x - projX, world.y - projY);
-            if (dist < bestDist) {
-              bestDist = dist;
-              best = idx;
-              bestProj = { x: projX, y: projY };
-            }
-          });
-          if (!isDoorPlacementMode && (e as any).shiftKey && onSegmentInsert && best !== null && bestProj) {
-            e.preventDefault();
-            e.stopPropagation();
-            onSegmentInsert(best, bestProj);
-            suppressClickRef.current = true;
-            return;
-          }
-          onSegmentSelect?.(best);
-          if (best !== null && onSegmentDragStart) {
-            onSegmentDragStart(best, world);
-            suppressClickRef.current = true;
-            onDragStateChange?.(true);
-          }
-        }}
+        onPointerOut={() => onSegmentHover?.(null)}
+        onPointerDown={handlePointerDown}
         onContextMenu={(e) => e.preventDefault()}
       >
         <defs>
@@ -1059,11 +1139,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     <circle
                       cx={cx}
                       cy={cy}
-                      r={8}
+                      r={11}
                       fill="#0ea5e9"
                       stroke="#e0f2fe"
                       strokeWidth={2}
-                      onMouseDown={handleDragStart(idx)}
+                      onPointerDown={handleDragStart(idx)}
                     />
                   </g>
                 );
@@ -1157,17 +1237,18 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                 return (
                   <>
                     <rect
-                      x={x1 - 6}
-                      y={y1 - 6}
-                      width={12}
-                      height={12}
+                      x={x1 - 9}
+                      y={y1 - 9}
+                      width={18}
+                      height={18}
                       fill="#0ea5e9"
                       stroke="#e0f2fe"
                       strokeWidth={2}
                       rx={2}
-                      onMouseDown={(e) => {
+                      onPointerDown={(e) => {
                         e.stopPropagation();
                         if (e.cancelable) e.preventDefault();
+                        capturePointer(e);
                         if (onEndpointDragStart) {
                           const world = toWorldFromEvent(e as any) ?? { x: p.x, y: p.y };
                           onEndpointDragStart(selectedSegment, 'start', world);
@@ -1177,17 +1258,18 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       }}
                     />
                     <rect
-                      x={x2 - 6}
-                      y={y2 - 6}
-                      width={12}
-                      height={12}
+                      x={x2 - 9}
+                      y={y2 - 9}
+                      width={18}
+                      height={18}
                       fill="#0ea5e9"
                       stroke="#e0f2fe"
                       strokeWidth={2}
                       rx={2}
-                      onMouseDown={(e) => {
+                      onPointerDown={(e) => {
                         e.stopPropagation();
                         if (e.cancelable) e.preventDefault();
+                        capturePointer(e);
                         if (onEndpointDragStart) {
                           const world = toWorldFromEvent(e as any) ?? { x: next.x, y: next.y };
                           onEndpointDragStart(selectedSegment, 'end', world);
@@ -1319,9 +1401,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   height={Math.abs(arcEndY) + 30}
                   fill="transparent"
                   style={{ cursor: isSelected ? 'grab' : 'pointer' }}
-                  onMouseDown={(e) => {
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
                     e.stopPropagation();
-                    suppressClickRef.current = false;
+                    if (e.cancelable) e.preventDefault();
+                    capturePointer(e);
+                    suppressClickRef.current = true;
 
                     // Select the door
                     onDoorSelect?.(door.id);
@@ -1450,11 +1535,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   strokeDasharray={isSelected ? '4 2' : undefined}
                   rx={3}
                   style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
-                  onMouseDown={(e) => {
+                  onPointerDown={(e) => {
                     e.stopPropagation();
+                    capturePointer(e);
                     const worldPos = toWorldFromEvent(e as any);
                     if (!worldPos) return;
-                    suppressClickRef.current = false;
+                    suppressClickRef.current = true;
                     setFurnitureDrag({ id: item.id, start: worldPos, basePos: { x: item.x, y: item.y } });
                     onDragStateChange?.(true);
                     onFurnitureSelect?.(item.id);
@@ -1464,7 +1550,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
 
               {/* Resize handles (only when selected and not dragging/rotating) */}
               {isSelected && !isDragging && !isResizing && !isRotating && (() => {
-                const handleSize = 8;
+                const handleSize = 14;
                 const handles: Array<{ corner: 'nw' | 'ne' | 'sw' | 'se'; x: number; y: number; cursor: string }> = [
                   { corner: 'nw', x: -canvasWidth / 2, y: -canvasHeight / 2, cursor: 'nwse-resize' },
                   { corner: 'ne', x: canvasWidth / 2, y: -canvasHeight / 2, cursor: 'nesw-resize' },
@@ -1487,11 +1573,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                         rx={1}
                         transform={`translate(${canvasPos.x}, ${canvasPos.y}) rotate(${displayRotation})`}
                         style={{ transformOrigin: '0 0', cursor: handle.cursor }}
-                        onMouseDown={(e) => {
+                        onPointerDown={(e) => {
                           e.stopPropagation();
+                          capturePointer(e);
                           const worldPos = toWorldFromEvent(e as any);
                           if (!worldPos) return;
-                          suppressClickRef.current = false;
+                          suppressClickRef.current = true;
                           setFurnitureResize({
                             id: item.id,
                             corner: handle.corner,
@@ -1519,16 +1606,17 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       <circle
                         cx={0}
                         cy={-canvasHeight / 2 - 20}
-                        r={6}
+                        r={10}
                         fill="#a855f7"
                         stroke="#ffffff"
                         strokeWidth={1.5}
                         style={{ cursor: 'grab' }}
-                        onMouseDown={(e) => {
+                        onPointerDown={(e) => {
                           e.stopPropagation();
+                          capturePointer(e);
                           const worldPos = toWorldFromEvent(e as any);
                           if (!worldPos) return;
-                          suppressClickRef.current = false;
+                          suppressClickRef.current = true;
                           setFurnitureRotate({
                             id: item.id,
                             start: worldPos,
@@ -1556,6 +1644,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           roomShellPoints: safePoints,
           devicePlacement: safePlacement,
           fieldOfViewDeg: effectiveFov,
+          onCanvasPointerMove: handlePointerMove,
+          onCanvasPointerRelease: handlePointerUp,
           deviceElement: (!deviceInteractive && showDevice && devicePlacement && safePlacement) ? (() => {
             const { x: px, y: py } = toCanvasCoord(safePlacement);
             // Add 90 degrees so that 0 degrees points down (Y+) instead of right (X+)
@@ -1885,7 +1975,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       width={iconSize}
                       height={iconSize}
                       style={{ cursor: 'grab', pointerEvents: 'all' }}
-                      onMouseDown={() => {
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        capturePointer(e);
+                        suppressClickRef.current = true;
                         setDragDevice(true);
                         onDragStateChange?.(true);
                       }}
@@ -1900,7 +1995,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       fill="#3b82f6"
                       stroke="#1d4ed8"
                       strokeWidth={2}
-                      onMouseDown={() => {
+                      onPointerDown={(e) => {
+                        if (e.button !== 0) return;
+                        e.stopPropagation();
+                        if (e.cancelable) e.preventDefault();
+                        capturePointer(e);
+                        suppressClickRef.current = true;
                         setDragDevice(true);
                         onDragStateChange?.(true);
                       }}

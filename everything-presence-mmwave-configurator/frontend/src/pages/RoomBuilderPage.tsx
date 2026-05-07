@@ -1232,6 +1232,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   zoom={zoom}
                   panOffsetMm={panOffsetMm}
                   onPanChange={(next) => setPanOffsetMm(next)}
+                  onZoomChange={setZoom}
+                  touchPanEnabled={!isDrawingWall && !isDoorPlacementMode}
                   displayUnits={displayUnits}
                   devicePlacement={
                     selectedRoom.devicePlacement ?? {
