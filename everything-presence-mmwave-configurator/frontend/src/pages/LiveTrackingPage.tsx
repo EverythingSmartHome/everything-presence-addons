@@ -2003,7 +2003,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
           {/* Settings Panel (appears when toggled) */}
           {showSettings && (
-            <div className="absolute bottom-6 right-6 z-50 hidden w-64 md:block">
+            <div className="absolute bottom-40 right-6 z-50 hidden w-64 md:block">
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur p-4 shadow-xl">
                 <div className="text-sm font-semibold text-slate-100 mb-3">Display Settings</div>
                 <div className="space-y-2.5">
@@ -2269,7 +2269,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
           {/* EP1 Recommendations Popup */}
           {showRecommendations && isEP1 && selectedRoom && liveState && (
-            <div className="absolute bottom-6 right-6 z-50 hidden w-80 md:block">
+            <div className="absolute bottom-40 right-6 z-50 hidden w-80 md:block">
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur p-4 shadow-xl">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-sm font-semibold text-slate-100">💡 Settings Recommendations</div>
@@ -2383,8 +2383,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             </div>
           )}
 
-          {/* Floating Controls (bottom left, above snap) */}
-          <div className={`absolute ${isEP1 ? 'bottom-32' : 'bottom-56'} left-6 z-40 hidden flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-3 py-3 shadow-xl md:flex`}>
+          {/* Floating Controls (bottom right) */}
+          <div className="absolute bottom-6 right-6 z-40 hidden flex-col gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-3 py-3 shadow-xl md:flex">
             <div className="flex flex-wrap gap-1.5">
               <button
                 className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-1.5 text-xs font-semibold text-slate-100 transition-all hover:border-slate-600 hover:bg-slate-700 active:scale-95"
@@ -2425,7 +2425,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                     ? 'border-slate-500 bg-slate-600/90 text-slate-100'
                     : 'border-slate-700/50 bg-slate-800/50 text-slate-100 hover:border-slate-600 hover:bg-slate-700'
                 }`}
-                onClick={() => setShowSettings((v) => !v)}
+                onClick={() => {
+                  setShowRecommendations(false);
+                  setShowSettings((v) => !v);
+                }}
                 title="Display Settings"
               >
                 🎨 Display
@@ -2446,7 +2449,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                       ? 'border-emerald-500 bg-emerald-600/20 text-emerald-100'
                       : 'border-slate-700/50 bg-slate-800/50 text-slate-100 hover:border-slate-600 hover:bg-slate-700'
                   }`}
-                  onClick={() => setShowRecommendations((v) => !v)}
+                  onClick={() => {
+                    setShowSettings(false);
+                    setShowRecommendations((v) => !v);
+                  }}
                   title="Settings Recommendations"
                 >
                   💡 Tips
