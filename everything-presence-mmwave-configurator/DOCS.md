@@ -11,7 +11,7 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 1. Click the Home Assistant My button below to open the add-on on your Home
    Assistant instance.
 
-    [![Open your Home Assistant instance and show the dashboard of an add-on.][ha-addon-svg]][ha-addon-url]
+    [![Open your Home Assistant instance and show the dashboard of an app.][ha-addon-svg]][ha-addon-url]
 
    - If that link doesn't work, then...
 
