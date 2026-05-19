@@ -1,10 +1,10 @@
-# Everything Presence Add-ons
+# Everything Presence Apps
 
 [![Stars][stars-shield]][repo]  [![Release][release-shield]][release] [![Discord][discord-shield]][discord]
 
 ## About
 
-Home Assistant add-ons for Everything Presence One/Lite/Pro mmWave presence sensors.
+Home Assistant apps for Everything Presence One/Lite/Pro mmWave presence sensors.
 
 ## Install Repository
 
@@ -24,17 +24,17 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 
         1. Click **`+ Add`** then **`Close`**.
 
-1. Scroll to the section **`"Everything Presence Add-ons"`**.
+1. Scroll to the section **`"Everything Presence Apps"`**.
 
-1. Install any of the **`Add-ons`** in this repository.
+1. Install any of the **`Apps`** in this repository.
 
-## Add-ons provided by this repository
+## Apps provided by this repository
 
 ### Everything Presence Zone Configurator
 
 A visual configuration tool for Everything Presence devices in Home Assistant.
 
-**[📚 Zone Configurator Add-on documentation:][zc-repo-addon-docs]** Use for Home Assistant OS Installations
+**[📚 Zone Configurator App documentation:][zc-repo-addon-docs]** Use for Home Assistant OS Installations
 
 **[📚 Zone Configurator Standalone Docker Documentation][zc-repo-standalone-docs]** Use for Home Assistant Installations that **DO NOT** support add-ons.
 

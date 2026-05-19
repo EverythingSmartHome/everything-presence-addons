@@ -1,4 +1,4 @@
-# Everything Presence Add-on: Zone Configurator
+# Everything Presence App: Zone Configurator
 
 [![Stars][stars-shield]][repo]  [![Release][release-shield]][release] [![Discord][discord-shield]][discord]
 
@@ -23,13 +23,13 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 
         1. Click **`+ Add`** then **`Close`**.
 
-1. Scroll to the section **"Everything Presence Add-ons"**
+1. Scroll to the section **"Everything Presence Apps"**
 
 1. Click **"Everything Presence Zone Configurator"** and then Install.
 
-1. Start the **Everything Presence Zone Configurator** add-on.
+1. Start the **Everything Presence Zone Configurator** app.
 
-1. Check the logs of the **Everything Presence Zone Configurator** add-on to see if everything started correctly.
+1. Check the logs of the **Everything Presence Zone Configurator** app to see if everything started correctly.
 
 1. Click the **OPEN WEB UI** button to open **Everything Presence Zone Configurator**.
 
@@ -47,14 +47,14 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 
 ## Quick Links
 
-| I want to...              | Go to...
-| :-------------------------| :-
-| Install the add-on        | [Installation][installation]
-| Set up my first device    | [Setup Wizard][setup-wizard]
-| Create detection zones    | [Zone Editor][zone-editor]
-| Draw my room layout       | [Room Builder][room-builder]
-| Fix a problem             | [Troubleshooting][troubleshooting]
-| Update device firmware    | [Firmware Updates][firmware-updates]
+| I want to...           | Go to...                             |
+| :--------------------- | :----------------------------------- |
+| Install the app        | [Installation][installation]         |
+| Set up my first device | [Setup Wizard][setup-wizard]         |
+| Create detection zones | [Zone Editor][zone-editor]           |
+| Draw my room layout    | [Room Builder][room-builder]         |
+| Fix a problem          | [Troubleshooting][troubleshooting]   |
+| Update device firmware | [Firmware Updates][firmware-updates] |
 
 <!--
 ###########################

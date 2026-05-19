@@ -2503,7 +2503,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                         To avoid installing incompatible firmware, updates are disabled.
                       </p>
                       <p className="mb-3 text-xs text-amber-200">
-                        Flash the latest firmware via USB to enable over-the-air updates in this add-on.
+                        Flash the latest firmware via USB to enable over-the-air updates in this app.
                       </p>
                       <a
                         href="https://docs.everythingsmart.io"

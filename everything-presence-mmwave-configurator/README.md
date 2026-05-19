@@ -1,10 +1,10 @@
-# Everything Presence Add-on: Zone Configurator
+# Everything Presence App: Zone Configurator
 
 [![Stars][stars-shield]][repo]  [![Release][release-shield]][release] [![Discord][discord-shield]][discord]
 
 ---
 
-[Zone Configurator][zone-configurator] is a Home Assistant add-on that provides a visual interface for configuring Everything Presence devices. Draw room layouts, create detection zones, and watch real-time target tracking - all from your browser.
+[Zone Configurator][zone-configurator] is a Home Assistant app that provides a visual interface for configuring Everything Presence devices. Draw room layouts, create detection zones, and watch real-time target tracking - all from your browser.
 
 ![Zone Configurator Frontend][screenshot]
 
@@ -33,7 +33,7 @@
 
 ## Requirements
 
-- Home Assistant (with Supervisor for add-on, or Docker for standalone)
+- Home Assistant (with Supervisor for app, or Docker for standalone)
 - Everything Presence Pro, Lite, or One device
 - Device already configured and connected to Home Assistant
 
