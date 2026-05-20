@@ -18,8 +18,8 @@ ports:
   42069/tcp: null
   38080/tcp: 38080
 ports_description:
-  42069/tcp: Optional direct access (ingress preferred, configurable in add-on settings)
-  38080/tcp: LAN firmware server for device OTA updates (configurable in add-on settings)
+  42069/tcp: Optional direct access (ingress preferred, configurable in app settings)
+  38080/tcp: LAN firmware server for device OTA updates (configurable in app settings)
 homeassistant_api: true
 auth_api: true
 hassio_api: true
