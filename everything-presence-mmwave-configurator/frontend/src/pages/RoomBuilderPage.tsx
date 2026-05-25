@@ -555,6 +555,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     return validateDoor(selectedDoor, selectedRoom.doors ?? [], selectedRoom.roomShell);
   }, [selectedDoor, selectedRoom, validateDoor]);
 
+  const desktopEditorOpen = !!selectedDoor || !!selectedFurniture;
+
   // Wall drawing hook
   const {
     isDrawingWall,
@@ -1185,7 +1187,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       <button
         onClick={handleSaveRoom}
         disabled={saving}
-        className="absolute top-6 right-6 z-40 hidden rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95 md:block"
+        className={`absolute top-6 z-40 hidden rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95 md:block ${desktopEditorOpen ? 'right-[22rem]' : 'right-6'}`}
       >
         {saving ? 'Saving...' : 'Save Room'}
       </button>
