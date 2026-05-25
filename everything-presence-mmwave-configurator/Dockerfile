@@ -4,17 +4,14 @@ FROM node:20-alpine AS build
 WORKDIR /app
 ENV NODE_ENV=development
 
-# Install dependencies for workspace build
+# Source copied before install so install+build+prune is one atomic layer
+# invalidated by source changes — fixes stale-install failure (#306).
 COPY package.json package-lock.json ./
-COPY backend/package.json backend/package.json
-COPY frontend/package.json frontend/package.json
-RUN npm ci --include=dev
-
-# Copy sources and build
 COPY backend backend
 COPY frontend frontend
-RUN npm run build --workspaces
-RUN npm prune --omit=dev --workspaces
+RUN npm ci --include=dev \
+ && npm run build --workspaces \
+ && npm prune --omit=dev --workspaces
 
 FROM ${BUILD_FROM} AS addon
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
