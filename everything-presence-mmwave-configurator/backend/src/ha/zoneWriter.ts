@@ -330,7 +330,9 @@ export class ZoneWriter {
           if (zoneEntitySet.endX) updates.push({ entity: zoneEntitySet.endX, value: zone.x + zone.width });
           if (zoneEntitySet.beginY) updates.push({ entity: zoneEntitySet.beginY, value: zone.y });
           if (zoneEntitySet.endY) updates.push({ entity: zoneEntitySet.endY, value: zone.y + zone.height });
-          if (zoneEntitySet.offDelay) updates.push({ entity: zoneEntitySet.offDelay, value: 15 });
+          if (zoneEntitySet.offDelay && typeof zone.timeout === 'number') {
+            updates.push({ entity: zoneEntitySet.offDelay, value: zone.timeout });
+          }
         } else {
           // Clear unused zone slot by setting all coordinates to 0
           if (zoneEntitySet.beginX) updates.push({ entity: zoneEntitySet.beginX, value: 0 });
