@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-pr:
-    name: Build Docker Images (PR)
+  build-pr-matrix:
+    name: "Build Docker Image (PR) (${{ matrix.arch }})"
     if: github.event_name != 'push'
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -76,6 +76,20 @@ jobs:
             BUILD_FROM=${{ matrix.build_from }}
           tags: |
             ${{ env.ADDON_IMAGE_TAG }}
+
+  build-pr:
+    name: Build Docker Images (PR)
+    if: ${{ always() && github.event_name != 'push' }}
+    needs: build-pr-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check matrix result
+        run: |
+          if [ "${{ needs.build-pr-matrix.result }}" != "success" ]; then
+            echo "One or more matrix builds failed: ${{ needs.build-pr-matrix.result }}"
+            exit 1
+          fi
+          echo "All matrix builds passed"
 
   build-push-standalone:
     name: Build and Push Standalone Image
