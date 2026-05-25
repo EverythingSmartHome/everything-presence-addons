@@ -96,6 +96,7 @@ export interface ZoneRect {
   y: number;
   width: number;
   height: number;
+  timeout?: number;
   enabled?: boolean; // Whether this zone slot is active/configured
   label?: string; // Custom display label (e.g., "Bed", "Chair")
 }

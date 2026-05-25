@@ -216,13 +216,14 @@ export class ZoneReader {
         }
 
         if (!zoneEntitySet) continue;
-        const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity } = zoneEntitySet;
+        const { beginX: beginXEntity, endX: endXEntity, beginY: beginYEntity, endY: endYEntity, offDelay: offDelayEntity } = zoneEntitySet;
 
-        const [beginXState, endXState, beginYState, endYState] = await Promise.all([
+        const [beginXState, endXState, beginYState, endYState, offDelayState] = await Promise.all([
           this.readTransport.getState(beginXEntity),
           this.readTransport.getState(endXEntity),
           this.readTransport.getState(beginYEntity),
           this.readTransport.getState(endYEntity),
+          offDelayEntity ? this.readTransport.getState(offDelayEntity) : Promise.resolve(null),
         ]);
 
         if (!beginXState || !endXState || !beginYState || !endYState) continue;
@@ -245,6 +246,8 @@ export class ZoneReader {
         // Skip zones with no area
         if (width === 0 || height === 0) continue;
 
+        const timeout = this.parseStateNumber(offDelayState);
+
         zones.push({
           id: `Zone ${i}`,
           type: 'regular',
@@ -252,6 +255,7 @@ export class ZoneReader {
           y,
           width,
           height,
+          ...(timeout !== null ? { timeout } : {}),
         });
       } catch (error) {
         logger.warn({ key, error }, 'Failed to read zone');
