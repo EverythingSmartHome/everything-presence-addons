@@ -172,11 +172,11 @@ body {
 }
 
 .light .text-slate-400 {
-  color: #64748b !important;
+  color: #475569 !important;
 }
 
 .light .text-slate-500 {
-  color: #94a3b8 !important;
+  color: #64748b !important;
 }
 
 .light .text-white {
@@ -411,7 +411,22 @@ body {
 }
 
 .light .text-amber-100 {
+  color: #92400e !important;
+}
+
+.light .text-amber-300,
+.light .text-amber-400 {
   color: #b45309 !important;
+}
+
+.light .text-yellow-100 {
+  color: #854d0e !important;
+}
+
+.light .text-yellow-200,
+.light .text-yellow-300,
+.light .text-yellow-400 {
+  color: #a16207 !important;
 }
 
 .light .text-rose-100 {
@@ -428,7 +443,15 @@ body {
 }
 
 .light .bg-amber-600\/10 {
-  background-color: rgba(217, 119, 6, 0.15) !important;
+  background-color: rgba(217, 119, 6, 0.18) !important;
+}
+
+.light .bg-yellow-500\/10 {
+  background-color: rgba(234, 179, 8, 0.16) !important;
+}
+
+.light .bg-yellow-500\/20 {
+  background-color: rgba(234, 179, 8, 0.22) !important;
 }
 
 .light .bg-rose-600\/10 {
@@ -448,7 +471,15 @@ body {
 }
 
 .light .border-amber-600\/50 {
-  border-color: rgba(217, 119, 6, 0.5) !important;
+  border-color: rgba(180, 83, 9, 0.45) !important;
+}
+
+.light .border-yellow-500\/30 {
+  border-color: rgba(202, 138, 4, 0.35) !important;
+}
+
+.light .border-yellow-500\/50 {
+  border-color: rgba(202, 138, 4, 0.45) !important;
 }
 
 .light .border-rose-600\/50 {
