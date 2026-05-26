@@ -28,6 +28,38 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
   };
 
   const hasWarnings = validation && (validation.overlaps || validation.nearCorner || validation.tooWide);
+  const swingDirectionOptions: Array<{
+    value: Door['swingDirection'];
+    label: string;
+    description: string;
+  }> = [
+    {
+      value: 'in',
+      label: 'Into room',
+      description: 'Door opens into the selected room',
+    },
+    {
+      value: 'out',
+      label: 'Out of room',
+      description: 'Door opens away from the selected room',
+    },
+  ];
+  const hingeSideOptions: Array<{
+    value: Door['swingSide'];
+    label: string;
+    description: string;
+  }> = [
+    {
+      value: 'left',
+      label: 'Left',
+      description: 'Hinge is on the left side of the doorway',
+    },
+    {
+      value: 'right',
+      label: 'Right',
+      description: 'Hinge is on the right side of the doorway',
+    },
+  ];
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-80 bg-slate-900/95 backdrop-blur border-l border-slate-700 shadow-2xl flex flex-col">
@@ -163,56 +195,91 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
         <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Swing Direction</label>
           <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => handleChange({ swingDirection: 'in' })}
-              className={`px-4 py-2 rounded-lg border transition-all ${
-                door.swingDirection === 'in'
-                  ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
-                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
-              }`}
-            >
-              Inward
-            </button>
-            <button
-              onClick={() => handleChange({ swingDirection: 'out' })}
-              className={`px-4 py-2 rounded-lg border transition-all ${
-                door.swingDirection === 'out'
-                  ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
-                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
-              }`}
-            >
-              Outward
-            </button>
+            {swingDirectionOptions.map((option) => {
+              const isIn = option.value === 'in';
+              const panelY = isIn ? 32 : 8;
+              const sweep = isIn ? 1 : 0;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => handleChange({ swingDirection: option.value })}
+                  className={`rounded-lg border p-3 transition-all ${
+                    door.swingDirection === option.value
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                      : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                  }`}
+                  aria-label={option.description}
+                  title={option.description}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <svg className="h-12 w-12" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                      <rect x="3" y="21" width="42" height="24" fill="currentColor" opacity="0.1" rx="2" />
+                      <line x1="3" y1="20" x2="18" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <line x1="30" y1="20" x2="45" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <path
+                        d={`M30 20 A12 12 0 0 ${sweep} 18 ${panelY}`}
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeOpacity="0.6"
+                        strokeDasharray="3 2"
+                        strokeLinecap="round"
+                      />
+                      <line x1="18" y1="20" x2="18" y2={panelY} stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                      <circle cx="18" cy="20" r="2" fill="currentColor" />
+                    </svg>
+                    <span className="text-sm font-medium">{option.label}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <p className="text-xs text-slate-400 mt-1">Direction door swings relative to room</p>
+          <p className="text-xs text-slate-400 mt-1">Shaded side is the room. Door swing matches the canvas.</p>
         </div>
 
         {/* Hinge Side */}
         <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Hinge Side</label>
           <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => handleChange({ swingSide: 'left' })}
-              className={`px-4 py-2 rounded-lg border transition-all ${
-                door.swingSide === 'left'
-                  ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
-                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
-              }`}
-            >
-              Left
-            </button>
-            <button
-              onClick={() => handleChange({ swingSide: 'right' })}
-              className={`px-4 py-2 rounded-lg border transition-all ${
-                door.swingSide === 'right'
-                  ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
-                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
-              }`}
-            >
-              Right
-            </button>
+            {hingeSideOptions.map((option) => {
+              const isLeft = option.value === 'left';
+              const hingeX = isLeft ? 18 : 30;
+              const freeEndClosedX = isLeft ? 30 : 18;
+              const sweep = isLeft ? 1 : 0;
+              return (
+                <button
+                  key={option.value}
+                  onClick={() => handleChange({ swingSide: option.value })}
+                  className={`rounded-lg border p-3 transition-all ${
+                    door.swingSide === option.value
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                      : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                  }`}
+                  aria-label={option.description}
+                  title={option.description}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <svg className="h-12 w-12" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                      <rect x="3" y="21" width="42" height="24" fill="currentColor" opacity="0.1" rx="2" />
+                      <line x1="3" y1="20" x2="18" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <line x1="30" y1="20" x2="45" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <path
+                        d={`M${freeEndClosedX} 20 A12 12 0 0 ${sweep} ${hingeX} 32`}
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeOpacity="0.6"
+                        strokeDasharray="3 2"
+                        strokeLinecap="round"
+                      />
+                      <line x1={hingeX} y1="20" x2={hingeX} y2="32" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                      <circle cx={hingeX} cy="20" r="2" fill="currentColor" />
+                    </svg>
+                    <span className="text-sm font-medium">{option.label}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <p className="text-xs text-slate-400 mt-1">Which side the hinge is on</p>
+          <p className="text-xs text-slate-400 mt-1">Dot marks the hinge; the panel and arc swing from that side.</p>
         </div>
       </div>
 
