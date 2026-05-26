@@ -110,6 +110,19 @@ const fromCanvas = (v: number, range: number) => (v / CANVAS_SIZE) * range;
 
 const degToRad = (deg: number) => (deg * Math.PI) / 180;
 
+const getSignedPolygonArea = (points: Point[]) => {
+  if (points.length < 3) return 0;
+
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    area += points[i].x * points[j].y;
+    area -= points[j].x * points[i].y;
+  }
+
+  return area / 2;
+};
+
 const getClosestWallIntersectionDistance = (
   origin: Point,
   rayEnd: Point,
@@ -607,6 +620,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   const effectiveZoom = Math.min(5, Math.max(0.1, Number.isFinite(zoom) ? zoom : 1));
   const viewSize = CANVAS_SIZE / effectiveZoom;
   const viewMin = (CANVAS_SIZE - viewSize) / 2;
+  const roomSignedArea = getSignedPolygonArea(safePoints);
+  const inwardNormalSign = roomSignedArea >= 0 ? 1 : -1;
 
   const toCanvasCoord = (p: Point) => ({
     x: HALF + toCanvas(p.x - panOffsetMm.x, effectiveRangeMm),
@@ -1348,8 +1363,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           // Calculate arc for a 90-degree door swing
           // The arc traces the path of the door's free end (opposite from hinge)
 
-          // Negative Y is "into the room" (up in SVG coords), positive Y is "out" (down)
-          const arcDirection = door.swingDirection === 'in' ? -1 : 1;
+          // Room interior lies on different sides of the wall depending on polygon winding.
+          const arcDirection = door.swingDirection === 'in' ? inwardNormalSign : -inwardNormalSign;
 
           // The arc goes from closed position (along wall) to open position (perpendicular)
           // Start: FREE end of door when closed (opposite from hinge, along x-axis)
@@ -1364,14 +1379,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           // Determine which arc to draw (0 = short 90° arc, 1 = long arc)
           const largeArcFlag = 0;
 
-          // Sweep flag: 1 = clockwise, 0 = counterclockwise (in SVG coords where Y increases downward)
-          // For a concave arc (curving toward the hinge/center):
-          // - Left hinge, swinging in (negative Y): sweep counterclockwise (0)
-          // - Left hinge, swinging out (positive Y): sweep clockwise (1)
-          // - Right hinge, swinging in (negative Y): sweep clockwise (1)
-          // - Right hinge, swinging out (positive Y): sweep counterclockwise (0)
-          const sweepFlag = (door.swingSide === 'left' && door.swingDirection === 'in') ||
-                            (door.swingSide === 'right' && door.swingDirection === 'out') ? 0 : 1;
+          const startVector = { x: arcStartX - hingeOffset, y: arcStartY };
+          const endVector = { x: arcEndX - hingeOffset, y: arcEndY };
+          const crossProduct = (startVector.x * endVector.y) - (startVector.y * endVector.x);
+          const sweepFlag = crossProduct > 0 ? 1 : 0;
 
           return (
             <g key={door.id}>
