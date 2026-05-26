@@ -1533,7 +1533,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           </div>
 
           {/* Live State Info Panel (or EP1 Info Stack) */}
-          <div className="absolute top-24 right-6 z-40 hidden w-72 max-w-full flex-col gap-3 md:flex">
+          <div className="absolute top-24 right-6 bottom-28 z-40 hidden w-72 max-w-full md:block">
+            <div className="live-dashboard-rail relative h-full">
+              <div className="live-dashboard-rail__fade-top" />
+              <div className="live-dashboard-rail__fade-bottom" />
+              <div className="live-dashboard-rail__scroll h-full space-y-3 overflow-y-auto pr-2 pb-2">
             {/* Main Status Panel */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-4 text-sm text-slate-200 shadow-xl">
               <div className="flex items-center gap-2 mb-3">
@@ -2004,6 +2008,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             {heatmapEnabled && heatmapData?.hourlyBreakdown && (
               <HourlyActivityChart data={heatmapData.hourlyBreakdown} visible={heatmapEnabled} />
             )}
+              </div>
+            </div>
           </div>
 
 
