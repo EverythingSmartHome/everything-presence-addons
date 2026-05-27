@@ -12,7 +12,7 @@ boot: auto
 ingress: true
 ingress_port: 42069
 panel_icon: mdi:radar
-panel_title: Zone Configurator
+panel_title: Presence
 watchdog: "http://[HOST]:[PORT:42069]/api/health"
 ports:
   42069/tcp: null
