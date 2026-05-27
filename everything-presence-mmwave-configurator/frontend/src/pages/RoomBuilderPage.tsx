@@ -70,6 +70,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
+  const [wallLengthInput, setWallLengthInput] = useState('');
   const [segmentDragIndex, setSegmentDragIndex] = useState<number | null>(null);
   const [segmentDragStart, setSegmentDragStart] = useState<{ x: number; y: number } | null>(null);
   const [segmentDragBase, setSegmentDragBase] = useState<{ x: number; y: number }[] | null>(null);
@@ -119,9 +120,18 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [rotationSuggestion, setRotationSuggestion] = useState<{ suggestedAngle: number; targetAxis: number } | null>(null);
   const [applyingInstallationAngle, setApplyingInstallationAngle] = useState(false);
   const [rotationSuggestionError, setRotationSuggestionError] = useState<string | null>(null);
+  const [wallEditorDragOffset, setWallEditorDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [wallEditorDragging, setWallEditorDragging] = useState(false);
+  const [canvasViewportSize, setCanvasViewportSize] = useState({ width: 0, height: 0 });
   const lastRotationSuggestionRef = useRef<number | null>(null);
+  const wallEditorDragPointerRef = useRef<number | null>(null);
+  const wallEditorDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const CANVAS_SIZE = 700;
   const HALF = CANVAS_SIZE / 2;
+  const WALL_EDITOR_WIDTH = 280;
+  const WALL_EDITOR_HEIGHT = 170;
+  const WALL_EDITOR_MARGIN = 20;
   const toCanvas = (v: number, range: number) => (v / range) * CANVAS_SIZE;
 
   const selectedRoom = useMemo(
@@ -731,20 +741,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     return { dx: signX * mag, dy: signY * mag };
   };
 
-  const segmentMidpointPercent = useMemo(() => {
-    if (selectedSegment === null || !selectedRoom?.roomShell?.points?.length) return null;
-    const pts = selectedRoom.roomShell.points;
-    const a = pts[selectedSegment];
-    const b = pts[(selectedSegment + 1) % pts.length];
-    if (!a || !b) return null;
-    const midX = (a.x + b.x) / 2;
-    const midY = (a.y + b.y) / 2;
-    const range = rangeMm || 6000;
-    const viewX = HALF + toCanvas(midX, range);
-    const viewY = HALF + toCanvas(midY, range);
-    return { left: (viewX / CANVAS_SIZE) * 100, top: (viewY / CANVAS_SIZE) * 100 };
-  }, [selectedSegment, selectedRoom?.roomShell?.points, rangeMm]);
-
   const adjustSegmentLength = (meters: number) => {
     if (selectedSegment === null || !selectedRoom?.roomShell?.points) return;
     const pts = selectedRoom.roomShell.points;
@@ -793,6 +789,123 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     next[aIdx] = { x: a.x + nx, y: a.y + ny };
     next[bIdx] = { x: b.x + nx, y: b.y + ny };
     handlePointsChange(next);
+  };
+
+  useEffect(() => {
+    if (selectedSegment === null || !selectedRoom?.roomShell?.points?.length) {
+      setWallLengthInput('');
+      return;
+    }
+
+    const pts = selectedRoom.roomShell.points;
+    const start = pts[selectedSegment];
+    const end = pts[(selectedSegment + 1) % pts.length];
+    if (!start || !end) {
+      setWallLengthInput('');
+      return;
+    }
+
+    const lenMeters = Math.hypot(end.x - start.x, end.y - start.y) / 1000;
+    const displayValue = displayUnits === 'imperial' ? lenMeters * 3.28084 : lenMeters;
+    setWallLengthInput(displayValue.toFixed(2));
+  }, [displayUnits, selectedRoom?.roomShell?.points, selectedSegment]);
+
+  const commitSelectedSegmentLength = (rawValue: string) => {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return;
+    const meters = displayUnits === 'imperial' ? parsed * 0.3048 : parsed;
+    adjustSegmentLength(Math.max(0.1, meters));
+  };
+
+  const segmentEditorPosition = useMemo(() => {
+    if (selectedSegment === null || !selectedRoom?.roomShell?.points?.length) return null;
+
+    const pts = selectedRoom.roomShell.points;
+    const start = pts[selectedSegment];
+    const end = pts[(selectedSegment + 1) % pts.length];
+    if (!start || !end) return null;
+
+    const range = rangeMm || 6000;
+    const startCanvasX = HALF + toCanvas(start.x, range);
+    const startCanvasY = HALF + toCanvas(start.y, range);
+    const endCanvasX = HALF + toCanvas(end.x, range);
+    const endCanvasY = HALF + toCanvas(end.y, range);
+    const midX = (startCanvasX + endCanvasX) / 2;
+    const midY = (startCanvasY + endCanvasY) / 2;
+    const dx = endCanvasX - startCanvasX;
+    const dy = endCanvasY - startCanvasY;
+    const length = Math.hypot(dx, dy) || 1;
+    const normalX = -dy / length;
+    const normalY = dx / length;
+
+    const scaleX = canvasViewportSize.width > 0 ? canvasViewportSize.width / CANVAS_SIZE : 1;
+    const scaleY = canvasViewportSize.height > 0 ? canvasViewportSize.height / CANVAS_SIZE : 1;
+    const preferredX = (midX + normalX * 110) * scaleX - WALL_EDITOR_WIDTH / 2;
+    const preferredY = (midY + normalY * 110) * scaleY - WALL_EDITOR_HEIGHT / 2;
+    const maxLeft = Math.max(WALL_EDITOR_MARGIN, canvasViewportSize.width - WALL_EDITOR_WIDTH - WALL_EDITOR_MARGIN);
+    const maxTop = Math.max(WALL_EDITOR_MARGIN, canvasViewportSize.height - WALL_EDITOR_HEIGHT - WALL_EDITOR_MARGIN);
+    const clampedLeft = Math.min(maxLeft, Math.max(WALL_EDITOR_MARGIN, preferredX + wallEditorDragOffset.x));
+    const clampedTop = Math.min(maxTop, Math.max(WALL_EDITOR_MARGIN, preferredY + wallEditorDragOffset.y));
+
+    return { left: clampedLeft, top: clampedTop };
+  }, [canvasViewportSize.height, canvasViewportSize.width, selectedRoom?.roomShell?.points, selectedSegment, rangeMm, wallEditorDragOffset]);
+
+  useEffect(() => {
+    setWallEditorDragOffset({ x: 0, y: 0 });
+    setWallEditorDragging(false);
+    wallEditorDragPointerRef.current = null;
+    wallEditorDragStartRef.current = null;
+  }, [selectedSegment]);
+
+  useEffect(() => {
+    const element = canvasViewportRef.current;
+    if (!element) return;
+
+    const updateSize = () => {
+      setCanvasViewportSize({
+        width: element.clientWidth,
+        height: element.clientHeight,
+      });
+    };
+
+    updateSize();
+
+    const observer = new ResizeObserver(() => updateSize());
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [selectedRoom?.id]);
+
+  const handleWallEditorDragPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (segmentEditorPosition === null) return;
+    wallEditorDragPointerRef.current = e.pointerId;
+    wallEditorDragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      offsetX: wallEditorDragOffset.x,
+      offsetY: wallEditorDragOffset.y,
+    };
+    setWallEditorDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  const handleWallEditorDragPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (wallEditorDragPointerRef.current !== e.pointerId || wallEditorDragStartRef.current === null) return;
+    const start = wallEditorDragStartRef.current;
+    setWallEditorDragOffset({
+      x: start.offsetX + (e.clientX - start.x),
+      y: start.offsetY + (e.clientY - start.y),
+    });
+  };
+
+  const handleWallEditorDragPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (wallEditorDragPointerRef.current !== e.pointerId) return;
+    wallEditorDragPointerRef.current = null;
+    wallEditorDragStartRef.current = null;
+    setWallEditorDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
   };
 
   const handleCanvasClick = (pt: { x: number; y: number }) => {
@@ -1207,7 +1320,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
       {selectedRoom && (
         <div
-          className="h-full w-full overflow-hidden overscroll-contain touch-none"
+          ref={canvasViewportRef}
+          className="relative h-full w-full overflow-hidden overscroll-contain touch-none"
           onWheelCapture={(e) => {
             if (isCanvasDragging) return;
             if (e.cancelable) e.preventDefault();
@@ -1266,6 +1380,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   onSegmentHover={(idx) => setHoveredSegment(idx)}
                   onSegmentSelect={(idx) => {
                     setSelectedSegment(idx);
+                    setSelectedDoorId(null);
+                    setSelectedFurnitureId(null);
                     setSegmentDragIndex(null);
                     setSegmentDragStart(null);
                     setSegmentDragBase(null);
@@ -1299,12 +1415,18 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   selectedFurnitureId={selectedFurnitureId}
                   onFurnitureSelect={(id) => {
                     setSelectedFurnitureId(id);
+                    setSelectedDoorId(null);
+                    setSelectedSegment(null);
                     setShowFurnitureLibrary(false);
                   }}
                   onFurnitureChange={handleFurnitureChange}
                   doors={selectedRoom.doors ?? []}
                   selectedDoorId={selectedDoorId}
-                  onDoorSelect={setSelectedDoorId}
+                  onDoorSelect={(id) => {
+                    setSelectedDoorId(id);
+                    setSelectedFurnitureId(null);
+                    setSelectedSegment(null);
+                  }}
                   onDoorChange={handleDoorChange}
                   isDoorPlacementMode={isDoorPlacementMode}
                   onWallSegmentClick={handleWallSegmentClick}
@@ -2045,109 +2167,228 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               </div>
             </div>
           </div>
-                {selectedSegment !== null && segmentMidpointPercent && (
-                  <div
-                    className="pointer-events-auto absolute z-10"
-                    style={{
-                      left: `${segmentMidpointPercent.left}%`,
-                      top: `${segmentMidpointPercent.top}%`,
-                      transform: 'translate(-50%, -120%)',
-                    }}
-                  >
-                    <div className="rounded-lg border border-slate-800 bg-slate-900/90 p-2 shadow-xl">
-                      <div className="flex items-center gap-2 text-xs text-slate-200">
-                        {(() => {
-                          const pts = selectedRoom.roomShell?.points ?? [];
-                          const a = pts[selectedSegment];
-                          const b = pts[(selectedSegment + 1) % pts.length];
-                          const lenMeters = a && b ? Math.hypot(b.x - a.x, b.y - a.y) / 1000 : 0;
-                          const lengthUnit = displayUnits === 'imperial' ? 'ft' : 'm';
-                          const lengthValue = displayUnits === 'imperial' ? lenMeters * 3.28084 : lenMeters;
-                          const nudgeStepMeters = displayUnits === 'imperial' ? 0.1 * 0.3048 : 0.05; // 0.1ft or 0.05m
-                          const nudgeLabel = displayUnits === 'imperial' ? '0.10 ft' : '0.05 m';
-                          const offsetStepMeters = 0.1; // keep physical 0.1m, just display units
-                          const offsetLabel =
-                            displayUnits === 'imperial'
-                              ? `${(offsetStepMeters * 3.28084).toFixed(2)} ft`
-                              : `${offsetStepMeters.toFixed(2)} m`;
-                          return (
-                            <>
-                              <span>Length ({lengthUnit})</span>
+                {selectedSegment !== null && (() => {
+                  const pts = selectedRoom.roomShell?.points ?? [];
+                  const a = pts[selectedSegment];
+                  const b = pts[(selectedSegment + 1) % pts.length];
+                  if (!a || !b) return null;
+
+                  const lengthUnit = displayUnits === 'imperial' ? 'ft' : 'm';
+                  const nudgeStepMeters = displayUnits === 'imperial' ? 0.1 * 0.3048 : 0.05;
+                  const nudgeLabel = displayUnits === 'imperial' ? '0.10 ft' : '0.05 m';
+                  const offsetStepMeters = 0.1;
+                  const offsetLabel =
+                    displayUnits === 'imperial'
+                      ? `${(offsetStepMeters * 3.28084).toFixed(2)} ft`
+                      : `${offsetStepMeters.toFixed(2)} m`;
+
+                  return (
+                    <>
+                      <div
+                        className="absolute z-[90] hidden md:block"
+                        style={{
+                          left: segmentEditorPosition?.left ?? WALL_EDITOR_MARGIN,
+                          top: segmentEditorPosition?.top ?? WALL_EDITOR_MARGIN,
+                          width: WALL_EDITOR_WIDTH,
+                        }}
+                      >
+                        <div className={`rounded-xl border border-slate-800 bg-slate-900/95 shadow-2xl backdrop-blur ${wallEditorDragging ? 'select-none' : ''}`}>
+                        <div className="flex items-center justify-between border-b border-slate-700 px-3 py-2">
+                          <div>
+                            <h2 className="text-sm font-semibold text-white">Wall</h2>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className={`rounded-md p-1 text-slate-500 transition-colors hover:text-slate-200 ${wallEditorDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                              aria-label="Move wall editor"
+                              title="Move"
+                              onPointerDown={handleWallEditorDragPointerDown}
+                              onPointerMove={handleWallEditorDragPointerMove}
+                              onPointerUp={handleWallEditorDragPointerUp}
+                              onPointerCancel={handleWallEditorDragPointerUp}
+                            >
+                              <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                <circle cx="5" cy="4" r="1.1" />
+                                <circle cx="8" cy="4" r="1.1" />
+                                <circle cx="11" cy="4" r="1.1" />
+                                <circle cx="5" cy="8" r="1.1" />
+                                <circle cx="8" cy="8" r="1.1" />
+                                <circle cx="11" cy="8" r="1.1" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setSelectedSegment(null);
+                                setHoveredSegment(null);
+                              }}
+                              className="text-slate-400 transition-colors hover:text-white"
+                              aria-label="Close"
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="space-y-3 px-3 py-3" onWheelCapture={(e) => e.stopPropagation()}>
+                          <div>
+                            <label className="mb-1 block text-[11px] font-semibold text-slate-300">Length ({lengthUnit})</label>
+                            <div className="flex gap-2">
                               <input
-                                type="number"
-                                className="w-20 rounded-md border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs text-white focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
-                                value={lengthValue.toFixed(2)}
-                                onChange={(e) => {
-                                  const raw = Number(e.target.value);
-                                  const meters = displayUnits === 'imperial' ? raw * 0.3048 : raw;
-                                  adjustSegmentLength(Math.max(0.1, meters));
+                                type="text"
+                                inputMode="decimal"
+                                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2.5 py-2 text-sm text-white focus:border-aqua-500 focus:outline-none"
+                                value={wallLengthInput}
+                                onChange={(e) => setWallLengthInput(e.target.value)}
+                                onBlur={(e) => commitSelectedSegmentLength(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.currentTarget.blur();
+                                  }
                                 }}
                               />
                               <button
-                                className="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 hover:border-aqua-400"
+                                className="rounded-lg border border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-400"
                                 onClick={() => nudgeSegmentLength(-nudgeStepMeters)}
                               >
                                 -{nudgeLabel}
                               </button>
                               <button
-                                className="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 hover:border-aqua-400"
+                                className="rounded-lg border border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-400"
                                 onClick={() => nudgeSegmentLength(nudgeStepMeters)}
                               >
                                 +{nudgeLabel}
                               </button>
+                            </div>
+                          </div>
+                          <div>
+                            <div className="mb-1 text-[11px] font-semibold text-slate-300">Offset</div>
+                            <div className="grid grid-cols-2 gap-2">
                               <button
-                                className="rounded-md border border-slate-700 px-2 py-1 text-xs font-semibold text-slate-100 hover:border-amber-400"
-                                onClick={() => {
-                                  setSelectedSegment(null);
-                                  setHoveredSegment(null);
-                                }}
+                                className="rounded-lg border border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-100 transition hover:border-amber-400"
+                                onClick={() => offsetSegmentNormal(-offsetStepMeters)}
                               >
-                                Close
+                                -{offsetLabel}
                               </button>
                               <button
-                                className="rounded-md border border-rose-500/70 px-2 py-1 text-xs font-semibold text-rose-100 hover:bg-rose-500/10"
-                                onClick={() => {
-                                  const ptsDelete = selectedRoom.roomShell?.points ?? [];
-                                  if (ptsDelete.length <= 2) return;
-                                  const removeIdx = (selectedSegment + 1) % ptsDelete.length;
-                                  const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
-                                  handlePointsChange(nextDelete);
-                                  setSelectedSegment(null);
-                                  setHoveredSegment(null);
-                                }}
+                                className="rounded-lg border border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-100 transition hover:border-amber-400"
+                                onClick={() => offsetSegmentNormal(offsetStepMeters)}
                               >
-                                Delete
+                                +{offsetLabel}
                               </button>
-                              <button
-                                className="rounded-md border border-emerald-500/70 px-2 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/10"
-                                onClick={() => {
-                                  insertPointOnSegment(selectedSegment);
-                                }}
-                              >
-                                + Insert point
-                              </button>
-                              <div className="flex items-center gap-2 pt-1 text-xs text-slate-200">
-                                <span>Offset</span>
-                                <button
-                                  className="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 hover:border-amber-400"
-                                  onClick={() => offsetSegmentNormal(-offsetStepMeters)}
-                                >
-                                  -{offsetLabel}
-                                </button>
-                                <button
-                                  className="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 hover:border-amber-400"
-                                  onClick={() => offsetSegmentNormal(offsetStepMeters)}
-                                >
-                                  +{offsetLabel}
-                                </button>
-                              </div>
-                            </>
-                          );
-                        })()}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              className="rounded-lg border border-emerald-500/70 px-2.5 py-2 text-[11px] font-semibold text-emerald-100 transition hover:bg-emerald-500/10"
+                              onClick={() => insertPointOnSegment(selectedSegment)}
+                            >
+                              Insert
+                            </button>
+                            <button
+                              className="rounded-lg border border-rose-500/70 px-2.5 py-2 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/10"
+                              onClick={() => {
+                                const ptsDelete = selectedRoom.roomShell?.points ?? [];
+                                if (ptsDelete.length <= 2) return;
+                                const removeIdx = (selectedSegment + 1) % ptsDelete.length;
+                                const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
+                                handlePointsChange(nextDelete);
+                                setSelectedSegment(null);
+                                setHoveredSegment(null);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                )}
+                      </div>
+
+                      <div className="absolute bottom-0 left-0 right-0 z-[80] max-h-[82dvh] overflow-y-auto rounded-t-2xl border-t border-slate-700 bg-slate-900/95 p-4 text-sm text-slate-100 shadow-2xl mobile-safe-bottom md:hidden">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="font-semibold text-slate-100">Wall</div>
+                            <div className="text-xs text-slate-400">Edit the selected wall segment.</div>
+                          </div>
+                          <button
+                            className="rounded-md border border-slate-700 px-2 py-1 hover:border-aqua-500"
+                            onClick={() => {
+                              setSelectedSegment(null);
+                              setHoveredSegment(null);
+                            }}
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <div className="mt-4 space-y-4">
+                          <div>
+                            <label className="mb-2 block text-sm font-semibold text-slate-300">Length ({lengthUnit})</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className="w-full rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-white focus:border-aqua-500 focus:outline-none"
+                              value={wallLengthInput}
+                              onChange={(e) => setWallLengthInput(e.target.value)}
+                              onBlur={(e) => commitSelectedSegmentLength(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.currentTarget.blur();
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-100"
+                              onClick={() => nudgeSegmentLength(-nudgeStepMeters)}
+                            >
+                              -{nudgeLabel}
+                            </button>
+                            <button
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-100"
+                              onClick={() => nudgeSegmentLength(nudgeStepMeters)}
+                            >
+                              +{nudgeLabel}
+                            </button>
+                            <button
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-100"
+                              onClick={() => offsetSegmentNormal(-offsetStepMeters)}
+                            >
+                              -{offsetLabel}
+                            </button>
+                            <button
+                              className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-100"
+                              onClick={() => offsetSegmentNormal(offsetStepMeters)}
+                            >
+                              +{offsetLabel}
+                            </button>
+                          </div>
+                          <button
+                            className="w-full rounded-lg border border-emerald-500/70 px-3 py-2 text-sm font-semibold text-emerald-100"
+                            onClick={() => insertPointOnSegment(selectedSegment)}
+                          >
+                            Insert point
+                          </button>
+                          <button
+                            className="w-full rounded-lg border border-rose-500/70 px-3 py-2 text-sm font-semibold text-rose-100"
+                            onClick={() => {
+                              const ptsDelete = selectedRoom.roomShell?.points ?? [];
+                              if (ptsDelete.length <= 2) return;
+                              const removeIdx = (selectedSegment + 1) % ptsDelete.length;
+                              const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
+                              handlePointsChange(nextDelete);
+                              setSelectedSegment(null);
+                              setHoveredSegment(null);
+                            }}
+                          >
+                            Delete wall point
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
 
           {/* Furniture Editor Panel */}
           {selectedFurniture && (
