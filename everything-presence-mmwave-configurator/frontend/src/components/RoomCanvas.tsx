@@ -1,9 +1,10 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { FurnitureInstance, Door } from '../api/types';
 import { getFurnitureIcon } from '../furniture/icons';
-import { getFurnitureColors } from '../furniture/colors';
+import { CustomFurniturePreview, getCustomFurnitureType } from '../furniture/customVisual';
 import { FloorMaterialDefs, getFloorFill } from './FloorMaterials';
 import { useThemeContext } from '../contexts/ThemeContext';
+import { useCustomAssets } from '../hooks/useCustomAssets';
 
 export interface Point {
   x: number;
@@ -580,6 +581,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
 
   // Theme-aware colors for canvas
   const { isDark } = useThemeContext();
+  const { customFurniture } = useCustomAssets();
   const canvasColors = useMemo(() => ({
     background: isDark ? '#0f172a' : '#f8fafc',
     gridAxis: isDark ? '#334155' : '#94a3b8',
@@ -1514,7 +1516,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           const canvasHeight = toCanvas(displayDepth, effectiveRangeMm);
           const isSelected = selectedFurnitureId === item.id;
           const Icon = getFurnitureIcon(item.typeId);
-          const colors = getFurnitureColors(item.typeId, isSelected);
+          const customType = getCustomFurnitureType(customFurniture, item.typeId);
 
           return (
             <g key={item.id}>
@@ -1532,6 +1534,19 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     style={{ overflow: 'visible', pointerEvents: 'none' }}
                   >
                     <Icon />
+                  </svg>
+                )}
+                {!Icon && customType && (
+                  <svg
+                    x={-canvasWidth / 2}
+                    y={-canvasHeight / 2}
+                    width={canvasWidth}
+                    height={canvasHeight}
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    style={{ overflow: 'visible', pointerEvents: 'none' }}
+                  >
+                    <CustomFurniturePreview furniture={customType} />
                   </svg>
                 )}
                 {/* Clickable interaction rectangle - positioned over furniture */}
