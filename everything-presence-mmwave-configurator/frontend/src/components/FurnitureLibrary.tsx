@@ -1,7 +1,9 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { FurnitureType } from '../api/types';
-import { getFurnitureCategories, getFurnitureByCategory } from '../furniture/catalog';
+import { getAllFurnitureByCategory, getFurnitureCategories } from '../furniture/catalog';
 import { getFurnitureIcon } from '../furniture/icons';
+import { useCustomAssets } from '../hooks/useCustomAssets';
+import { CustomFurniturePreview, getCustomFurnitureType } from '../furniture/customVisual';
 
 interface FurnitureLibraryProps {
   onSelect: (furnitureType: FurnitureType) => void;
@@ -12,8 +14,9 @@ export const FurnitureLibrary: React.FC<FurnitureLibraryProps> = ({ onSelect, on
   const [selectedCategory, setSelectedCategory] = useState('all');
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { customFurniture } = useCustomAssets();
   const categories = getFurnitureCategories();
-  const furniture = getFurnitureByCategory(selectedCategory);
+  const furniture = getAllFurnitureByCategory(selectedCategory, customFurniture);
 
   useEffect(() => {
     const closeTimer = window.setTimeout(() => {
@@ -84,6 +87,7 @@ export const FurnitureLibrary: React.FC<FurnitureLibraryProps> = ({ onSelect, on
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 md:gap-4">
             {furniture.map((item) => {
               const Icon = getFurnitureIcon(item.id);
+              const customType = getCustomFurnitureType(customFurniture, item.id);
               return (
                 <button
                   key={item.id}
@@ -94,6 +98,8 @@ export const FurnitureLibrary: React.FC<FurnitureLibraryProps> = ({ onSelect, on
                   <div className="flex h-14 w-14 items-center justify-center text-slate-300 transition-colors group-hover:text-aqua-400 md:h-16 md:w-16">
                     {Icon ? (
                       <Icon className="h-full w-full" />
+                    ) : customType ? (
+                      <CustomFurniturePreview furniture={customType} className="h-full w-full" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center rounded-lg bg-slate-700 text-xs font-semibold text-slate-300">
                         Item
