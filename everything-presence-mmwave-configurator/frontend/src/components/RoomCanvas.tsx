@@ -620,6 +620,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   const effectiveMaxRange = Number.isFinite(maxRangeMeters) ? maxRangeMeters : 6;
   const effectiveSnap = Number.isFinite(snapGridMm) && snapGridMm > 0 ? snapGridMm : 0;
   const effectiveZoom = Math.min(5, Math.max(0.1, Number.isFinite(zoom) ? zoom : 1));
+  const clampHandleSize = (baseSize: number, minSize: number, maxSize: number) =>
+    Math.max(minSize, Math.min(maxSize, baseSize / effectiveZoom));
+  const vertexHandleRadius = clampHandleSize(11, 4.5, 11);
+  const endpointHandleSize = clampHandleSize(18, 8, 18);
+  const endpointHandleRadius = clampHandleSize(2, 1, 2);
+  const handleStrokeWidth = clampHandleSize(2, 1, 2);
   const viewSize = CANVAS_SIZE / effectiveZoom;
   const viewMin = (CANVAS_SIZE - viewSize) / 2;
   const roomSignedArea = getSignedPolygonArea(safePoints);
@@ -1156,10 +1162,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     <circle
                       cx={cx}
                       cy={cy}
-                      r={11}
+                      r={vertexHandleRadius}
                       fill="#0ea5e9"
                       stroke="#e0f2fe"
-                      strokeWidth={2}
+                      strokeWidth={handleStrokeWidth}
+                      vectorEffect="non-scaling-stroke"
                       onPointerDown={handleDragStart(idx)}
                     />
                   </g>
@@ -1254,14 +1261,15 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                 return (
                   <>
                     <rect
-                      x={x1 - 9}
-                      y={y1 - 9}
-                      width={18}
-                      height={18}
+                      x={x1 - endpointHandleSize / 2}
+                      y={y1 - endpointHandleSize / 2}
+                      width={endpointHandleSize}
+                      height={endpointHandleSize}
                       fill="#0ea5e9"
                       stroke="#e0f2fe"
-                      strokeWidth={2}
-                      rx={2}
+                      strokeWidth={handleStrokeWidth}
+                      rx={endpointHandleRadius}
+                      vectorEffect="non-scaling-stroke"
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         if (e.cancelable) e.preventDefault();
@@ -1275,14 +1283,15 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       }}
                     />
                     <rect
-                      x={x2 - 9}
-                      y={y2 - 9}
-                      width={18}
-                      height={18}
+                      x={x2 - endpointHandleSize / 2}
+                      y={y2 - endpointHandleSize / 2}
+                      width={endpointHandleSize}
+                      height={endpointHandleSize}
                       fill="#0ea5e9"
                       stroke="#e0f2fe"
-                      strokeWidth={2}
-                      rx={2}
+                      strokeWidth={handleStrokeWidth}
+                      rx={endpointHandleRadius}
+                      vectorEffect="non-scaling-stroke"
                       onPointerDown={(e) => {
                         e.stopPropagation();
                         if (e.cancelable) e.preventDefault();
