@@ -42,6 +42,7 @@ export class WsReadTransport implements IHaReadTransport {
   private rejectReady!: (reason?: unknown) => void;
   private _isConnected = false;
   private stateSubscriptionActive = false;
+  private stateSubscriptionId?: number;
   private reconnectTimeout?: NodeJS.Timeout;
 
   constructor(config: ReadTransportConfig) {
@@ -157,6 +158,7 @@ export class WsReadTransport implements IHaReadTransport {
         logger.warn({ code, reason: reason.toString() }, 'WsReadTransport: WebSocket closed');
         this._isConnected = false;
         this.stateSubscriptionActive = false;
+        this.stateSubscriptionId = undefined;
         this.pending.forEach((p) => p.reject(new Error('WebSocket connection closed')));
         this.pending.clear();
 
@@ -335,11 +337,17 @@ export class WsReadTransport implements IHaReadTransport {
 
   unsubscribe(subscriptionId: string): void {
     this.subscriptions.delete(subscriptionId);
+    if (this.subscriptions.size === 0 && this.stateSubscriptionActive) {
+      void this.deactivateStateSubscription();
+    }
     logger.debug({ subscriptionId }, 'WsReadTransport: Removed state subscription');
   }
 
   unsubscribeAll(): void {
     this.subscriptions.clear();
+    if (this.stateSubscriptionActive) {
+      void this.deactivateStateSubscription();
+    }
     logger.debug('WsReadTransport: Removed all state subscriptions');
   }
 
@@ -348,14 +356,39 @@ export class WsReadTransport implements IHaReadTransport {
 
     try {
       await this.waitUntilReady();
-      await this.call({
+      const response = (await this.call({
         type: 'subscribe_events',
         event_type: 'state_changed',
-      });
+      })) as HaWsMessage & { success?: boolean; id?: number };
       this.stateSubscriptionActive = true;
+      this.stateSubscriptionId = response.type === 'result' && typeof response.id === 'number'
+        ? response.id
+        : undefined;
       logger.info('WsReadTransport: Subscribed to state_changed events');
     } catch (err) {
       logger.error({ err }, 'WsReadTransport: Failed to subscribe to state_changed');
+    }
+  }
+
+  private async deactivateStateSubscription(): Promise<void> {
+    if (!this.stateSubscriptionActive || this.stateSubscriptionId === undefined) {
+      this.stateSubscriptionActive = false;
+      this.stateSubscriptionId = undefined;
+      return;
+    }
+
+    try {
+      await this.waitUntilReady();
+      await this.call({
+        type: 'unsubscribe_events',
+        subscription: this.stateSubscriptionId,
+      });
+      logger.info('WsReadTransport: Unsubscribed from state_changed events');
+    } catch (err) {
+      logger.warn({ err }, 'WsReadTransport: Failed to unsubscribe from state_changed');
+    } finally {
+      this.stateSubscriptionActive = false;
+      this.stateSubscriptionId = undefined;
     }
   }
 
