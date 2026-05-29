@@ -21,6 +21,7 @@ import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import { formatLengthLabel } from '../utils/lengthLabels';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import {
   getCeilingSliceLineDepth,
@@ -2174,6 +2175,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   const b = pts[(selectedSegment + 1) % pts.length];
                   if (!a || !b) return null;
 
+                  const selectedLengthMm = Math.hypot(b.x - a.x, b.y - a.y);
+                  const selectedLengthLabel = formatLengthLabel(selectedLengthMm, displayUnits);
                   const lengthUnit = displayUnits === 'imperial' ? 'ft' : 'm';
                   const nudgeStepMeters = displayUnits === 'imperial' ? 0.1 * 0.3048 : 0.05;
                   const nudgeLabel = displayUnits === 'imperial' ? '0.10 ft' : '0.05 m';
@@ -2234,7 +2237,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </div>
                         <div className="space-y-3 px-3 py-3" onWheelCapture={(e) => e.stopPropagation()}>
                           <div>
-                            <label className="mb-1 block text-[11px] font-semibold text-slate-300">Length ({lengthUnit})</label>
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                              <label className="block text-[11px] font-semibold text-slate-300">Length ({lengthUnit})</label>
+                              {displayUnits === 'imperial' && (
+                                <span className="text-[11px] text-slate-400">{selectedLengthLabel}</span>
+                              )}
+                            </div>
                             <div className="flex gap-2">
                               <input
                                 type="text"
@@ -2324,7 +2332,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </div>
                         <div className="mt-4 space-y-4">
                           <div>
-                            <label className="mb-2 block text-sm font-semibold text-slate-300">Length ({lengthUnit})</label>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <label className="block text-sm font-semibold text-slate-300">Length ({lengthUnit})</label>
+                              {displayUnits === 'imperial' && (
+                                <span className="text-xs text-slate-400">{selectedLengthLabel}</span>
+                              )}
+                            </div>
                             <input
                               type="text"
                               inputMode="decimal"
