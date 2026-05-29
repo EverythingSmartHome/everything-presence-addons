@@ -18,7 +18,7 @@ import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
-import { fetchZoneAvailability, ingressAware } from '../api/client';
+import { fetchMetaConfig, fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
@@ -106,6 +106,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [pushingZones, setPushingZones] = useState(false);
   const [pushSuccess, setPushSuccess] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('unknown');
 
   // Entity discovery mappings (discovered after device selection)
   const [discoveredMappings, setDiscoveredMappings] = useState<EntityMappings | null>(null);
@@ -118,6 +119,12 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Zone selection for embedded zone drawing
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchMetaConfig()
+      .then((res) => setAppVersion(res.appVersion ?? 'unknown'))
+      .catch(() => null);
+  }, []);
 
   // Display settings for live tracking and device icon
   const {
@@ -2807,9 +2814,14 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       {currentStep === 'device' && (
         <div className={`${slideAnimationClass} rounded-2xl border border-slate-800/50 bg-gradient-to-br from-slate-900/90 to-slate-900/70 p-6 backdrop-blur-xl shadow-xl`}>
           <div className="mb-4">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="mb-2 flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
               <span className="text-2xl">📡</span>
               <h3 className="text-lg font-bold text-white">Select your device</h3>
+              </div>
+              <div className="rounded-full border border-slate-700/80 bg-slate-950/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                App v{appVersion}
+              </div>
             </div>
             <p className="text-sm text-slate-400">
               Which Everything Presence device do you want to setup?

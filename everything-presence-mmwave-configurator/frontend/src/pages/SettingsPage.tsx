@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchRooms, deleteRoom, updateRoom, createRoom } from '../api/rooms';
 import {
+  fetchMetaConfig,
   fetchSettings,
   updateSettings,
   fetchDevices,
@@ -65,6 +66,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const [unlinkingDeviceRoomId, setUnlinkingDeviceRoomId] = useState<string | null>(null);
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
+  const [appVersion, setAppVersion] = useState<string>('unknown');
 
   // Zone backups state
   const [selectedBackupDeviceId, setSelectedBackupDeviceId] = useState('');
@@ -104,18 +106,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   useEffect(() => {
     const load = async () => {
       try {
-        const [roomsRes, floorsRes, furnitureRes, settingsRes, devicesRes, profilesRes] = await Promise.all([
+        const [roomsRes, floorsRes, furnitureRes, settingsRes, devicesRes, profilesRes, metaRes] = await Promise.all([
           fetchRooms(),
           fetchCustomFloors(),
           fetchCustomFurniture(),
           fetchSettings(),
           fetchDevices(),
           fetchProfiles(),
+          fetchMetaConfig(),
         ]);
         setRooms(roomsRes.rooms);
         setCustomFloors(floorsRes.floors);
         setCustomFurniture(furnitureRes.furniture);
         setDefaultRoomId(typeof settingsRes.settings.defaultRoomId === 'string' ? settingsRes.settings.defaultRoomId : null);
+        setAppVersion(metaRes.appVersion ?? 'unknown');
         const epDevices = devicesRes.devices.filter(
           (device) =>
             device.manufacturer?.toLowerCase().includes('everything') ||
@@ -1484,6 +1488,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
           </div>
         </div>
       )}
+      <div className="mt-8 border-t border-slate-800/80 pt-4 text-center text-xs text-slate-500">
+        Zone Configurator v{appVersion}
+      </div>
     </div>
   );
 };
