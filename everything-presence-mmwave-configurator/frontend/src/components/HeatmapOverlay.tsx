@@ -7,6 +7,7 @@ interface HeatmapOverlayProps {
   toCanvas: (point: { x: number; y: number }) => { x: number; y: number };
   devicePlacement?: DevicePlacement | null;
   installationAngle?: number;
+  upsideDownMounting?: boolean;
   intensityThreshold?: number; // 0-1, cells below this won't be shown
   roomShellPoints?: Array<{ x: number; y: number }> | null; // Canvas coordinates for room boundary
   clipToRoom?: boolean;
@@ -56,7 +57,7 @@ const getHeatColor = (intensity: number, threshold: number): { fill: string; opa
   };
 };
 
-export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, toCanvas, devicePlacement, installationAngle, intensityThreshold = 0.15, roomShellPoints, clipToRoom = true, showAveragePosition = true }) => {
+export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, toCanvas, devicePlacement, installationAngle, upsideDownMounting = false, intensityThreshold = 0.15, roomShellPoints, clipToRoom = true, showAveragePosition = true }) => {
   // Transform device-relative coordinates to room coordinates
   const deviceToRoom = useMemo(() => {
     if (!devicePlacement) {
@@ -70,14 +71,15 @@ export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, t
     const sin = Math.sin(angleRad);
 
     return (deviceX: number, deviceY: number) => {
-      const rotatedX = deviceX * cos - deviceY * sin;
-      const rotatedY = deviceX * sin + deviceY * cos;
+      const localX = upsideDownMounting ? -deviceX : deviceX;
+      const rotatedX = localX * cos - deviceY * sin;
+      const rotatedY = localX * sin + deviceY * cos;
       return {
         x: rotatedX + x,
         y: rotatedY + y,
       };
     };
-  }, [devicePlacement, installationAngle]);
+  }, [devicePlacement, installationAngle, upsideDownMounting]);
 
   // Calculate average position in canvas coordinates
   const avgPositionCanvas = useMemo(() => {

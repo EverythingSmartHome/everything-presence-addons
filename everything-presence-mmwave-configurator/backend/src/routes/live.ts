@@ -95,6 +95,14 @@ export function createLiveRouter(
         return Number.isFinite(value) ? value : null;
       };
 
+      const parseBooleanState = (state: { state: string } | null): boolean | null => {
+        if (!state || isUnavailableState(state.state)) return null;
+        const normalized = normalizeState(state.state);
+        if (normalized === 'on' || normalized === 'true') return true;
+        if (normalized === 'off' || normalized === 'false') return false;
+        return null;
+      };
+
       // Helper to get entity state by pattern - tries device mapping first, then legacy
       const getEntityState = async (mappingKey: string, template: string | null) => {
         // Try device-level mapping first (preferred)
@@ -341,6 +349,14 @@ export function createLiveRouter(
         markAvailability('installationAngle', installationAngleState);
         const angle = parseNumberState(installationAngleState);
         config.installationAngle = angle ?? 0;
+        liveState.config = config;
+      }
+
+      if (capabilities?.tracking && entityMap.upsideDownMountingEntity) {
+        const config: any = liveState.config || {};
+        const upsideDownMountingState = await getEntityState('upsideDownMountingEntity', entityMap.upsideDownMountingEntity);
+        markAvailability('upsideDownMounting', upsideDownMountingState);
+        config.upsideDownMounting = parseBooleanState(upsideDownMountingState) ?? false;
         liveState.config = config;
       }
 

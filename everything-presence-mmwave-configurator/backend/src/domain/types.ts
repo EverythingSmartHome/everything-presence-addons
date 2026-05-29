@@ -140,6 +140,7 @@ export interface EntityMappings {
   updateRateEntity?: string;
   firmwareUpdateEntity?: string;
   installationAngleEntity?: string;
+  upsideDownMountingEntity?: string;
   polygonZonesEnabledEntity?: string;
 
   // EPL tracking target count

@@ -156,7 +156,7 @@ export const createRoomsRouter = (): Router => {
       'presenceEntity', 'mmwaveEntity', 'pirEntity', 'temperatureEntity',
       'humidityEntity', 'illuminanceEntity', 'co2Entity', 'distanceEntity',
       'speedEntity', 'energyEntity', 'targetCountEntity', 'modeEntity',
-      'maxDistanceEntity', 'installationAngleEntity', 'polygonZonesEnabledEntity',
+      'maxDistanceEntity', 'installationAngleEntity', 'upsideDownMountingEntity', 'polygonZonesEnabledEntity',
       'trackingTargetCountEntity',
     ];
     for (const key of stringKeys) {

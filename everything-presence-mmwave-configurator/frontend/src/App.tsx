@@ -217,6 +217,7 @@ function App() {
                   const value = parseInt(message.state, 10);
                   return Number.isFinite(value) ? value : null;
                 };
+                const entityKey = typeof message.entityKey === 'string' ? message.entityKey : '';
 
                 // Helper to check if entity matches a mapping or falls back to pattern
                 const mappings = selectedRoom.entityMappings;
@@ -337,10 +338,14 @@ function App() {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('distanceMax');
                   updated.config!.distanceMax = parseNumberValue();
-                } else if (matchesEntity(mappings?.installationAngleEntity, 'installation_angle', 'tracking_sensor_angle')) {
+                } else if (entityKey === 'installationAngleEntity' || matchesEntity(mappings?.installationAngleEntity, 'installation_angle', 'tracking_sensor_angle')) {
                   if (!updated.config) updated.config = {} as any;
                   setAvailability('installationAngle');
                   updated.config!.installationAngle = parseNumberValue() ?? undefined;
+                } else if (entityKey === 'upsideDownMountingEntity' || matchesEntity(mappings?.upsideDownMountingEntity, 'upside_down_mounting')) {
+                  if (!updated.config) updated.config = {} as any;
+                  setAvailability('upsideDownMounting');
+                  updated.config!.upsideDownMounting = message.state === 'on';
                 }
                 // Settings entities that may not have dedicated mappings yet - use settingsEntities
                 else if (matchesEntity(mappings?.settingsEntities?.mmwaveDistanceMin, 'distance_min', 'mmwave_minimum_distance')) {
@@ -502,6 +507,7 @@ function App() {
   // Transform device-relative coordinates to room coordinates
   const installationAngle =
     typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
+  const upsideDownMounting = liveState?.config?.upsideDownMounting === true;
 
   const deviceToRoom = React.useCallback((deviceX: number, deviceY: number) => {
     if (!selectedRoom?.devicePlacement) {
@@ -513,15 +519,16 @@ function App() {
     const angleRad = (effectiveRotationDeg * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
+    const localX = upsideDownMounting ? -deviceX : deviceX;
 
-    const rotatedX = deviceX * cos - deviceY * sin;
-    const rotatedY = deviceX * sin + deviceY * cos;
+    const rotatedX = localX * cos - deviceY * sin;
+    const rotatedY = localX * sin + deviceY * cos;
 
     return {
       x: rotatedX + x,
       y: rotatedY + y,
     };
-  }, [selectedRoom, installationAngle]);
+  }, [selectedRoom, installationAngle, upsideDownMounting]);
 
   // Compute target positions in room coordinates
   const targetPositions = useMemo(() => {
