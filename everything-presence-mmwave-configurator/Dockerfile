@@ -29,6 +29,7 @@ COPY --from=build /app/backend/package.json ./backend/package.json
 COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/frontend/dist ./frontend/dist
+COPY config.yaml ./config.yaml
 COPY config ./config
 COPY rootfs/ /
 
@@ -50,6 +51,7 @@ COPY --from=build /app/backend/package.json ./backend/package.json
 COPY --from=build /app/backend/node_modules ./backend/node_modules
 COPY --from=build /app/backend/dist ./backend/dist
 COPY --from=build /app/frontend/dist ./frontend/dist
+COPY config.yaml ./config.yaml
 COPY config ./config
 
 EXPOSE 42069/tcp 38080/tcp

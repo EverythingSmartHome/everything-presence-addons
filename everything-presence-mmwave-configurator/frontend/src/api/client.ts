@@ -50,6 +50,24 @@ export const fetchProfiles = async () => {
   return handle<{ profiles: DeviceProfile[] }>(res);
 };
 
+export interface MetaConfigResponse {
+  appVersion: string;
+  port: number;
+  mode: string;
+  readTransport: string;
+  writeTransport: string;
+  transportStatus?: {
+    websocket: string;
+    rest: string;
+  };
+  ha: unknown;
+}
+
+export const fetchMetaConfig = async () => {
+  const res = await fetch(ingressAware('api/meta/config'));
+  return handle<MetaConfigResponse>(res);
+};
+
 export const fetchSettings = async () => {
   const res = await fetch(ingressAware('api/settings'));
   return handle<{ settings: AppSettings }>(res);
