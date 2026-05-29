@@ -21,7 +21,7 @@ import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
-import { formatLengthLabel, parseLengthInput } from '../utils/lengthLabels';
+import { formatLengthLabel } from '../utils/lengthLabels';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import {
   getCeilingSliceLineDepth,
@@ -73,6 +73,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
   const [wallLengthInput, setWallLengthInput] = useState('');
+  const [wallLengthFeetInput, setWallLengthFeetInput] = useState('');
+  const [wallLengthInchesInput, setWallLengthInchesInput] = useState('');
   const [segmentDragIndex, setSegmentDragIndex] = useState<number | null>(null);
   const [segmentDragStart, setSegmentDragStart] = useState<{ x: number; y: number } | null>(null);
   const [segmentDragBase, setSegmentDragBase] = useState<{ x: number; y: number }[] | null>(null);
@@ -796,6 +798,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   useEffect(() => {
     if (selectedSegment === null || !selectedRoom?.roomShell?.points?.length) {
       setWallLengthInput('');
+      setWallLengthFeetInput('');
+      setWallLengthInchesInput('');
       return;
     }
 
@@ -804,21 +808,44 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const end = pts[(selectedSegment + 1) % pts.length];
     if (!start || !end) {
       setWallLengthInput('');
+      setWallLengthFeetInput('');
+      setWallLengthInchesInput('');
       return;
     }
 
     const lengthMm = Math.hypot(end.x - start.x, end.y - start.y);
     if (displayUnits === 'imperial') {
-      setWallLengthInput(formatLengthLabel(lengthMm, 'imperial'));
+      const totalInches = Math.round(lengthMm / 25.4);
+      const feet = Math.floor(totalInches / 12);
+      const inches = totalInches % 12;
+      setWallLengthFeetInput(String(feet));
+      setWallLengthInchesInput(String(inches));
+      setWallLengthInput('');
     } else {
       setWallLengthInput((lengthMm / 1000).toFixed(2));
+      setWallLengthFeetInput('');
+      setWallLengthInchesInput('');
     }
   }, [displayUnits, selectedRoom?.roomShell?.points, selectedSegment]);
 
   const commitSelectedSegmentLength = (rawValue: string) => {
-    const lengthMm = parseLengthInput(rawValue, displayUnits);
-    if (!Number.isFinite(lengthMm)) return;
-    adjustSegmentLength(Math.max(0.1, lengthMm / 1000));
+    if (displayUnits === 'imperial') {
+      return;
+    }
+
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return;
+    adjustSegmentLength(Math.max(0.1, parsed));
+  };
+
+  const commitSelectedSegmentImperialLength = (feetRaw: string, inchesRaw: string) => {
+    const feet = feetRaw.trim() === '' ? 0 : Number(feetRaw);
+    const inches = inchesRaw.trim() === '' ? 0 : Number(inchesRaw);
+    if (!Number.isFinite(feet) || !Number.isFinite(inches)) return;
+
+    const totalInches = feet * 12 + inches;
+    const meters = (totalInches * 25.4) / 1000;
+    adjustSegmentLength(Math.max(0.1, meters));
   };
 
   const segmentEditorPosition = useMemo(() => {
@@ -2246,19 +2273,56 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               )}
                             </div>
                             <div className="flex gap-2">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2.5 py-2 text-sm text-white focus:border-aqua-500 focus:outline-none"
-                                value={wallLengthInput}
-                                onChange={(e) => setWallLengthInput(e.target.value)}
-                                onBlur={(e) => commitSelectedSegmentLength(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.currentTarget.blur();
-                                  }
-                                }}
-                              />
+                              {displayUnits === 'imperial' ? (
+                                <>
+                                  <div className="min-w-0 flex-1">
+                                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">ft</label>
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      className="w-full rounded-lg border border-slate-700 bg-slate-800/70 px-2.5 py-2 text-sm text-white focus:border-aqua-500 focus:outline-none"
+                                      value={wallLengthFeetInput}
+                                      onChange={(e) => setWallLengthFeetInput(e.target.value)}
+                                      onBlur={() => commitSelectedSegmentImperialLength(wallLengthFeetInput, wallLengthInchesInput)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.currentTarget.blur();
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">in</label>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      className="w-full rounded-lg border border-slate-700 bg-slate-800/70 px-2.5 py-2 text-sm text-white focus:border-aqua-500 focus:outline-none"
+                                      value={wallLengthInchesInput}
+                                      onChange={(e) => setWallLengthInchesInput(e.target.value)}
+                                      onBlur={() => commitSelectedSegmentImperialLength(wallLengthFeetInput, wallLengthInchesInput)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.currentTarget.blur();
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                </>
+                              ) : (
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2.5 py-2 text-sm text-white focus:border-aqua-500 focus:outline-none"
+                                  value={wallLengthInput}
+                                  onChange={(e) => setWallLengthInput(e.target.value)}
+                                  onBlur={(e) => commitSelectedSegmentLength(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.currentTarget.blur();
+                                    }
+                                  }}
+                                />
+                              )}
                               <button
                                 className="rounded-lg border border-slate-700 px-2.5 py-2 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-400"
                                 onClick={() => nudgeSegmentLength(-nudgeStepMeters)}
@@ -2340,19 +2404,56 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                                 <span className="text-xs text-slate-400">{selectedLengthLabel}</span>
                               )}
                             </div>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              className="w-full rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-white focus:border-aqua-500 focus:outline-none"
-                              value={wallLengthInput}
-                              onChange={(e) => setWallLengthInput(e.target.value)}
-                              onBlur={(e) => commitSelectedSegmentLength(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  e.currentTarget.blur();
-                                }
-                              }}
-                            />
+                            {displayUnits === 'imperial' ? (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="mb-1 block text-[11px] font-semibold text-slate-500">Feet</label>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    className="w-full rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-white focus:border-aqua-500 focus:outline-none"
+                                    value={wallLengthFeetInput}
+                                    onChange={(e) => setWallLengthFeetInput(e.target.value)}
+                                    onBlur={() => commitSelectedSegmentImperialLength(wallLengthFeetInput, wallLengthInchesInput)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.currentTarget.blur();
+                                      }
+                                    }}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-[11px] font-semibold text-slate-500">Inches</label>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    className="w-full rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-white focus:border-aqua-500 focus:outline-none"
+                                    value={wallLengthInchesInput}
+                                    onChange={(e) => setWallLengthInchesInput(e.target.value)}
+                                    onBlur={() => commitSelectedSegmentImperialLength(wallLengthFeetInput, wallLengthInchesInput)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.currentTarget.blur();
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                className="w-full rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2 text-white focus:border-aqua-500 focus:outline-none"
+                                value={wallLengthInput}
+                                onChange={(e) => setWallLengthInput(e.target.value)}
+                                onBlur={(e) => commitSelectedSegmentLength(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.currentTarget.blur();
+                                  }
+                                }}
+                              />
+                            )}
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <button
