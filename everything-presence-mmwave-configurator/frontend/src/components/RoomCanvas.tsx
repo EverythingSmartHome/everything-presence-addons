@@ -5,6 +5,7 @@ import { CustomFurniturePreview, getCustomFurnitureType } from '../furniture/cus
 import { FloorMaterialDefs, getFloorFill } from './FloorMaterials';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useCustomAssets } from '../hooks/useCustomAssets';
+import { formatLengthLabel } from '../utils/lengthLabels';
 
 export interface Point {
   x: number;
@@ -683,11 +684,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   };
 
   const formatLength = (mm: number) => {
-    if (displayUnits === 'imperial') {
-      const ft = mm / 304.8;
-      return `${ft.toFixed(2)} ft`;
-    }
-    return `${(mm / 1000).toFixed(2)} m`;
+    return formatLengthLabel(mm, displayUnits);
   };
 
   const handleSvgClick = (e: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
