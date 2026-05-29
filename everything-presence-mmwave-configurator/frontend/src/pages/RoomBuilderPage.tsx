@@ -2163,7 +2163,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 </button>
               </div>
               <div className="text-[10px] text-slate-500">
-                Tips: A to draw, Enter to finish, Esc to cancel, Del to undo
+                Tips: Click a wall to edit it, Shift+Click a wall to split it, A to draw, Enter to finish, Esc to cancel, Del to undo
               </div>
             </div>
           </div>
@@ -2284,7 +2284,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               className="rounded-lg border border-emerald-500/70 px-2.5 py-2 text-[11px] font-semibold text-emerald-100 transition hover:bg-emerald-500/10"
                               onClick={() => insertPointOnSegment(selectedSegment)}
                             >
-                              Insert
+                              Split wall
                             </button>
                             <button
                               className="rounded-lg border border-rose-500/70 px-2.5 py-2 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/10"
@@ -2368,7 +2368,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             className="w-full rounded-lg border border-emerald-500/70 px-3 py-2 text-sm font-semibold text-emerald-100"
                             onClick={() => insertPointOnSegment(selectedSegment)}
                           >
-                            Insert point
+                            Split wall
                           </button>
                           <button
                             className="w-full rounded-lg border border-rose-500/70 px-3 py-2 text-sm font-semibold text-rose-100"
