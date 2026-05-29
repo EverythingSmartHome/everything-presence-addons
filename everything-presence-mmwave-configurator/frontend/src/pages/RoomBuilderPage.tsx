@@ -21,6 +21,7 @@ import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import { formatSnapPresetLabel } from '../utils/snapLabels';
 import {
   getCeilingSliceLineDepth,
   getCeilingSlicePosition,
@@ -1747,9 +1748,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               className={`rounded-md border px-2 py-1 ${
                                 snapGridMm === v ? 'border-aqua-500 text-aqua-100' : 'border-slate-700 text-slate-200'
                               }`}
-                              onClick={() => setSnapGridMm(v)}
-                            >
-                              {v === 0 ? 'Off' : `${v}mm`}
+                            onClick={() => setSnapGridMm(v)}
+                          >
+                              {formatSnapPresetLabel(v, displayUnits)}
                             </button>
                           ))}
                         </div>
@@ -2112,7 +2113,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     }`}
                     onClick={() => setSnapGridMm(v)}
                   >
-                    {v === 0 ? 'Off' : `${v}mm`}
+                    {formatSnapPresetLabel(v, displayUnits)}
                   </button>
                 ))}
               </div>

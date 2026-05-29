@@ -25,6 +25,7 @@ import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
+import { formatSnapPresetLabel } from '../utils/snapLabels';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -1868,7 +1869,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:border-slate-600'
                   }`}
                 >
-                  {v === 0 ? 'Off' : `${v}mm`}
+                  {formatSnapPresetLabel(v, units)}
                 </button>
               ))}
             </div>
@@ -2462,7 +2463,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                             : 'border-slate-700 bg-slate-800 text-slate-200'
                         }`}
                       >
-                        {v === 0 ? 'Off' : `${v}mm`}
+                        {formatSnapPresetLabel(v, units)}
                       </button>
                     ))}
                   </div>
@@ -3230,7 +3231,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   }`}
                   onClick={() => setCanvasSnap(v)}
                 >
-                  {v === 0 ? 'Off' : `${v}mm`}
+                  {formatSnapPresetLabel(v, units)}
                 </button>
               ))}
               <span className="ml-auto text-slate-500">Click to add points • Right-drag to pan • Wheel to zoom</span>
@@ -3335,7 +3336,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   }`}
                   onClick={() => setCanvasSnap(v)}
                 >
-                  {v === 0 ? 'Off' : `${v}mm`}
+                  {formatSnapPresetLabel(v, units)}
                 </button>
               ))}
               <div className="flex items-center gap-2 ml-4 pl-4 border-l border-slate-700">
@@ -3667,7 +3668,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   }`}
                   onClick={() => setCanvasSnap(v)}
                 >
-                  {v === 0 ? 'Off' : `${v}mm`}
+                  {formatSnapPresetLabel(v, units)}
                 </button>
               ))}
               <span className="ml-auto text-slate-500">Right-drag to pan • Wheel to zoom</span>
