@@ -29,6 +29,7 @@ export const canonicalKeyPairs: Array<[string, string]> = [
   ['updateRate', 'updateRateEntity'],
   ['firmwareUpdate', 'firmwareUpdateEntity'],
   ['installationAngle', 'installationAngleEntity'],
+  ['upsideDownMounting', 'upsideDownMountingEntity'],
   ['polygonZonesEnabled', 'polygonZonesEnabledEntity'],
   ['zone1OccupancyEntity', 'zone1Occupancy'],
   ['zone2OccupancyEntity', 'zone2Occupancy'],

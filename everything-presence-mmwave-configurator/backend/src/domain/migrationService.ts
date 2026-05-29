@@ -65,6 +65,7 @@ class MigrationServiceImpl {
     // Configuration entities
     if (em.maxDistanceEntity) mappings['maxDistance'] = em.maxDistanceEntity;
     if (em.installationAngleEntity) mappings['installationAngle'] = em.installationAngleEntity;
+    if (em.upsideDownMountingEntity) mappings['upsideDownMounting'] = em.upsideDownMountingEntity;
     if (em.polygonZonesEnabledEntity) mappings['polygonZonesEnabled'] = em.polygonZonesEnabledEntity;
     if (em.trackingTargetCountEntity) mappings['trackingTargetCount'] = em.trackingTargetCountEntity;
     if (em.firmwareUpdateEntity) mappings['firmwareUpdate'] = em.firmwareUpdateEntity;

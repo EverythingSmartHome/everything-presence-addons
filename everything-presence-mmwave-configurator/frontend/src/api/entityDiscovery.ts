@@ -244,6 +244,7 @@ export const getTemplateKeyLabel = (templateKey: string): string => {
     modeEntity: 'Mode',
     maxDistanceEntity: 'Max Distance',
     installationAngleEntity: 'Installation Angle',
+    upsideDownMountingEntity: 'Upside Down Mounting',
     polygonZonesEnabledEntity: 'Polygon Zones Switch',
     trackingTargetCountEntity: 'Tracking Target Count',
     firmwareUpdateEntity: 'Firmware Update',

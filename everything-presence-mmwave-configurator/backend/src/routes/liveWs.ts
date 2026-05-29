@@ -174,6 +174,7 @@ export function createLiveWebSocketServer(
           addEntity('trackingTargetsEntity', entityMap.trackingTargetsEntity);
           addEntity('maxDistanceEntity', entityMap.maxDistanceEntity);
           addEntity('installationAngleEntity', entityMap.installationAngleEntity);
+          addEntity('upsideDownMountingEntity', entityMap.upsideDownMountingEntity);
 
           // EP1 config entities for distance overlays
           addEntity('distanceMaxEntity', entityMap.distanceMaxEntity);

@@ -232,6 +232,7 @@ export interface EntityMappings {
 
   maxDistanceEntity?: string;
   installationAngleEntity?: string;
+  upsideDownMountingEntity?: string;
   polygonZonesEnabledEntity?: string;
   trackingTargetCountEntity?: string;
   firmwareUpdateEntity?: string;
@@ -388,6 +389,7 @@ export interface EP1Config {
   updateRate?: string | null;
   // EPL-specific (installation angle for coordinate system rotation)
   installationAngle?: number;
+  upsideDownMounting?: boolean;
 }
 
 export interface EP1LiveData {

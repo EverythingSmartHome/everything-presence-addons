@@ -234,6 +234,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const currentInstallationAngle =
     typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : null;
+  const currentUpsideDownMounting = liveState?.config?.upsideDownMounting === true;
   const deviceLocalToRoom = useCallback((deviceX: number, deviceY: number) => {
     if (!selectedRoom?.devicePlacement) {
       return { x: deviceX, y: deviceY };
@@ -242,11 +243,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const angleRad = (((rotationDeg ?? 0) + (currentInstallationAngle ?? 0)) * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
+    const localX = currentUpsideDownMounting ? -deviceX : deviceX;
     return {
-      x: deviceX * cos - deviceY * sin + x,
-      y: deviceX * sin + deviceY * cos + y,
+      x: localX * cos - deviceY * sin + x,
+      y: localX * sin + deviceY * cos + y,
     };
-  }, [currentInstallationAngle, selectedRoom?.devicePlacement]);
+  }, [currentInstallationAngle, currentUpsideDownMounting, selectedRoom?.devicePlacement]);
 
   const isEplDevice = useMemo(() => {
     const caps = selectedProfile?.capabilities as { tracking?: boolean; distanceOnlyTracking?: boolean } | undefined;
