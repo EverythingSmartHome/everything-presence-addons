@@ -21,7 +21,7 @@ import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
-import { formatLengthLabel } from '../utils/lengthLabels';
+import { formatLengthLabel, parseLengthInput } from '../utils/lengthLabels';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import {
   getCeilingSliceLineDepth,
@@ -807,16 +807,18 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       return;
     }
 
-    const lenMeters = Math.hypot(end.x - start.x, end.y - start.y) / 1000;
-    const displayValue = displayUnits === 'imperial' ? lenMeters * 3.28084 : lenMeters;
-    setWallLengthInput(displayValue.toFixed(2));
+    const lengthMm = Math.hypot(end.x - start.x, end.y - start.y);
+    if (displayUnits === 'imperial') {
+      setWallLengthInput(formatLengthLabel(lengthMm, 'imperial'));
+    } else {
+      setWallLengthInput((lengthMm / 1000).toFixed(2));
+    }
   }, [displayUnits, selectedRoom?.roomShell?.points, selectedSegment]);
 
   const commitSelectedSegmentLength = (rawValue: string) => {
-    const parsed = Number(rawValue);
-    if (!Number.isFinite(parsed)) return;
-    const meters = displayUnits === 'imperial' ? parsed * 0.3048 : parsed;
-    adjustSegmentLength(Math.max(0.1, meters));
+    const lengthMm = parseLengthInput(rawValue, displayUnits);
+    if (!Number.isFinite(lengthMm)) return;
+    adjustSegmentLength(Math.max(0.1, lengthMm / 1000));
   };
 
   const segmentEditorPosition = useMemo(() => {
