@@ -121,13 +121,17 @@ jobs:
       - name: Extract version from config.yaml
         run: |
           VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
+          MAJOR_VERSION=${VERSION%%.*}
           echo "Extracted version: $VERSION"
+          echo "Extracted major version: $MAJOR_VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "MAJOR_VERSION=$MAJOR_VERSION" >> $GITHUB_ENV
 
       - name: Set Image Tags
         run: |
           echo "IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
           echo "LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest" >> $GITHUB_ENV
+          echo "MAJOR_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.MAJOR_VERSION }}" >> $GITHUB_ENV
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
@@ -146,6 +150,7 @@ jobs:
           tags: |
             ${{ env.IMAGE_TAG }}-${{ matrix.arch }}
             ${{ env.LATEST_TAG }}-${{ matrix.arch }}
+            ${{ env.MAJOR_TAG }}-${{ matrix.arch }}
 
       - name: Test Docker image
         run: |
@@ -184,13 +189,17 @@ jobs:
       - name: Extract version from config.yaml
         run: |
           VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
+          MAJOR_VERSION=${VERSION%%.*}
           echo "Extracted version: $VERSION"
+          echo "Extracted major version: $MAJOR_VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "MAJOR_VERSION=$MAJOR_VERSION" >> $GITHUB_ENV
 
       - name: Set Image Tags
         run: |
           echo "ADDON_IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon-${{ env.VERSION }}" >> $GITHUB_ENV
           echo "ADDON_LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon" >> $GITHUB_ENV
+          echo "ADDON_MAJOR_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon-${{ env.MAJOR_VERSION }}" >> $GITHUB_ENV
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
@@ -211,6 +220,7 @@ jobs:
           tags: |
             ${{ env.ADDON_IMAGE_TAG }}-${{ matrix.arch }}
             ${{ env.ADDON_LATEST_TAG }}-${{ matrix.arch }}
+            ${{ env.ADDON_MAJOR_TAG }}-${{ matrix.arch }}
 
       - name: Test Docker image
         run: |
@@ -231,13 +241,17 @@ jobs:
       - name: Extract version from config.yaml
         run: |
           VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
+          MAJOR_VERSION=${VERSION%%.*}
           echo "Extracted version: $VERSION"
+          echo "Extracted major version: $MAJOR_VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "MAJOR_VERSION=$MAJOR_VERSION" >> $GITHUB_ENV
 
       - name: Set Image Tags
         run: |
           echo "IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.VERSION }}" >> $GITHUB_ENV
           echo "LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:latest" >> $GITHUB_ENV
+          echo "MAJOR_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:${{ env.MAJOR_VERSION }}" >> $GITHUB_ENV
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
@@ -257,6 +271,11 @@ jobs:
             ${{ env.LATEST_TAG }}-amd64 \
             ${{ env.LATEST_TAG }}-arm64 \
             ${{ env.LATEST_TAG }}-armv7
+          docker buildx imagetools create \
+            -t ${{ env.MAJOR_TAG }} \
+            ${{ env.MAJOR_TAG }}-amd64 \
+            ${{ env.MAJOR_TAG }}-arm64 \
+            ${{ env.MAJOR_TAG }}-armv7
 
   manifest-addon:
     name: Create Add-on Multi-Arch Manifest
@@ -273,13 +292,17 @@ jobs:
       - name: Extract version from config.yaml
         run: |
           VERSION=$(grep '^version:' everything-presence-mmwave-configurator/config.yaml | awk '{print $2}' | tr -d '"')
+          MAJOR_VERSION=${VERSION%%.*}
           echo "Extracted version: $VERSION"
+          echo "Extracted major version: $MAJOR_VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "MAJOR_VERSION=$MAJOR_VERSION" >> $GITHUB_ENV
 
       - name: Set Image Tags
         run: |
           echo "ADDON_IMAGE_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon-${{ env.VERSION }}" >> $GITHUB_ENV
           echo "ADDON_LATEST_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon" >> $GITHUB_ENV
+          echo "ADDON_MAJOR_TAG=${{ secrets.DOCKERHUB_USERNAME }}/everything-presence-mmwave-configurator:addon-${{ env.MAJOR_VERSION }}" >> $GITHUB_ENV
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
@@ -299,3 +322,8 @@ jobs:
             ${{ env.ADDON_LATEST_TAG }}-amd64 \
             ${{ env.ADDON_LATEST_TAG }}-arm64 \
             ${{ env.ADDON_LATEST_TAG }}-armv7
+          docker buildx imagetools create \
+            -t ${{ env.ADDON_MAJOR_TAG }} \
+            ${{ env.ADDON_MAJOR_TAG }}-amd64 \
+            ${{ env.ADDON_MAJOR_TAG }}-arm64 \
+            ${{ env.ADDON_MAJOR_TAG }}-armv7
