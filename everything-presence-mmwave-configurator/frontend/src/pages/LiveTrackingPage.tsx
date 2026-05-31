@@ -2701,7 +2701,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               {liveState?.temperature !== null && liveState?.temperature !== undefined && (
                 <div className="flex justify-between border-b border-slate-700/50 py-1">
                   <span className="text-slate-400">Temperature</span>
-                  <span>{liveState.temperature.toFixed(1)}{deviceMapping?.entityUnits?.temperature || 'Â°C'}</span>
+                  <span>{liveState.temperature.toFixed(1)}{deviceMapping?.entityUnits?.temperature || '°C'}</span>
                 </div>
               )}
               {liveState?.co2 !== null && liveState?.co2 !== undefined && (
