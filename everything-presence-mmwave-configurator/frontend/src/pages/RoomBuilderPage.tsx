@@ -659,15 +659,26 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         return;
       }
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (selectedRoom?.roomShell?.points?.length) {
-          e.preventDefault();
-          removeLastPoint();
+        if (!selectedRoom?.roomShell?.points?.length) return;
+        e.preventDefault();
+        if (selectedSegment !== null) {
+          deleteSelectedWallPoint();
+          return;
         }
+        removeLastPoint();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isDrawingWall, selectedRoom?.roomShell?.points, stopDrawing, setIsDrawingWall, removeLastPoint]);
+  }, [
+    deleteSelectedWallPoint,
+    isDrawingWall,
+    removeLastPoint,
+    selectedRoom?.roomShell?.points,
+    selectedSegment,
+    setIsDrawingWall,
+    stopDrawing,
+  ]);
 
   const handleAddPoint = (p: { x: number; y: number }) => {
     if (!selectedRoom) return;
@@ -729,6 +740,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       setPanOffsetMm({ x: centerX, y: centerY });
     }
   };
+
+  const deleteSelectedWallPoint = useCallback(() => {
+    const ptsDelete = selectedRoom?.roomShell?.points ?? [];
+    if (selectedSegment === null || ptsDelete.length <= 2) return;
+
+    const removeIdx = (selectedSegment + 1) % ptsDelete.length;
+    const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
+    handlePointsChange(nextDelete);
+    setSelectedSegment(null);
+    setHoveredSegment(null);
+  }, [handlePointsChange, selectedRoom?.roomShell?.points, selectedSegment]);
 
 
   const snapDelta = (dx: number, dy: number) => {
@@ -2196,7 +2218,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 </button>
               </div>
               <div className="text-[10px] text-slate-500">
-                Tips: Click a wall to edit it, Shift+Click a wall to split it, A to draw, Enter to finish, Esc to cancel, Del to undo
+                Tips: Click a wall to edit it, Shift+Click a wall to split it, A to draw, Enter to finish, Esc to cancel, Del to undo or delete the selected wall point
               </div>
             </div>
           </div>
@@ -2365,15 +2387,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             </button>
                             <button
                               className="rounded-lg border border-rose-500/70 px-2.5 py-2 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/10"
-                              onClick={() => {
-                                const ptsDelete = selectedRoom.roomShell?.points ?? [];
-                                if (ptsDelete.length <= 2) return;
-                                const removeIdx = (selectedSegment + 1) % ptsDelete.length;
-                                const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
-                                handlePointsChange(nextDelete);
-                                setSelectedSegment(null);
-                                setHoveredSegment(null);
-                              }}
+                              onClick={deleteSelectedWallPoint}
                             >
                               Delete
                             </button>
@@ -2491,15 +2505,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </button>
                           <button
                             className="w-full rounded-lg border border-rose-500/70 px-3 py-2 text-sm font-semibold text-rose-100"
-                            onClick={() => {
-                              const ptsDelete = selectedRoom.roomShell?.points ?? [];
-                              if (ptsDelete.length <= 2) return;
-                              const removeIdx = (selectedSegment + 1) % ptsDelete.length;
-                              const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
-                              handlePointsChange(nextDelete);
-                              setSelectedSegment(null);
-                              setHoveredSegment(null);
-                            }}
+                            onClick={deleteSelectedWallPoint}
                           >
                             Delete wall point
                           </button>
