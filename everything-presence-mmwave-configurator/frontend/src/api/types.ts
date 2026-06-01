@@ -749,4 +749,5 @@ export interface AutoPrepareResponse {
   validation: FirmwareValidation;
   prepared: PreparedFirmwareResponse;
   newVersion: string;
+  migration?: FirmwareMigration;
 }

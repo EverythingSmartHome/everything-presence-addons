@@ -765,7 +765,7 @@ export class FirmwareService {
   /**
    * Check if a version satisfies a simple comparator range (e.g., "<1.5.0", ">=1.2.0").
    */
-  private matchesVersionRange(version: string, range: string): boolean {
+  matchesVersionRange(version: string, range: string): boolean {
     if (!version || !range) return false;
     const trimmed = range.trim();
     const match = trimmed.match(/^(<=|>=|<|>|=)?\s*v?(\d+(?:\.\d+){0,2})/);
