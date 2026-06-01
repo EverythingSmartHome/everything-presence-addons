@@ -656,6 +656,12 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         });
       }
 
+      const migration = productIndex.migrations.find((m) => {
+        if (m.id !== 'rectangular-to-polygon-zones') return false;
+        return firmwareService.matchesVersionRange(currentVersion, m.fromVersion) &&
+          firmwareService.matchesVersionRange(productIndex.product.latestVersion, m.toVersion);
+      });
+
       // Prepare the firmware
       const prepared = await firmwareService.prepareFirmwareForDevice(deviceId, fullManifestUrl);
 
@@ -666,6 +672,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         validation,
         prepared,
         newVersion: productIndex.product.latestVersion,
+        migration,
       });
     } catch (error) {
       logger.error({ error }, 'Failed to auto-prepare firmware');

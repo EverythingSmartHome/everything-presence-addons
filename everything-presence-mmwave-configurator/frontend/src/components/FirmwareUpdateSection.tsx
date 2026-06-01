@@ -155,6 +155,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const [updateStatus, setUpdateStatus] = useState<FirmwareUpdateStatus>('idle');
   const [preparedToken, setPreparedToken] = useState<string | null>(null);
   const [preparedVersion, setPreparedVersion] = useState<string | null>(null);
+  const [preparedMigrationMeta, setPreparedMigrationMeta] = useState<AvailableUpdate['migration'] | null>(null);
   const [updateEntityStatus, setUpdateEntityStatus] = useState<FirmwareUpdateEntityStatus | null>(null);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [updateMonitorMessage, setUpdateMonitorMessage] = useState<string | null>(null);
@@ -354,6 +355,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     setUpdateStatus('idle');
     setPreparedToken(null);
     setPreparedVersion(null);
+    setPreparedMigrationMeta(null);
     setUpdateEntityStatus(null);
     setUpdateProgress(null);
     setUpdateMonitorMessage(null);
@@ -602,6 +604,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       setUpdateStatus('preparing');
       setPreparedToken(null);
       setPreparedVersion(null);
+      setPreparedMigrationMeta(null);
 
       setUpdateStatus('downloading');
       const prepareRes = await prepareFirmware(selectedDeviceId, manifestUrl, {
@@ -725,6 +728,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       setUpdateStatus('preparing');
       setPreparedToken(null);
       setPreparedVersion(null);
+      setPreparedMigrationMeta(null);
       setValidation(null);
 
       setUpdateStatus('downloading');
@@ -736,6 +740,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
       setPreparedToken(res.prepared.token);
       setPreparedVersion(res.newVersion);
+      setPreparedMigrationMeta(res.migration ?? null);
       setValidation(res.validation);
       setUpdateStatus('ready');
 
@@ -746,7 +751,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         resolved.firmwareVersion,
         res.newVersion,
         resolved.model,
-        null
+        res.migration ?? null
       );
       if (migrationInfo?.required) {
         promptMigration();
@@ -829,6 +834,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     if (migrationGate?.required) {
       setPreparedToken(entry.token);
       setPreparedVersion(entry.version);
+      setPreparedMigrationMeta(null);
       setUpdateStatus('ready');
       setUpdateModalOpen(true);
       promptMigration();
@@ -838,6 +844,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     try {
       setPreparedToken(entry.token);
       setPreparedVersion(entry.version);
+      setPreparedMigrationMeta(null);
       setUpdateModalOpen(true);
       await triggerUpdateOnDevice(entry.token);
     } catch (err) {
@@ -1246,7 +1253,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         currentFirmwareVersion,
         preparedVersion,
         deviceConfig?.model ?? selectedDevice?.model ?? undefined,
-        selectedUpdate?.migration ?? null
+        preparedMigrationMeta
       )
     : null;
   const restoreBackupId = migrationBackupId ?? lastBackupId ?? latestBackup?.id ?? null;
