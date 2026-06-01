@@ -150,7 +150,7 @@
       "label": "Assume Present Timeout",
       "controlType": "number",
       "min": 0,
-      "max": 600,
+      "max": 43200,
       "step": 1,
       "unit": "s",
       "required": false
