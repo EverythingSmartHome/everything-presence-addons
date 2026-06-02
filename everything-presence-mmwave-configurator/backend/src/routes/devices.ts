@@ -751,10 +751,34 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         statesMapSize: states.size
       }, 'Polygon mode entity state lookup result');
 
-      // If entity doesn't exist in Home Assistant, polygon zones are not supported
+      // If the old toggle entity no longer exists, fall back to polygon-only detection.
       if (!state) {
-        logger.info({ entityId: switchEntityId }, 'Polygon mode entity not found - feature not available');
-        return res.json({ supported: false, enabled: false, controllable: true });
+        logger.info({ entityId: switchEntityId }, 'Polygon mode entity not found - checking polygon-only zone entities');
+
+        let polygonZoneEntity: string | null = null;
+        if (hasDeviceMapping) {
+          polygonZoneEntity = deviceEntityService.getPolygonZoneEntity(deviceId, 'polygon', 1);
+        }
+        if (!polygonZoneEntity && entityMap?.polygonZoneEntities?.zone1) {
+          polygonZoneEntity = EntityResolver.resolvePolygonZoneEntity(
+            entityMappings,
+            entityNamePrefix as string,
+            'polygonZoneEntities',
+            'zone1',
+            entityMap.polygonZoneEntities.zone1
+          );
+        }
+        if (!polygonZoneEntity) {
+          return res.json({ supported: false, enabled: false, controllable: true });
+        }
+
+        const polygonStates = await readTransport.getStates([polygonZoneEntity]);
+        const polygonState = polygonStates.get(polygonZoneEntity);
+        if (!polygonState) {
+          return res.json({ supported: false, enabled: false, controllable: true });
+        }
+
+        return res.json({ supported: true, enabled: true, controllable: false });
       }
 
       // Check if enabled (case-insensitive)
