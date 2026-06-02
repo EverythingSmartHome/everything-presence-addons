@@ -1,3 +1,31 @@
+## 2.2.0
+
+### What's Changed
+* Update all user facing docs to use apps termionology by @timmo001 in #308
+* Make Dockerfile build layer atomic to fix #306 by @EverythingSmartHome in #311
+* Preserve zone timeouts when saving zones by @EverythingSmartHome in #312
+* Avoid save button overlap in room builder by @EverythingSmartHome in #313
+* Use native arm64 runners and build all arches on PR by @EverythingSmartHome in #315
+* Fix door swing direction rendering by @EverythingSmartHome in #316
+* Constrain live dashboard widget rail by @EverythingSmartHome in #317
+* Fix room builder wall editor bubble by @EverythingSmartHome in #319
+* Render custom furniture visuals by @EverythingSmartHome in #320
+* Clamp room builder handle size by @EverythingSmartHome in #322
+* Show configurator app version by @EverythingSmartHome in #323
+* Clarify wall splitting in room builder by @EverythingSmartHome in #324
+* Show imperial snap labels by @EverythingSmartHome in #326
+* Format imperial wall lengths by @EverythingSmartHome in #327
+* Handle upside-down EPL tracking by @EverythingSmartHome in #328
+* Lazy subscribe to HA live state by @EverythingSmartHome in #329
+* Publish major Docker tags by @EverythingSmartHome in #331
+* Fix mobile details temperature unit fallback by @EverythingSmartHome in #332
+* Align EPL assumed presence timeout range by @EverythingSmartHome in #333
+* Respect selected wall delete context by @EverythingSmartHome in #335
+* Use migration metadata for auto-prepare by @EverythingSmartHome in #337
+* Handle polygon-only EPL after migration by @EverythingSmartHome in #338
+* Back up polygon zones by @EverythingSmartHome in #340
+* Bump version by @EverythingSmartHome in #339
+
 ## 2.1.0
 
 ### Ceiling Mount for EP Pro
