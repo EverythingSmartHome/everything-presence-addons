@@ -1,4 +1,4 @@
-import type { ZoneRect } from '../domain/types';
+import type { Zone } from '../domain/types';
 
 export type ZoneBackupSource = 'device' | 'import';
 
@@ -11,7 +11,7 @@ export interface ZoneBackup {
   deviceName?: string;
   profileId: string;
   firmwareVersion?: string;
-  zones: ZoneRect[];
+  zones: Zone[];
   zoneLabels?: Record<string, string>;
   metadata?: {
     model?: string;

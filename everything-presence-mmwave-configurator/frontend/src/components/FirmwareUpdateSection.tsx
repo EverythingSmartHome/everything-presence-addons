@@ -31,6 +31,7 @@ import {
   FirmwareUpdateEntityStatus,
   DeviceProfile,
   ZoneBackup,
+  Zone,
   ZoneRect,
   ZonePolygon,
 } from '../api/types';
@@ -1021,28 +1022,47 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     return true;
   };
 
+  const isBackupRect = (zone: Zone): zone is ZoneRect =>
+    typeof zone === 'object' && zone !== null && 'width' in zone && 'height' in zone;
+
+  const isBackupPolygon = (zone: Zone): zone is ZonePolygon =>
+    typeof zone === 'object' && zone !== null && 'vertices' in zone;
+
   const buildExpectedPolygons = (backup: ZoneBackup, limits: DeviceProfile['limits'] | undefined): ZonePolygon[] => {
     const maxZones = limits?.maxZones ?? 4;
     const maxExclusion = limits?.maxExclusionZones ?? 2;
     const maxEntry = limits?.maxEntryZones ?? 2;
 
-    const regularZones = sortZonesByIndex(
-      backup.zones.filter((zone) => zone.type === 'regular' && isValidRect(zone))
+    const regularPolygonZones = sortZonesByIndex(
+      backup.zones.filter((zone): zone is ZonePolygon => zone.type === 'regular' && isBackupPolygon(zone))
     ).slice(0, maxZones);
-    const exclusionZones = sortZonesByIndex(
-      backup.zones.filter((zone) => zone.type === 'exclusion' && isValidRect(zone))
+    const exclusionPolygonZones = sortZonesByIndex(
+      backup.zones.filter((zone): zone is ZonePolygon => zone.type === 'exclusion' && isBackupPolygon(zone))
     ).slice(0, maxExclusion);
-    const entryZones = sortZonesByIndex(
-      backup.zones.filter((zone) => zone.type === 'entry' && isValidRect(zone))
+    const entryPolygonZones = sortZonesByIndex(
+      backup.zones.filter((zone): zone is ZonePolygon => zone.type === 'entry' && isBackupPolygon(zone))
+    ).slice(0, maxEntry);
+
+    const regularRectZones = sortZonesByIndex(
+      backup.zones.filter((zone): zone is ZoneRect => zone.type === 'regular' && isBackupRect(zone) && isValidRect(zone))
+    ).slice(0, maxZones);
+    const exclusionRectZones = sortZonesByIndex(
+      backup.zones.filter((zone): zone is ZoneRect => zone.type === 'exclusion' && isBackupRect(zone) && isValidRect(zone))
+    ).slice(0, maxExclusion);
+    const entryRectZones = sortZonesByIndex(
+      backup.zones.filter((zone): zone is ZoneRect => zone.type === 'entry' && isBackupRect(zone) && isValidRect(zone))
     ).slice(0, maxEntry);
 
     return [
       // IMPORTANT: restore writes zones sequentially into slot 1..N regardless of original slot index.
       // If a backup has gaps (e.g. Exclusion 2 only), it will be restored into Exclusion 1.
       // Verification must mirror that behavior to avoid false warnings.
-      ...regularZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Zone ${idx + 1}` })),
-      ...exclusionZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Exclusion ${idx + 1}` })),
-      ...entryZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Entry ${idx + 1}` })),
+      ...regularPolygonZones.map((zone, idx) => ({ ...zone, id: `Zone ${idx + 1}` })),
+      ...exclusionPolygonZones.map((zone, idx) => ({ ...zone, id: `Exclusion ${idx + 1}` })),
+      ...entryPolygonZones.map((zone, idx) => ({ ...zone, id: `Entry ${idx + 1}` })),
+      ...regularRectZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Zone ${regularPolygonZones.length + idx + 1}` })),
+      ...exclusionRectZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Exclusion ${exclusionPolygonZones.length + idx + 1}` })),
+      ...entryRectZones.map((zone, idx) => ({ ...rectToPolygon(zone), id: `Entry ${entryPolygonZones.length + idx + 1}` })),
     ];
   };
 
