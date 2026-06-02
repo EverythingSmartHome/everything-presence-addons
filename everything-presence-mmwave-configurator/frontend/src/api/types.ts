@@ -131,7 +131,7 @@ export interface ZoneBackup {
   deviceName?: string;
   profileId: string;
   firmwareVersion?: string;
-  zones: ZoneRect[];
+  zones: Zone[];
   zoneLabels?: Record<string, string>;
   metadata?: {
     model?: string;
