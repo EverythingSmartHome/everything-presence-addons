@@ -1,3 +1,6 @@
+## 2.2.1
+* Fix issue with room builder not loading by @EverythingSmartHome in #343
+
 ## 2.2.0
 
 ### What's Changed
