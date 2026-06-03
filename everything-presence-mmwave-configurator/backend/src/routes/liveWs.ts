@@ -24,48 +24,6 @@ export function createLiveWebSocketServer(
 ): WebSocketServer {
   const wss = new WebSocketServer({ server: httpServer, path: '/api/live/ws' });
   const clients: Map<WebSocket, LiveClientSubscription> = new Map();
-  let liveStateSubscriptionId: string | null = null;
-
-  const ensureLiveStateSubscription = () => {
-    if (liveStateSubscriptionId) return;
-
-    liveStateSubscriptionId = readTransport.subscribeToStateChanges(
-      [], // Empty = subscribe to all entities
-      (entityId: string, newState: EntityState | null, _oldState: EntityState | null) => {
-        if (!entityId || !newState) return;
-
-        // Broadcast to clients subscribed to this entity
-        clients.forEach((subscription, clientWs) => {
-          if (subscription.entityIds.has(entityId) && clientWs.readyState === WebSocket.OPEN) {
-            const entityKey = subscription.entityKeysById.get(entityId);
-            try {
-              clientWs.send(
-                JSON.stringify({
-                  type: 'state_update',
-                  entityKey,
-                  entityId,
-                  state: newState.state,
-                  attributes: newState.attributes,
-                  timestamp: Date.now(),
-                }),
-              );
-            } catch (err) {
-              logger.error({ err, entityId }, 'Failed to send state update to client');
-            }
-          }
-        });
-      }
-    );
-
-    logger.info('Live tracking bridge subscribed to HA state changes');
-  };
-
-  const releaseLiveStateSubscriptionIfUnused = () => {
-    if (clients.size > 0 || !liveStateSubscriptionId) return;
-    readTransport.unsubscribe(liveStateSubscriptionId);
-    liveStateSubscriptionId = null;
-    logger.info('Live tracking bridge unsubscribed from HA state changes');
-  };
 
   wss.on('connection', (ws: WebSocket) => {
     logger.info('Live tracking WebSocket client connected');
@@ -260,19 +218,48 @@ export function createLiveWebSocketServer(
             addEntity('assumedPresentRemaining', entities.assumedPresentRemaining.template);
           }
 
-          // Store subscription
-          ensureLiveStateSubscription();
+          const existingSubscription = clients.get(ws);
+          if (existingSubscription?.subscriptionId) {
+            readTransport.unsubscribe(existingSubscription.subscriptionId);
+          }
+
           const subscriptionId = `${deviceId}-${Date.now()}`;
+          const stateSubscriptionId = readTransport.subscribeToStateChanges(
+            Array.from(entityIds),
+            (entityId: string, newState: EntityState | null, _oldState: EntityState | null) => {
+              if (!entityId || !newState || ws.readyState !== WebSocket.OPEN) return;
+
+              const entityKey = entityKeysById.get(entityId);
+              try {
+                ws.send(
+                  JSON.stringify({
+                    type: 'state_update',
+                    entityKey,
+                    entityId,
+                    state: newState.state,
+                    attributes: newState.attributes,
+                    timestamp: Date.now(),
+                  }),
+                );
+              } catch (err) {
+                logger.error({ err, entityId, deviceId }, 'Failed to send state update to client');
+              }
+            },
+          );
+
           clients.set(ws, {
             ws,
             deviceId,
             profileId,
             entityIds,
             entityKeysById,
-            subscriptionId,
+            subscriptionId: stateSubscriptionId || subscriptionId,
           });
 
-          logger.info({ deviceId, profileId, entityCount: entityIds.size }, 'Client subscribed to live tracking');
+          logger.info(
+            { deviceId, profileId, entityCount: entityIds.size },
+            'Client subscribed to live tracking'
+          );
 
           // Send initial states using read transport bulk query
           try {
@@ -312,9 +299,12 @@ export function createLiveWebSocketServer(
             );
           }
         } else if (message.type === 'unsubscribe') {
+          const subscription = clients.get(ws);
+          if (subscription?.subscriptionId) {
+            readTransport.unsubscribe(subscription.subscriptionId);
+          }
           clients.delete(ws);
           logger.info('Client unsubscribed from live tracking');
-          releaseLiveStateSubscriptionIfUnused();
         }
       } catch (err) {
         logger.error({ err }, 'Failed to process WebSocket message');
@@ -323,15 +313,21 @@ export function createLiveWebSocketServer(
     });
 
     ws.on('close', () => {
+      const subscription = clients.get(ws);
+      if (subscription?.subscriptionId) {
+        readTransport.unsubscribe(subscription.subscriptionId);
+      }
       clients.delete(ws);
       logger.info('Live tracking WebSocket client disconnected');
-      releaseLiveStateSubscriptionIfUnused();
     });
 
     ws.on('error', (err) => {
       logger.error({ err }, 'WebSocket client error');
+      const subscription = clients.get(ws);
+      if (subscription?.subscriptionId) {
+        readTransport.unsubscribe(subscription.subscriptionId);
+      }
       clients.delete(ws);
-      releaseLiveStateSubscriptionIfUnused();
     });
   });
 

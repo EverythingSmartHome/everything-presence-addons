@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../logger';
 import { EntityRegistryEntry, HaWsMessage } from './types';
+import { RestReadTransport } from './restReadTransport';
 import {
   IHaReadTransport,
   ReadTransportConfig,
@@ -21,6 +22,8 @@ interface Subscription {
   id: string;
   entityIds: Set<string>; // Empty = all entities
   callback: StateChangeCallback;
+  haSubscriptionId?: number;
+  activationPromise?: Promise<void> | null;
 }
 
 /**
@@ -41,9 +44,8 @@ export class WsReadTransport implements IHaReadTransport {
   private setReady!: () => void;
   private rejectReady!: (reason?: unknown) => void;
   private _isConnected = false;
-  private stateSubscriptionActive = false;
-  private stateSubscriptionId?: number;
   private reconnectTimeout?: NodeJS.Timeout;
+  private restFallback?: RestReadTransport;
 
   constructor(config: ReadTransportConfig) {
     this.config = config;
@@ -52,6 +54,13 @@ export class WsReadTransport implements IHaReadTransport {
 
   get isConnected(): boolean {
     return this._isConnected;
+  }
+
+  private getRestFallback(): RestReadTransport {
+    if (!this.restFallback) {
+      this.restFallback = new RestReadTransport(this.config);
+    }
+    return this.restFallback;
   }
 
   private createReadyPromise(): Promise<void> {
@@ -124,9 +133,7 @@ export class WsReadTransport implements IHaReadTransport {
           this._isConnected = true;
           this.setReady();
           resolve();
-          if (this.subscriptions.size > 0) {
-            void this.activateStateSubscription();
-          }
+          this.reactivateSubscriptions();
           return;
         }
 
@@ -140,9 +147,9 @@ export class WsReadTransport implements IHaReadTransport {
           return;
         }
 
-        // Handle state_changed events for subscriptions
-        if (parsed.type === 'event' && (parsed as any).event?.event_type === 'state_changed') {
-          this.handleStateChanged((parsed as any).event.data);
+        // Handle subscription events
+        if (parsed.type === 'event') {
+          this.handleEventMessage(parsed as any);
         }
       });
 
@@ -157,8 +164,10 @@ export class WsReadTransport implements IHaReadTransport {
       this.socket.on('close', (code, reason) => {
         logger.warn({ code, reason: reason.toString() }, 'WsReadTransport: WebSocket closed');
         this._isConnected = false;
-        this.stateSubscriptionActive = false;
-        this.stateSubscriptionId = undefined;
+        this.subscriptions.forEach((subscription) => {
+          subscription.haSubscriptionId = undefined;
+          subscription.activationPromise = null;
+        });
         this.pending.forEach((p) => p.reject(new Error('WebSocket connection closed')));
         this.pending.clear();
 
@@ -186,7 +195,10 @@ export class WsReadTransport implements IHaReadTransport {
       this.socket = undefined;
     }
     this._isConnected = false;
-    this.stateSubscriptionActive = false;
+    this.subscriptions.forEach((subscription) => {
+      subscription.haSubscriptionId = undefined;
+      subscription.activationPromise = null;
+    });
   }
 
   async waitUntilReady(): Promise<void> {
@@ -198,42 +210,63 @@ export class WsReadTransport implements IHaReadTransport {
   // ─────────────────────────────────────────────────────────────────
 
   async listDevices(): Promise<DeviceRegistryEntry[]> {
-    const response = (await this.call({
-      type: 'config/device_registry/list',
-    })) as HaWsMessage & { result?: DeviceRegistryEntry[] };
+    try {
+      const response = (await this.call({
+        type: 'config/device_registry/list',
+      })) as HaWsMessage & { result?: DeviceRegistryEntry[] };
 
-    if (response.type === 'result' && (response as any).success) {
-      return (response as any).result ?? [];
+      if (response.type === 'result' && (response as any).success) {
+        return (response as any).result ?? [];
+      }
+
+      logger.warn({ response }, 'WsReadTransport: Unexpected response when listing devices');
+      return [];
+    } catch (err) {
+      logger.warn({ err }, 'WsReadTransport: listDevices failed, falling back to REST');
+      const restTransport = this.getRestFallback();
+      await restTransport.waitUntilReady();
+      return restTransport.listDevices();
     }
-
-    logger.warn({ response }, 'WsReadTransport: Unexpected response when listing devices');
-    return [];
   }
 
   async listEntityRegistry(): Promise<EntityRegistryEntry[]> {
-    const response = (await this.call({
-      type: 'config/entity_registry/list',
-    })) as HaWsMessage & { result?: EntityRegistryEntry[] };
+    try {
+      const response = (await this.call({
+        type: 'config/entity_registry/list',
+      })) as HaWsMessage & { result?: EntityRegistryEntry[] };
 
-    if (response.type === 'result' && (response as any).success) {
-      return (response as any).result ?? [];
+      if (response.type === 'result' && (response as any).success) {
+        return (response as any).result ?? [];
+      }
+
+      logger.warn({ response }, 'WsReadTransport: Unexpected response when listing entities');
+      return [];
+    } catch (err) {
+      logger.warn({ err }, 'WsReadTransport: listEntityRegistry failed, falling back to REST');
+      const restTransport = this.getRestFallback();
+      await restTransport.waitUntilReady();
+      return restTransport.listEntityRegistry();
     }
-
-    logger.warn({ response }, 'WsReadTransport: Unexpected response when listing entities');
-    return [];
   }
 
   async listAreaRegistry(): Promise<AreaRegistryEntry[]> {
-    const response = (await this.call({
-      type: 'config/area_registry/list',
-    })) as HaWsMessage & { result?: AreaRegistryEntry[] };
+    try {
+      const response = (await this.call({
+        type: 'config/area_registry/list',
+      })) as HaWsMessage & { result?: AreaRegistryEntry[] };
 
-    if (response.type === 'result' && (response as any).success) {
-      return (response as any).result ?? [];
+      if (response.type === 'result' && (response as any).success) {
+        return (response as any).result ?? [];
+      }
+
+      logger.warn({ response }, 'WsReadTransport: Unexpected response when listing areas');
+      return [];
+    } catch (err) {
+      logger.warn({ err }, 'WsReadTransport: listAreaRegistry failed, falling back to REST');
+      const restTransport = this.getRestFallback();
+      await restTransport.waitUntilReady();
+      return restTransport.listAreaRegistry();
     }
-
-    logger.warn({ response }, 'WsReadTransport: Unexpected response when listing areas');
-    return [];
   }
 
   async getServicesForTarget(target: HaTarget, expandGroup: boolean = true): Promise<string[]> {
@@ -278,35 +311,59 @@ export class WsReadTransport implements IHaReadTransport {
   // ─────────────────────────────────────────────────────────────────
 
   async getState(entityId: string): Promise<EntityState | null> {
-    const states = await this.getStates([entityId]);
-    return states.get(entityId) ?? null;
+    try {
+      const states = await this.getStates([entityId]);
+      return states.get(entityId) ?? null;
+    } catch (err) {
+      logger.warn({ err, entityId }, 'WsReadTransport: getState failed, falling back to REST');
+      const restTransport = this.getRestFallback();
+      await restTransport.waitUntilReady();
+      return restTransport.getState(entityId);
+    }
   }
 
   async getStates(entityIds: string[]): Promise<Map<string, EntityState>> {
-    const allStates = await this.getAllStates();
-    const result = new Map<string, EntityState>();
+    try {
+      const allStates = await this.getAllStates();
+      const result = new Map<string, EntityState>();
 
-    const entityIdSet = new Set(entityIds);
-    for (const state of allStates) {
-      if (entityIdSet.has(state.entity_id)) {
-        result.set(state.entity_id, state);
+      const entityIdSet = new Set(entityIds);
+      for (const state of allStates) {
+        if (entityIdSet.has(state.entity_id)) {
+          result.set(state.entity_id, state);
+        }
       }
-    }
 
-    return result;
+      return result;
+    } catch (err) {
+      logger.warn(
+        { err, entityCount: entityIds.length },
+        'WsReadTransport: getStates failed, falling back to REST'
+      );
+      const restTransport = this.getRestFallback();
+      await restTransport.waitUntilReady();
+      return restTransport.getStates(entityIds);
+    }
   }
 
   async getAllStates(): Promise<EntityState[]> {
-    const response = (await this.call({
-      type: 'get_states',
-    })) as HaWsMessage & { result?: EntityState[] };
+    try {
+      const response = (await this.call({
+        type: 'get_states',
+      })) as HaWsMessage & { result?: EntityState[] };
 
-    if (response.type === 'result' && (response as any).success) {
-      return (response as any).result ?? [];
+      if (response.type === 'result' && (response as any).success) {
+        return (response as any).result ?? [];
+      }
+
+      logger.warn({ response }, 'WsReadTransport: Unexpected response when getting states');
+      return [];
+    } catch (err) {
+      logger.warn({ err }, 'WsReadTransport: getAllStates failed, falling back to REST');
+      const restTransport = this.getRestFallback();
+      await restTransport.waitUntilReady();
+      return restTransport.getAllStates();
     }
-
-    logger.warn({ response }, 'WsReadTransport: Unexpected response when getting states');
-    return [];
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -320,11 +377,12 @@ export class WsReadTransport implements IHaReadTransport {
       id: subscriptionId,
       entityIds: new Set(entityIds),
       callback,
+      activationPromise: null,
     });
 
-    // Ensure we're subscribed to state_changed events
-    if (!this.stateSubscriptionActive) {
-      this.activateStateSubscription();
+    const subscription = this.subscriptions.get(subscriptionId);
+    if (subscription) {
+      void this.activateSubscription(subscription);
     }
 
     logger.debug(
@@ -336,44 +394,78 @@ export class WsReadTransport implements IHaReadTransport {
   }
 
   unsubscribe(subscriptionId: string): void {
-    this.subscriptions.delete(subscriptionId);
-    if (this.subscriptions.size === 0 && this.stateSubscriptionActive) {
-      void this.deactivateStateSubscription();
+    const subscription = this.subscriptions.get(subscriptionId);
+    if (subscription?.haSubscriptionId !== undefined) {
+      void this.deactivateSubscription(subscription);
     }
+    this.subscriptions.delete(subscriptionId);
     logger.debug({ subscriptionId }, 'WsReadTransport: Removed state subscription');
   }
 
   unsubscribeAll(): void {
-    this.subscriptions.clear();
-    if (this.stateSubscriptionActive) {
-      void this.deactivateStateSubscription();
+    for (const subscription of this.subscriptions.values()) {
+      if (subscription.haSubscriptionId !== undefined) {
+        void this.deactivateSubscription(subscription);
+      }
     }
+    this.subscriptions.clear();
     logger.debug('WsReadTransport: Removed all state subscriptions');
   }
 
-  private async activateStateSubscription(): Promise<void> {
-    if (this.stateSubscriptionActive) return;
-
-    try {
-      await this.waitUntilReady();
-      const response = (await this.call({
-        type: 'subscribe_events',
-        event_type: 'state_changed',
-      })) as HaWsMessage & { success?: boolean; id?: number };
-      this.stateSubscriptionActive = true;
-      this.stateSubscriptionId = response.type === 'result' && typeof response.id === 'number'
-        ? response.id
-        : undefined;
-      logger.info('WsReadTransport: Subscribed to state_changed events');
-    } catch (err) {
-      logger.error({ err }, 'WsReadTransport: Failed to subscribe to state_changed');
+  private reactivateSubscriptions(): void {
+    for (const subscription of this.subscriptions.values()) {
+      void this.activateSubscription(subscription);
     }
   }
 
-  private async deactivateStateSubscription(): Promise<void> {
-    if (!this.stateSubscriptionActive || this.stateSubscriptionId === undefined) {
-      this.stateSubscriptionActive = false;
-      this.stateSubscriptionId = undefined;
+  private async activateSubscription(subscription: Subscription): Promise<void> {
+    if (subscription.haSubscriptionId !== undefined) return;
+    if (subscription.activationPromise) return subscription.activationPromise;
+
+    subscription.activationPromise = (async () => {
+      await this.waitUntilReady();
+      const response = subscription.entityIds.size === 0
+        ? (await this.call({
+          type: 'subscribe_events',
+          event_type: 'state_changed',
+        })) as HaWsMessage & { success?: boolean; id?: number }
+        : (await this.call({
+          type: 'subscribe_trigger',
+          trigger: Array.from(subscription.entityIds).map((entityId) => ({
+            platform: 'state',
+            entity_id: entityId,
+          })),
+        })) as HaWsMessage & { success?: boolean; id?: number };
+
+      subscription.haSubscriptionId =
+        response.type === 'result' && typeof response.id === 'number'
+          ? response.id
+          : undefined;
+      logger.info(
+        {
+          subscriptionId: subscription.id,
+          entityCount: subscription.entityIds.size,
+          mode: subscription.entityIds.size === 0 ? 'all-events' : 'targeted-triggers',
+        },
+        'WsReadTransport: Activated state subscription'
+      );
+    })()
+      .catch((err) => {
+        logger.error(
+          { err, subscriptionId: subscription.id, entityCount: subscription.entityIds.size },
+          'WsReadTransport: Failed to activate state subscription'
+        );
+      })
+      .finally(() => {
+        subscription.activationPromise = null;
+      });
+
+    return subscription.activationPromise;
+  }
+
+  private async deactivateSubscription(subscription: Subscription): Promise<void> {
+    if (subscription.haSubscriptionId === undefined) {
+      subscription.activationPromise = null;
       return;
     }
 
@@ -381,33 +473,65 @@ export class WsReadTransport implements IHaReadTransport {
       await this.waitUntilReady();
       await this.call({
         type: 'unsubscribe_events',
-        subscription: this.stateSubscriptionId,
+        subscription: subscription.haSubscriptionId,
       });
-      logger.info('WsReadTransport: Unsubscribed from state_changed events');
+      logger.info({ subscriptionId: subscription.id }, 'WsReadTransport: Deactivated state subscription');
     } catch (err) {
-      logger.warn({ err }, 'WsReadTransport: Failed to unsubscribe from state_changed');
+      logger.warn({ err, subscriptionId: subscription.id }, 'WsReadTransport: Failed to deactivate state subscription');
     } finally {
-      this.stateSubscriptionActive = false;
-      this.stateSubscriptionId = undefined;
+      subscription.haSubscriptionId = undefined;
+      subscription.activationPromise = null;
     }
   }
 
-  private handleStateChanged(data: {
+  private handleEventMessage(parsed: any): void {
+    const subscription = typeof parsed.id === 'number'
+      ? Array.from(this.subscriptions.values()).find((candidate) => candidate.haSubscriptionId === parsed.id)
+      : undefined;
+
+    if (!subscription) {
+      return;
+    }
+
+    if (parsed.event?.event_type === 'state_changed') {
+      this.handleStateChanged(subscription, parsed.event.data);
+      return;
+    }
+
+    const trigger = parsed.event?.variables?.trigger;
+    const entityId = trigger?.entity_id;
+    const oldState = trigger?.from_state ?? null;
+    const newState = trigger?.to_state ?? null;
+
+    if (typeof entityId === 'string') {
+      this.dispatchStateChange(subscription, entityId, newState, oldState);
+    }
+  }
+
+  private handleStateChanged(subscription: Subscription, data: {
     entity_id: string;
     old_state: EntityState | null;
     new_state: EntityState | null;
   }): void {
     const { entity_id, old_state, new_state } = data;
 
-    for (const subscription of this.subscriptions.values()) {
-      // If entityIds is empty, subscribe to all; otherwise check if entity is in set
-      if (subscription.entityIds.size === 0 || subscription.entityIds.has(entity_id)) {
-        try {
-          subscription.callback(entity_id, new_state, old_state);
-        } catch (err) {
-          logger.error({ err, subscriptionId: subscription.id }, 'WsReadTransport: Subscription callback error');
-        }
-      }
+    this.dispatchStateChange(subscription, entity_id, new_state, old_state);
+  }
+
+  private dispatchStateChange(
+    subscription: Subscription,
+    entityId: string,
+    newState: EntityState | null,
+    oldState: EntityState | null
+  ): void {
+    if (subscription.entityIds.size > 0 && !subscription.entityIds.has(entityId)) {
+      return;
+    }
+
+    try {
+      subscription.callback(entityId, newState, oldState);
+    } catch (err) {
+      logger.error({ err, subscriptionId: subscription.id }, 'WsReadTransport: Subscription callback error');
     }
   }
 
