@@ -630,56 +630,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     if (Number.isFinite(height)) setHeightMm(Math.round(height));
   }, [selectedRoom?.roomShell?.points]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      const isEditable =
-        target?.isContentEditable ||
-        tag === 'input' ||
-        tag === 'textarea' ||
-        tag === 'select' ||
-        tag === 'button';
-      if (isEditable) return;
-
-      if (e.key === 'Escape') {
-        stopDrawing();
-        return;
-      }
-      if (e.key === 'a' || e.key === 'A') {
-        e.preventDefault();
-        setIsDrawingWall((prev) => !prev);
-        return;
-      }
-      if (e.key === 'Enter') {
-        if (isDrawingWall) {
-          e.preventDefault();
-          handleCloseLoop();
-        }
-        return;
-      }
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (!selectedRoom?.roomShell?.points?.length) return;
-        e.preventDefault();
-        if (selectedSegment !== null) {
-          deleteSelectedWallPoint();
-          return;
-        }
-        removeLastPoint();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [
-    deleteSelectedWallPoint,
-    isDrawingWall,
-    removeLastPoint,
-    selectedRoom?.roomShell?.points,
-    selectedSegment,
-    setIsDrawingWall,
-    stopDrawing,
-  ]);
-
   const handleAddPoint = (p: { x: number; y: number }) => {
     if (!selectedRoom) return;
     const nextPoints = [...(selectedRoom.roomShell?.points ?? []), p];
@@ -751,6 +701,57 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setSelectedSegment(null);
     setHoveredSegment(null);
   }, [handlePointsChange, selectedRoom?.roomShell?.points, selectedSegment]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isEditable =
+        target?.isContentEditable ||
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        tag === 'button';
+      if (isEditable) return;
+
+      if (e.key === 'Escape') {
+        stopDrawing();
+        return;
+      }
+      if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        setIsDrawingWall((prev) => !prev);
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (isDrawingWall) {
+          e.preventDefault();
+          handleCloseLoop();
+        }
+        return;
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (!selectedRoom?.roomShell?.points?.length) return;
+        e.preventDefault();
+        if (selectedSegment !== null) {
+          deleteSelectedWallPoint();
+          return;
+        }
+        removeLastPoint();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [
+    deleteSelectedWallPoint,
+    handleCloseLoop,
+    isDrawingWall,
+    removeLastPoint,
+    selectedRoom?.roomShell?.points,
+    selectedSegment,
+    setIsDrawingWall,
+    stopDrawing,
+  ]);
 
 
   const snapDelta = (dx: number, dy: number) => {
