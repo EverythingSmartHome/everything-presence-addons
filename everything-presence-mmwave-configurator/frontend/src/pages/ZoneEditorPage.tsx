@@ -1485,7 +1485,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                 return (
                   <g style={{ pointerEvents: 'none' }}>
                     {liveState.targets.map((target) => {
-                      if (target.active === false) return null;
+                      if (target.x === null || target.y === null) return null;
+                      if (target.x === 0 && target.y === 0 && target.active !== true) return null;
                       const lateral = getCeilingSlicePosition(target, ceilingSliceConfig);
                       if (lateral === null) return null;
                       const endpoints = ceilingSliceConfig.axis === 'x'

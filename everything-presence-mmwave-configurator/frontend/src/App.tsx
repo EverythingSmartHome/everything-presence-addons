@@ -450,10 +450,10 @@ function App() {
                     }
                   }
                   // Handle assumed presence status (entry/exit feature)
-                  else if (matchesEntity(mappings?.assumedPresentRemainingEntity, 'assumed_present_remaining')) {
+                  else if (entityKey === 'assumedPresentRemaining' || matchesEntity(mappings?.assumedPresentRemainingEntity, 'assumed_present_remaining')) {
                     const value = parseFloat(message.state);
                     updated.assumedPresentRemaining = !isNaN(value) ? value : undefined;
-                  } else if (matchesEntity(mappings?.assumedPresentEntity, 'assumed_present')) {
+                  } else if (entityKey === 'assumedPresent' || matchesEntity(mappings?.assumedPresentEntity, 'assumed_present')) {
                     updated.assumedPresent = message.state === 'on';
                   }
                 }
@@ -535,12 +535,10 @@ function App() {
     if (!liveState?.targets) return [];
     return liveState.targets
       .filter((t) => {
-        // Skip if explicitly marked as inactive
-        if (t.active === false) return false;
         // Skip if coordinates are null
         if (t.x === null || t.y === null) return false;
-        // Skip if coordinates are (0,0) UNLESS explicitly marked as active
-        // (0,0 usually means no detection, but if active=true, show it anyway)
+        // Treat live coordinates as the source of truth. Some devices can report
+        // stale target_N_active values while x/y continue updating correctly.
         if (t.x === 0 && t.y === 0 && t.active !== true) return false;
         return true;
       })
