@@ -9,7 +9,7 @@ interface DeviceSettingsModalProps {
   onClose: () => void;
   room: RoomConfig;
   liveState: LiveState | null;
-  isEP1: boolean;
+  deviceTypeLabel: string;
 }
 
 interface SettingState {
@@ -75,7 +75,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
   onClose,
   room,
   liveState,
-  isEP1,
+  deviceTypeLabel,
 }) => {
   const [settingValues, setSettingValues] = useState<Record<string, SettingState>>({});
   const [fetchingValues, setFetchingValues] = useState(false);
@@ -348,7 +348,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
           <div>
             <h3 className="text-lg font-semibold text-white">Device Settings</h3>
-            <p className="text-xs text-slate-400 mt-0.5">{room.name} • {isEP1 ? 'EP1' : 'EP Lite'}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{room.name} - {deviceTypeLabel}</p>
           </div>
           <button
             onClick={onClose}
