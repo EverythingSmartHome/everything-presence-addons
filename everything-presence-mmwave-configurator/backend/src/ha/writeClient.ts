@@ -41,6 +41,16 @@ export interface IHaWriteClient {
    * Set a text entity value
    */
   setTextEntity(entityId: string, value: string): Promise<void>;
+
+  /**
+   * Set a light entity state
+   */
+  setLightEntity(entityId: string, on: boolean): Promise<void>;
+
+  /**
+   * Press a button entity
+   */
+  pressButtonEntity(entityId: string): Promise<void>;
 }
 
 export class HaWriteClient implements IHaWriteClient {
@@ -141,6 +151,18 @@ export class HaWriteClient implements IHaWriteClient {
     await this.callService('text', 'set_value', {
       entity_id: entityId,
       value,
+    });
+  }
+
+  async setLightEntity(entityId: string, on: boolean): Promise<void> {
+    await this.callService('light', on ? 'turn_on' : 'turn_off', {
+      entity_id: entityId,
+    });
+  }
+
+  async pressButtonEntity(entityId: string): Promise<void> {
+    await this.callService('button', 'press', {
+      entity_id: entityId,
     });
   }
 }

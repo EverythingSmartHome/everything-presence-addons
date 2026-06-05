@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LiveState, RoomConfig } from '../api/types';
 import { ingressAware } from '../api/client';
-import { useDeviceSettings } from '../contexts/DeviceMappingsContext';
+import { useDeviceMapping, useDeviceSettings } from '../contexts/DeviceMappingsContext';
 import { SettingsGroup, SettingEntity } from '../api/deviceMappings';
 
 interface DeviceSettingsModalProps {
@@ -9,7 +9,7 @@ interface DeviceSettingsModalProps {
   onClose: () => void;
   room: RoomConfig;
   liveState: LiveState | null;
-  isEP1: boolean;
+  deviceTypeLabel: string;
 }
 
 interface SettingState {
@@ -75,18 +75,22 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
   onClose,
   room,
   liveState,
-  isEP1,
+  deviceTypeLabel,
 }) => {
   const [settingValues, setSettingValues] = useState<Record<string, SettingState>>({});
   const [fetchingValues, setFetchingValues] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Use the new device mappings context to get settings dynamically
+  const { mapping, loading: mappingLoading } = useDeviceMapping(room.deviceId);
   const { settings: settingsGroups, loading: settingsLoading, error: settingsError } = useDeviceSettings(room.deviceId);
+  const profileMismatch =
+    !!mapping?.profileId &&
+    !!room.profileId &&
+    mapping.profileId !== room.profileId;
 
   // Fetch current values from HA when settings are loaded
   useEffect(() => {
-    if (!isOpen || settingsLoading || !settingsGroups.length) return;
+    if (!isOpen || settingsLoading || profileMismatch || !settingsGroups.length) return;
 
     const fetchSettingValues = async () => {
       setFetchingValues(true);
@@ -97,14 +101,18 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
       // Flatten all settings from all groups
       const allSettings = settingsGroups.flatMap(group => group.settings);
-      const settingsToFetch = allSettings.filter((setting) => setting.status !== 'disabled');
+      const settingsToFetch = allSettings.filter(
+        (setting) => setting.status !== 'disabled' && setting.controlType !== 'button'
+      );
 
       for (const setting of allSettings) {
         const status = setting.status ?? 'unknown';
         newSettings[setting.key] = {
           value: null,
           entityId: setting.entityId,
-          loading: status === 'enabled' || status === 'unavailable' || status === 'unknown',
+          loading:
+            setting.controlType !== 'button' &&
+            (status === 'enabled' || status === 'unavailable' || status === 'unknown'),
           status,
           disabledBy: setting.disabledBy ?? null,
           hiddenBy: setting.hiddenBy ?? null,
@@ -186,7 +194,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
     };
 
     fetchSettingValues();
-  }, [isOpen, settingsLoading, settingsGroups]);
+  }, [isOpen, settingsLoading, settingsGroups, profileMismatch]);
 
   const updateSetting = async (key: string, newValue: string | number | boolean) => {
     const settingState = settingValues[key];
@@ -228,7 +236,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
   if (!isOpen) return null;
 
-  const loading = settingsLoading || fetchingValues;
+  const loading = mappingLoading || settingsLoading || fetchingValues;
 
   const renderSetting = (setting: SettingEntity) => {
     const state = settingValues[setting.key];
@@ -301,7 +309,17 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
             </select>
           )}
 
-          {canEdit && !state.loading && state.value === null && (
+          {setting.controlType === 'button' && canEdit && (
+            <button
+              onClick={() => updateSetting(setting.key, true)}
+              disabled={state.loading}
+              className="min-w-[72px] rounded-lg border border-aqua-500/40 bg-aqua-500/10 px-3 py-1.5 text-xs font-semibold text-aqua-100 transition hover:bg-aqua-500/20 disabled:opacity-50"
+            >
+              Apply
+            </button>
+          )}
+
+          {setting.controlType !== 'button' && canEdit && !state.loading && state.value === null && (
             <span className="text-xs text-slate-500 italic">Value unavailable</span>
           )}
 
@@ -348,7 +366,7 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700">
           <div>
             <h3 className="text-lg font-semibold text-white">Device Settings</h3>
-            <p className="text-xs text-slate-400 mt-0.5">{room.name} • {isEP1 ? 'EP1' : 'EP Lite'}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{room.name} • {deviceTypeLabel}</p>
           </div>
           <button
             onClick={onClose}
@@ -367,6 +385,14 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
               <div className="flex items-center gap-3 text-slate-400 text-sm">
                 <div className="w-5 h-5 border-2 border-aqua-500 border-t-transparent rounded-full animate-spin" />
                 Loading settings...
+              </div>
+            </div>
+          ) : profileMismatch ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="text-amber-300 text-sm mb-2">Device mapping needs re-sync</div>
+              <div className="max-w-xs text-slate-400 text-xs leading-relaxed">
+                Room profile is <span className="font-medium text-slate-200">{room.profileId}</span>, but the saved device mapping is <span className="font-medium text-slate-200">{mapping?.profileId}</span>.
+                Re-sync entities from Settings so the device mapping remains the single source of truth.
               </div>
             </div>
           ) : settingsError ? (

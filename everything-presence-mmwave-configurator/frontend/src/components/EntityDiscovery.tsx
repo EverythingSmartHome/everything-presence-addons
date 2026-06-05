@@ -18,7 +18,7 @@ interface EntityDiscoveryProps {
   deviceId: string;
   profileId: string;
   deviceName: string;
-  onComplete: (mappings: EntityMappings) => void;
+  onComplete: (mappings: EntityMappings, savedMapping: DeviceMapping) => void;
   onCancel: () => void;
   onBack?: () => void;
 }
@@ -362,13 +362,16 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
       };
 
       // Save to device storage
-      await saveDeviceMapping(deviceMapping);
+      const savedMapping = await saveDeviceMapping(deviceMapping);
+      if (!savedMapping) {
+        throw new Error('Failed to save device mapping');
+      }
 
       // Refresh the context cache
       await refreshMapping(deviceId);
 
       // Continue with the legacy flow
-      onComplete(mappings);
+      onComplete(mappings, savedMapping);
     } catch (err) {
       console.error('Failed to save device mapping:', err);
       setError(err instanceof Error ? err.message : 'Failed to save device mapping');

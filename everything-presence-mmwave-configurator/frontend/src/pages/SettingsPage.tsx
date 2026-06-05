@@ -261,15 +261,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
     setIsSyncing(true);
   };
 
-  const handleSyncComplete = async (mappings: EntityMappings) => {
+  const handleSyncComplete = async (mappings: EntityMappings, savedMapping: DeviceMapping) => {
     if (!syncingRoom) return;
 
     try {
-      await updateRoom(syncingRoom.id, { entityMappings: mappings });
-      // Update local state
+      const updatedProfileId = savedMapping.profileId || syncingRoom.profileId;
+      const result = await updateRoom(syncingRoom.id, {
+        entityMappings: mappings,
+        profileId: updatedProfileId,
+      });
+      const updatedRoom = result.room;
+
       setRooms((prev) =>
-        prev.map((r) => (r.id === syncingRoom.id ? { ...r, entityMappings: mappings } : r))
+        prev.map((r) => (r.id === syncingRoom.id ? updatedRoom : r))
       );
+      onRoomUpdated?.(updatedRoom);
 
       // Refresh device mapping cache so other pages see the new mappings
       if (syncingRoom.deviceId) {

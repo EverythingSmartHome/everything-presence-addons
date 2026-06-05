@@ -2862,7 +2862,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           onClose={() => setShowDeviceSettings(false)}
           room={selectedRoom}
           liveState={liveState ?? null}
-          isEP1={isEP1}
+          deviceTypeLabel={selectedProfile?.label ?? selectedRoom.profileId ?? 'Device'}
         />
       )}
     </div>

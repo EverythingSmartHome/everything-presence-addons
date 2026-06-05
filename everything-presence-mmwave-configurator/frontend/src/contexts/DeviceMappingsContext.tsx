@@ -174,15 +174,16 @@ export const DeviceMappingsProvider: React.FC<DeviceMappingsProviderProps> = ({
   // Get settings (with caching)
   const getSettings = useCallback(
     async (deviceId: string): Promise<SettingsGroup[]> => {
+      const cacheKey = deviceId;
       // Check cache
-      const cached = settingsCache.get(deviceId);
+      const cached = settingsCache.get(cacheKey);
       if (cached) return cached;
 
       // Fetch and cache
       const settings = await getDeviceSettings(deviceId);
       setSettingsCache((prev) => {
         const next = new Map(prev);
-        next.set(deviceId, settings);
+        next.set(cacheKey, settings);
         return next;
       });
       return settings;
@@ -234,7 +235,11 @@ export const DeviceMappingsProvider: React.FC<DeviceMappingsProviderProps> = ({
       });
       setSettingsCache((prev) => {
         const next = new Map(prev);
-        next.delete(deviceId);
+        for (const key of next.keys()) {
+          if (key === deviceId || key.startsWith(`${deviceId}:`)) {
+            next.delete(key);
+          }
+        }
         return next;
       });
       // Fetch fresh
@@ -253,7 +258,11 @@ export const DeviceMappingsProvider: React.FC<DeviceMappingsProviderProps> = ({
       });
       setSettingsCache((prev) => {
         const next = new Map(prev);
-        next.delete(deviceId);
+        for (const key of next.keys()) {
+          if (key === deviceId || key.startsWith(`${deviceId}:`)) {
+            next.delete(key);
+          }
+        }
         return next;
       });
     } else {

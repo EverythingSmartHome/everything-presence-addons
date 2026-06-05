@@ -523,8 +523,17 @@ export function createLiveRouter(
         case 'switch':
           await writeClient.setSwitchEntity(entityId, value as boolean);
           break;
+        case 'light':
+          await writeClient.setLightEntity(entityId, value as boolean);
+          break;
         case 'input_boolean':
           await writeClient.setInputBooleanEntity(entityId, value as boolean);
+          break;
+        case 'text':
+          await writeClient.setTextEntity(entityId, value as string);
+          break;
+        case 'button':
+          await writeClient.pressButtonEntity(entityId);
           break;
         default:
           return res.status(400).json({ error: `Unsupported entity domain: ${domain}` });

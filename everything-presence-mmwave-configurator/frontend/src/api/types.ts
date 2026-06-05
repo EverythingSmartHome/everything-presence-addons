@@ -35,7 +35,7 @@ export type ZoneType = 'regular' | 'exclusion' | 'entry' | 'polygon' | 'polygonE
 /**
  * Control type for settings entities.
  */
-export type ControlType = 'number' | 'switch' | 'select' | 'light' | 'text';
+export type ControlType = 'number' | 'switch' | 'select' | 'light' | 'text' | 'button';
 
 /**
  * Entity definition in the device profile.
