@@ -1,12 +1,18 @@
 import type { IHaReadTransport } from '../ha/readTransport';
 import type { EntityRegistryEntry } from '../ha/types';
 import type { DeviceRegistryEntry } from '../ha/readTransport';
-import type { DeviceProfileLoader } from './deviceProfiles';
+import type { DeviceProfile, DeviceProfileLoader } from './deviceProfiles';
 import type { EntityMappings, ZoneEntitySet, TargetEntitySet } from './types';
 import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../config/deviceMappingStorage';
 import { logger } from '../logger';
 import { telemetry } from '../logger/telemetry';
 import { normalizeMappingKeys } from './mappingUtils';
+import {
+  deriveEntityPrefixFromRegistryEntries,
+  extractEsphomeNodeName,
+  filterEverythingPresenceDevices,
+  isEverythingPresenceManufacturer,
+} from './everythingPresenceDevices';
 
 /**
  * Entity definition from profile.entities with template for discovery.
@@ -79,9 +85,40 @@ export class EntityDiscoveryService {
   /**
    * Get all entities belonging to a specific device.
    */
-  async getDeviceEntities(deviceId: string): Promise<EntityRegistryEntry[]> {
-    const entityRegistry = await this.readTransport.listEntityRegistry();
-    return entityRegistry.filter((e) => e.device_id === deviceId);
+  async getDeviceEntities(deviceId: string, profileId?: string): Promise<EntityRegistryEntry[]> {
+    const device = await this.getEverythingPresenceDevice(deviceId);
+    if (!device) {
+      logger.warn({ deviceId }, 'Refusing entity discovery for non-Everything Presence device');
+      return [];
+    }
+
+    const profiles = this.getCandidateProfiles(profileId);
+    const prefixes = await this.getCandidateNamePrefixes(device);
+    const candidateEntityIds = this.buildCandidateEntityIds(prefixes, profiles);
+
+    if (candidateEntityIds.size === 0) {
+      logger.warn({ deviceId, profileId }, 'No candidate entity IDs generated for device discovery');
+      return [];
+    }
+
+    const allStates = await this.readTransport.getAllStates();
+    const matchedEntities = allStates
+      .filter((state) => candidateEntityIds.has(state.entity_id))
+      .map((state) => ({
+        entity_id: state.entity_id,
+        name: typeof state.attributes.friendly_name === 'string' ? state.attributes.friendly_name : null,
+        platform: '',
+        device_id: deviceId,
+        disabled_by: null,
+        hidden_by: null,
+      }));
+
+    logger.info(
+      { deviceId, candidateCount: candidateEntityIds.size, matchedCount: matchedEntities.length },
+      'Resolved targeted Everything Presence entity candidates'
+    );
+
+    return matchedEntities;
   }
 
   /**
@@ -97,7 +134,7 @@ export class EntityDiscoveryService {
     }
 
     // Get all entities for this device
-    const deviceEntities = await this.getDeviceEntities(deviceId);
+    const deviceEntities = await this.getDeviceEntities(deviceId, profileId);
     logger.info({ deviceId, entityCount: deviceEntities.length }, 'Found device entities');
 
     // Attempt ESPHome service discovery in parallel with entity discovery.
@@ -266,6 +303,95 @@ export class EntityDiscoveryService {
     }
 
     return byDomain;
+  }
+
+  private async getEverythingPresenceDevice(deviceId: string): Promise<DeviceRegistryEntry | null> {
+    const devices = await this.readTransport.listDevices();
+    return filterEverythingPresenceDevices(devices).find((device) => device.id === deviceId) ?? null;
+  }
+
+  private getCandidateProfiles(profileId?: string): DeviceProfile[] {
+    if (profileId) {
+      const profile = this.profileLoader.getProfileById(profileId);
+      return profile ? [profile] : [];
+    }
+
+    return this.profileLoader
+      .listProfiles()
+      .filter((profile) => isEverythingPresenceManufacturer(profile.manufacturer));
+  }
+
+  private async getCandidateNamePrefixes(device: DeviceRegistryEntry): Promise<string[]> {
+    const prefixes = new Set<string>();
+    const esphomeNodeName = extractEsphomeNodeName(device);
+    if (esphomeNodeName) {
+      prefixes.add(esphomeNodeName);
+    }
+
+    if (prefixes.size === 0) {
+      try {
+        const entityRegistry = await this.readTransport.listEntityRegistry();
+        const deviceEntities = entityRegistry.filter((entry) => entry.device_id === device.id);
+        const registryPrefix = deriveEntityPrefixFromRegistryEntries(deviceEntities);
+        if (registryPrefix) {
+          prefixes.add(registryPrefix);
+        }
+      } catch (err) {
+        logger.warn({ err, deviceId: device.id }, 'Failed to derive entity prefix from registry fallback');
+      }
+    }
+
+    return Array.from(prefixes);
+  }
+
+  private buildCandidateEntityIds(prefixes: string[], profiles: DeviceProfile[]): Set<string> {
+    const candidateEntityIds = new Set<string>();
+
+    for (const prefix of prefixes) {
+      for (const profile of profiles) {
+        const profileEntities = profile.entities as Record<string, EntityDefinitionWithTemplate> | undefined;
+        if (profileEntities) {
+          for (const definition of Object.values(profileEntities)) {
+            if (typeof definition.template === 'string') {
+              candidateEntityIds.add(definition.template.replace('${name}', prefix));
+            }
+          }
+        }
+
+        const entityMap = profile.entityMap as Record<string, unknown> | undefined;
+        if (entityMap) {
+          this.collectTemplatesFromLegacyMap(entityMap, candidateEntityIds, prefix);
+        }
+      }
+    }
+
+    return candidateEntityIds;
+  }
+
+  private collectTemplatesFromLegacyMap(
+    value: unknown,
+    candidateEntityIds: Set<string>,
+    prefix: string
+  ): void {
+    if (typeof value === 'string') {
+      if (value.includes('${name}')) {
+        candidateEntityIds.add(value.replace('${name}', prefix));
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        this.collectTemplatesFromLegacyMap(item, candidateEntityIds, prefix);
+      }
+      return;
+    }
+
+    if (value && typeof value === 'object') {
+      for (const nested of Object.values(value as Record<string, unknown>)) {
+        this.collectTemplatesFromLegacyMap(nested, candidateEntityIds, prefix);
+      }
+    }
   }
 
   /**
@@ -1139,21 +1265,7 @@ export class EntityDiscoveryService {
   }
 
   private extractEsphomeNodeName(device: DeviceRegistryEntry): string | undefined {
-    for (const [domain, identifier] of device.identifiers ?? []) {
-      if (typeof domain === 'string' && typeof identifier === 'string' && domain.toLowerCase() === 'esphome') {
-        return identifier;
-      }
-    }
-    return this.slugifyDeviceName(device.name);
-  }
-
-  private slugifyDeviceName(name: string | null | undefined): string | undefined {
-    if (!name) return undefined;
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-    return slug || undefined;
+    return extractEsphomeNodeName(device);
   }
 
   /**
