@@ -27,6 +27,7 @@ interface Subscription {
  */
 export class RestReadTransport implements IHaReadTransport {
   readonly activeTransport = 'rest' as const;
+  private static readonly TEMPLATE_ENTITY_BATCH_SIZE = 200;
 
   private readonly config: ReadTransportConfig;
   private readonly baseUrl: string;
@@ -63,6 +64,36 @@ export class RestReadTransport implements IHaReadTransport {
   private buildUrl(path: string): string {
     const normalized = path.startsWith('/') ? path : `/${path}`;
     return `${this.baseUrl}${normalized}`;
+  }
+
+  private async renderTemplate(template: string): Promise<string | null> {
+    try {
+      const url = this.buildUrl('/template');
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify({ template }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        logger.warn({ status: res.status, text }, 'RestReadTransport: Template API request failed');
+        return null;
+      }
+
+      return await res.text();
+    } catch (err) {
+      logger.error({ err }, 'RestReadTransport: Template API request failed');
+      return null;
+    }
+  }
+
+  private chunkArray<T>(items: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
+    }
+    return chunks;
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -159,20 +190,10 @@ export class RestReadTransport implements IHaReadTransport {
 {{ devices.list | tojson }}`.trim();
 
     try {
-      const url = this.buildUrl('/template');
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({ template }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        logger.warn({ status: res.status, text }, 'RestReadTransport: Template API failed');
+      const resultText = await this.renderTemplate(template);
+      if (!resultText) {
         return [];
       }
-
-      const resultText = await res.text();
       const devices = JSON.parse(resultText) as DeviceRegistryEntry[];
       logger.info({ count: devices.length }, 'RestReadTransport: Discovered devices via template');
       return devices;
@@ -206,39 +227,56 @@ export class RestReadTransport implements IHaReadTransport {
    * It focuses on the fields needed for zone availability checking.
    */
   private async listEntityRegistryViaTemplate(): Promise<EntityRegistryEntry[]> {
-    // Jinja2 template that collects entity info from states
-    // Note: disabled_by isn't directly available via template, but we can infer
-    // unavailable entities from state
-    const template = `
-{% set entities = namespace(list=[]) %}
-{% for state in states %}
-  {% set entities.list = entities.list + [{
-    'entity_id': state.entity_id,
-    'disabled_by': none,
-    'hidden_by': none,
-    'platform': state.attributes.get('platform', ''),
-    'device_id': device_id(state.entity_id)
-  }] %}
-{% endfor %}
-{{ entities.list | tojson }}`.trim();
-
     try {
-      const url = this.buildUrl('/template');
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({ template }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        logger.warn({ status: res.status, text }, 'RestReadTransport: Template API failed for entity registry');
+      const states = await this.getAllStates();
+      if (states.length === 0) {
         return [];
       }
 
-      const resultText = await res.text();
-      const entities = JSON.parse(resultText) as EntityRegistryEntry[];
-      logger.info({ count: entities.length }, 'RestReadTransport: Got entity registry via template');
+      const entityIds = states.map((state) => state.entity_id);
+      const stateMap = new Map(states.map((state) => [state.entity_id, state]));
+      const chunks = this.chunkArray(entityIds, RestReadTransport.TEMPLATE_ENTITY_BATCH_SIZE);
+      const entities: EntityRegistryEntry[] = [];
+
+      for (const chunk of chunks) {
+        const quotedEntityIds = JSON.stringify(chunk);
+        const template = `
+{% set ns = namespace(list=[]) %}
+{% set entity_ids = ${quotedEntityIds} %}
+{% for entity_id in entity_ids %}
+  {% set ns.list = ns.list + [{
+    'entity_id': entity_id,
+    'disabled_by': none,
+    'hidden_by': none,
+    'platform': '',
+    'device_id': device_id(entity_id)
+  }] %}
+{% endfor %}
+{{ ns.list | tojson }}`.trim();
+
+        const resultText = await this.renderTemplate(template);
+        if (!resultText) {
+          logger.warn(
+            { chunkSize: chunk.length },
+            'RestReadTransport: Skipping entity registry template chunk after API failure'
+          );
+          continue;
+        }
+
+        const chunkEntities = JSON.parse(resultText) as EntityRegistryEntry[];
+        for (const entity of chunkEntities) {
+          const state = stateMap.get(entity.entity_id);
+          entities.push({
+            ...entity,
+            platform: state?.attributes?.platform ? String(state.attributes.platform) : '',
+          });
+        }
+      }
+
+      logger.info(
+        { count: entities.length, chunkCount: chunks.length },
+        'RestReadTransport: Got entity registry via chunked template fallback'
+      );
       return entities;
     } catch (err) {
       logger.error({ err }, 'RestReadTransport: Template-based entity registry failed');
@@ -294,20 +332,10 @@ export class RestReadTransport implements IHaReadTransport {
 {{ areas.list | tojson }}`.trim();
 
     try {
-      const url = this.buildUrl('/template');
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: this.headers,
-        body: JSON.stringify({ template }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        logger.warn({ status: res.status, text }, 'RestReadTransport: Template API failed for area registry');
+      const resultText = await this.renderTemplate(template);
+      if (!resultText) {
         return [];
       }
-
-      const resultText = await res.text();
       const areas = JSON.parse(resultText) as AreaRegistryEntry[];
       logger.info({ count: areas.length }, 'RestReadTransport: Got area registry via template');
       return areas;
