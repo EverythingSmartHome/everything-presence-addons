@@ -143,6 +143,9 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     () => profiles.find((p) => p.id === (selectedRoom?.profileId ?? selectedProfileId)) ?? null,
     [profiles, selectedRoom, selectedProfileId],
   );
+  const deviceTypeLabel = useMemo(() => {
+    return selectedProfile?.label ?? 'Device';
+  }, [selectedProfile?.label]);
 
   const deviceIconUrl = useMemo(
     () => getDeviceIconUrl(selectedProfile, selectedRoom?.devicePlacement),
