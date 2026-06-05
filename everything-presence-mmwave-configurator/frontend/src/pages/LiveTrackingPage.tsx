@@ -2865,7 +2865,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           onClose={() => setShowDeviceSettings(false)}
           room={selectedRoom}
           liveState={liveState ?? null}
-          deviceTypeLabel={deviceTypeLabel}
+          deviceTypeLabel={selectedProfile?.label ?? selectedRoom.profileId ?? 'Device'}
         />
       )}
     </div>

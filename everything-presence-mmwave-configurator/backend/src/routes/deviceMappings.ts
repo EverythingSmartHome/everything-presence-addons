@@ -392,10 +392,13 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
           const disabledBy = registryEntry?.disabled_by ?? null;
           const hiddenBy = registryEntry?.hidden_by ?? null;
           const state = statesById.get(setting.entityId);
+          const isButton = setting.controlType === 'button';
 
           let status: 'enabled' | 'disabled' | 'unavailable' | 'unknown' = 'unknown';
           if (disabledBy) {
             status = 'disabled';
+          } else if (isButton && registryEntry) {
+            status = 'enabled';
           } else if (state) {
             if (isUnavailableState(state.state)) {
               status = 'unavailable';

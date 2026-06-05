@@ -1090,8 +1090,11 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
   };
 
-  const handleEntityDiscoveryComplete = (mappings: EntityMappings) => {
+  const handleEntityDiscoveryComplete = (mappings: EntityMappings, savedMapping: { profileId: string }) => {
     setDiscoveredMappings(mappings);
+    if (savedMapping.profileId) {
+      setProfileId(savedMapping.profileId);
+    }
     nextStep();
   };
 
