@@ -1,3 +1,9 @@
+## 2.2.2
+* Improve websocket connections by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/345
+* Fix assumed presence display status by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/346
+* Fix labeling of EP Pro as EPL by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/347
+* Add EP Pro settings by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/348
+
 ## 2.2.1
 * Fix issue with room builder not loading by @EverythingSmartHome in #343
 
