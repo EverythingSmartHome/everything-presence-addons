@@ -1,3 +1,8 @@
+## 2.2.3
+* Fix: Reduce broad Home Assistant entity discovery devices by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/351
+* Fix: Handle EPL 1.5.0 polygon migration more cleanly by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/357
+* Fix: Use HA entity registry as the primary source for device discovery by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/358
+
 ## 2.2.2
 * Improve websocket connections by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/345
 * Fix assumed presence display status by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/346
