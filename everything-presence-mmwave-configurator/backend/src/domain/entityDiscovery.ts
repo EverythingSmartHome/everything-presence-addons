@@ -93,12 +93,42 @@ export class EntityDiscoveryService {
       return [];
     }
 
+    try {
+      const entityRegistry = await this.readTransport.listEntityRegistry();
+      const registryEntities = entityRegistry.filter((entry) => entry.device_id === deviceId);
+      if (registryEntities.length > 0) {
+        logger.info(
+          { deviceId, entityCount: registryEntities.length },
+          'Loaded device entities from Home Assistant entity registry'
+        );
+        return registryEntities;
+      }
+
+      logger.warn(
+        { deviceId, profileId },
+        'No entity-registry entries linked to device; falling back to prefix-based discovery'
+      );
+    } catch (err) {
+      logger.warn(
+        { err, deviceId, profileId },
+        'Failed to read entity registry for device; falling back to prefix-based discovery'
+      );
+    }
+
+    return this.getDeviceEntitiesByPrefixFallback(device, deviceId, profileId);
+  }
+
+  private async getDeviceEntitiesByPrefixFallback(
+    device: DeviceRegistryEntry,
+    deviceId: string,
+    profileId?: string
+  ): Promise<EntityRegistryEntry[]> {
     const profiles = this.getCandidateProfiles(profileId);
     const prefixes = await this.getCandidateNamePrefixes(device);
     const candidateEntityIds = this.buildCandidateEntityIds(prefixes, profiles);
 
     if (candidateEntityIds.size === 0) {
-      logger.warn({ deviceId, profileId }, 'No candidate entity IDs generated for device discovery');
+      logger.warn({ deviceId, profileId }, 'No candidate entity IDs generated for device discovery fallback');
       return [];
     }
 
@@ -116,7 +146,7 @@ export class EntityDiscoveryService {
 
     logger.info(
       { deviceId, candidateCount: candidateEntityIds.size, matchedCount: matchedEntities.length },
-      'Resolved targeted Everything Presence entity candidates'
+      'Resolved targeted Everything Presence entity candidates via fallback discovery'
     );
 
     return matchedEntities;

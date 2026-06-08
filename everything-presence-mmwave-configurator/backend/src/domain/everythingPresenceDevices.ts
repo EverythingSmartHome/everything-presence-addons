@@ -3,6 +3,7 @@ import type { EntityRegistryEntry } from '../ha/types';
 
 const MANUFACTURER_FILTERS = [
   'EverythingSmartTechnology',
+  'Everything_Smart_Technology',
   'Everything Smart Technology',
 ];
 
@@ -150,15 +151,45 @@ const ENTITY_SUFFIX_REGEX = new RegExp(
 export const extractEntityPrefixFromEntityId = (entityId: string): string | undefined => {
   const withoutDomain = entityId.replace(/^[^.]+\./, '');
   const prefix = withoutDomain.replace(ENTITY_SUFFIX_REGEX, '');
-  return prefix || undefined;
+  if (prefix && prefix !== withoutDomain) {
+    return prefix;
+  }
+  return undefined;
+};
+
+const deriveEntityPrefixFromCommonPrefix = (
+  deviceEntities: EntityRegistryEntry[]
+): string | undefined => {
+  const objectIds = deviceEntities
+    .map((entry) => entry.entity_id)
+    .filter((id): id is string => Boolean(id))
+    .map((id) => id.replace(/^[^.]+\./, ''));
+
+  if (objectIds.length === 0) {
+    return undefined;
+  }
+
+  let common = objectIds[0];
+  for (const objectId of objectIds.slice(1)) {
+    let i = 0;
+    while (i < common.length && i < objectId.length && common[i] === objectId[i]) {
+      i += 1;
+    }
+    common = common.slice(0, i);
+    if (!common) {
+      break;
+    }
+  }
+
+  const trimmed = common.replace(/_+$/, '');
+  return trimmed || undefined;
 };
 
 export const deriveEntityPrefixFromRegistryEntries = (
   deviceEntities: EntityRegistryEntry[]
 ): string | undefined => {
-  let deviceEntity = deviceEntities.find(
-    (entry) => entry.entity_id?.includes('_occupancy') || entry.entity_id?.includes('_presence')
-  );
+  const objectId = (entityId: string | undefined): string => (entityId ?? '').replace(/^[^.]+\./, '');
+  let deviceEntity = deviceEntities.find((entry) => /_(occupancy|presence)$/.test(objectId(entry.entity_id)));
 
   if (!deviceEntity) {
     deviceEntity = deviceEntities.find(
@@ -166,13 +197,12 @@ export const deriveEntityPrefixFromRegistryEntries = (
     );
   }
 
-  if (!deviceEntity) {
-    deviceEntity = deviceEntities[0];
+  if (deviceEntity?.entity_id) {
+    const prefix = extractEntityPrefixFromEntityId(deviceEntity.entity_id);
+    if (prefix) {
+      return prefix;
+    }
   }
 
-  if (!deviceEntity?.entity_id) {
-    return undefined;
-  }
-
-  return extractEntityPrefixFromEntityId(deviceEntity.entity_id);
+  return deriveEntityPrefixFromCommonPrefix(deviceEntities);
 };
