@@ -150,15 +150,49 @@ const ENTITY_SUFFIX_REGEX = new RegExp(
 export const extractEntityPrefixFromEntityId = (entityId: string): string | undefined => {
   const withoutDomain = entityId.replace(/^[^.]+\./, '');
   const prefix = withoutDomain.replace(ENTITY_SUFFIX_REGEX, '');
-  return prefix || undefined;
+  // Only trust the result when a known suffix was actually stripped. Otherwise the
+  // entity is not a recognised one (e.g. a button like `_apply_update`) and its full
+  // object_id must not be returned as a prefix.
+  if (prefix && prefix !== withoutDomain) {
+    return prefix;
+  }
+  return undefined;
+};
+
+const deriveEntityPrefixFromCommonPrefix = (
+  deviceEntities: EntityRegistryEntry[]
+): string | undefined => {
+  const objectIds = deviceEntities
+    .map((entry) => entry.entity_id)
+    .filter((id): id is string => Boolean(id))
+    .map((id) => id.replace(/^[^.]+\./, ''));
+  if (objectIds.length === 0) {
+    return undefined;
+  }
+  let common = objectIds[0];
+  for (const id of objectIds.slice(1)) {
+    let i = 0;
+    while (i < common.length && i < id.length && common[i] === id[i]) {
+      i++;
+    }
+    common = common.slice(0, i);
+    if (!common) {
+      break;
+    }
+  }
+  const trimmed = common.replace(/_+$/, '');
+  return trimmed || undefined;
 };
 
 export const deriveEntityPrefixFromRegistryEntries = (
   deviceEntities: EntityRegistryEntry[]
 ): string | undefined => {
-  let deviceEntity = deviceEntities.find(
-    (entry) => entry.entity_id?.includes('_occupancy') || entry.entity_id?.includes('_presence')
-  );
+  // Prefer the presence/occupancy sensor, matched on an END-ANCHORED suffix.
+  // The product name "everything_presence_lite" contains the substring "_presence",
+  // so a loose includes() check spuriously matches every entity (including buttons)
+  // and derives a garbage prefix from whichever entity happens to be first.
+  const objectId = (entityId: string | undefined): string => (entityId ?? '').replace(/^[^.]+\./, '');
+  let deviceEntity = deviceEntities.find((entry) => /_(occupancy|presence)$/.test(objectId(entry.entity_id)));
 
   if (!deviceEntity) {
     deviceEntity = deviceEntities.find(
@@ -166,13 +200,14 @@ export const deriveEntityPrefixFromRegistryEntries = (
     );
   }
 
-  if (!deviceEntity) {
-    deviceEntity = deviceEntities[0];
+  if (deviceEntity?.entity_id) {
+    const prefix = extractEntityPrefixFromEntityId(deviceEntity.entity_id);
+    if (prefix) {
+      return prefix;
+    }
   }
 
-  if (!deviceEntity?.entity_id) {
-    return undefined;
-  }
-
-  return extractEntityPrefixFromEntityId(deviceEntity.entity_id);
+  // Robust fallback: the longest common object_id prefix across all device entities.
+  // Immune to unknown/new entity suffixes that ENTITY_SUFFIX_REGEX does not cover.
+  return deriveEntityPrefixFromCommonPrefix(deviceEntities);
 };
