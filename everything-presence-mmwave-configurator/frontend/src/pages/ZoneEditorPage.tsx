@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { fetchDevices, fetchProfiles, fetchZoneAvailability, ingressAware } from '../api/client';
+import {
+  fetchDevices,
+  fetchProfiles,
+  fetchZoneAvailability,
+  fetchZoneBackups,
+  ingressAware,
+  restoreZoneBackup,
+} from '../api/client';
 import { fetchRooms, updateRoom } from '../api/rooms';
 import { ZoneCanvas } from '../components/ZoneCanvas';
 import {
@@ -13,7 +20,16 @@ import {
 } from '../api/zones';
 import { validateZones } from '../api/validate';
 import { getZoneLabels, saveZoneLabels } from '../api/deviceMappings';
-import { DiscoveredDevice, DeviceProfile, RoomConfig, ZoneRect, ZonePolygon, LiveState, ZoneAvailability } from '../api/types';
+import {
+  DiscoveredDevice,
+  DeviceProfile,
+  RoomConfig,
+  ZoneRect,
+  ZonePolygon,
+  LiveState,
+  ZoneAvailability,
+  ZoneBackup,
+} from '../api/types';
 import {
   CanvasBottomToolbar,
   CanvasMobileSheet,
@@ -26,6 +42,7 @@ import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
+import { usesPolygonOnlyZones } from '../utils/firmware';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -98,6 +115,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [polygonZones, setPolygonZones] = useState<ZonePolygon[]>([]);
   const [togglingPolygonMode, setTogglingPolygonMode] = useState(false);
   const [showModeChangeConfirm, setShowModeChangeConfirm] = useState(false);
+  const [recoveringPolygonZones, setRecoveringPolygonZones] = useState(false);
+  const [latestZoneBackup, setLatestZoneBackup] = useState<ZoneBackup | null>(null);
+  const [loadingLatestZoneBackup, setLoadingLatestZoneBackup] = useState(false);
   // Zone labels from device mapping (stored separately from zone coordinates)
   const [deviceZoneLabels, setDeviceZoneLabels] = useState<Record<string, string>>({});
   const [roomLiveState, setRoomLiveState] = useState<LiveState | null>(null);
@@ -150,6 +170,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     () => resolveTrackingCoverageFov(selectedProfile),
     [selectedProfile],
   );
+  const polygonOnlyZones = useMemo(() => (
+    usesPolygonOnlyZones(
+      selectedDevice?.firmwareVersion ?? null,
+      selectedDevice?.model ?? selectedProfile?.label ?? null,
+    ) === true
+  ), [selectedDevice?.firmwareVersion, selectedDevice?.model, selectedProfile?.label]);
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
   const trackingMaxRangeMeters = trackingCoverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
   const trackingFieldOfViewDeg = trackingCoverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees;
@@ -209,9 +235,15 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     [ceilingSliceConfig, deviceZoneLabels],
   );
   const activePolygonZones = isCeilingSliceMode ? [...ceilingSliceDisplayZones, ...ceilingExclusionDisplayZones] : polygonZones;
+  const savedRectangularZones = useMemo(
+    () => (selectedRoom?.zones ?? []).filter((zone) => zone.enabled !== false),
+    [selectedRoom?.zones],
+  );
+  const hasSavedRectangularRecovery = savedRectangularZones.length > 0;
+  const hasBackupRecovery = latestZoneBackup !== null;
 
   // Device mappings context - used to check if device has valid entity mappings
-  const { hasValidMappings, clearCache } = useDeviceMappings();
+  const { hasValidMappings, clearCache, getMapping } = useDeviceMappings();
   const deviceHasValidMappings = selectedRoom?.deviceId ? hasValidMappings(selectedRoom.deviceId) : false;
   const hasPropLiveStateForRoom = Boolean(
     propLiveState && selectedRoom?.deviceId && propLiveState.deviceId === selectedRoom.deviceId
@@ -272,7 +304,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const displayZones = useMemo(() => {
     if (!selectedRoom) return allPossibleZones;
 
-    const deviceZones = selectedRoom.zones ?? [];
+    const deviceZones = polygonOnlyZones ? [] : selectedRoom.zones ?? [];
 
     // Create new objects to avoid mutating allPossibleZones
     return allPossibleZones.map(slot => {
@@ -285,7 +317,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       // Return a fresh copy with enabled: false to ensure clean state
       return { ...slot, enabled: false };
     });
-  }, [selectedRoom, allPossibleZones, deviceZoneLabels]);
+  }, [selectedRoom, allPossibleZones, deviceZoneLabels, polygonOnlyZones]);
 
   // Only enabled zones should show on canvas
   const enabledZones = useMemo(() => {
@@ -484,6 +516,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       }
 
       try {
+        if (polygonOnlyZones) {
+          return;
+        }
         // Skip entityMappings if device has valid mappings stored (device mapping is source of truth)
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         const deviceZones = await fetchZonesFromDevice(
@@ -517,7 +552,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings, polygonOnlyZones]);
 
   // Fetch zone availability from entity registry
   useEffect(() => {
@@ -733,6 +768,184 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       setSelectedZoneId(nextZones[0].id);
     }
   };
+
+  const resolveZoneRestoreContext = useCallback(async () => {
+    if (!selectedRoom?.deviceId) return null;
+
+    const device = devices.find((entry) => entry.id === selectedRoom.deviceId);
+    const mapping = await getMapping(selectedRoom.deviceId);
+    const profileId = selectedRoom.profileId || mapping?.profileId || null;
+    const entityNamePrefix =
+      selectedRoom.entityNamePrefix ||
+      device?.entityNamePrefix ||
+      mapping?.esphomeNodeName ||
+      null;
+
+    if (!profileId) {
+      setError('Device profile not found. Run entity discovery to sync the device.');
+      return null;
+    }
+
+    if (!entityNamePrefix && !mapping) {
+      setError('Entity name prefix is missing. Link the device to a room or re-sync entities.');
+      return null;
+    }
+
+    return {
+      deviceId: selectedRoom.deviceId,
+      profileId,
+      entityNamePrefix,
+      entityMappings: deviceHasValidMappings ? undefined : selectedRoom.entityMappings,
+    };
+  }, [
+    deviceHasValidMappings,
+    devices,
+    getMapping,
+    selectedRoom?.deviceId,
+    selectedRoom?.entityMappings,
+    selectedRoom?.entityNamePrefix,
+    selectedRoom?.profileId,
+  ]);
+
+  const handleRecoverPolygonZones = useCallback(async () => {
+    const context = await resolveZoneRestoreContext();
+    if (!context) {
+      return;
+    }
+
+    if (savedRectangularZones.length === 0) {
+      setError('No saved rectangular zones are available to recover');
+      return;
+    }
+
+    setRecoveringPolygonZones(true);
+    setError(null);
+
+    try {
+      const convertedZones: ZonePolygon[] = savedRectangularZones.map((zone) => ({
+        id: zone.id,
+        type: zone.type,
+        vertices: [
+          { x: zone.x, y: zone.y },
+          { x: zone.x + zone.width, y: zone.y },
+          { x: zone.x + zone.width, y: zone.y + zone.height },
+          { x: zone.x, y: zone.y + zone.height },
+        ],
+        enabled: zone.enabled,
+        label: deviceZoneLabels[zone.id] ?? zone.label,
+      }));
+
+      const result = await pushPolygonZonesToDevice(
+        context.deviceId,
+        context.profileId,
+        convertedZones,
+        context.entityNamePrefix ?? undefined,
+        context.entityMappings,
+      );
+
+      if (!result.ok) {
+        const sample = result.warnings?.[0];
+        throw new Error(sample ? `Recovery partially failed: ${sample.error}` : 'Failed to recover polygon zones');
+      }
+
+      setPolygonZones(convertedZones);
+      setPolygonModeStatus((current) => ({ ...current, supported: true, enabled: true }));
+      setWarning(`Recovered ${convertedZones.length} polygon zone${convertedZones.length === 1 ? '' : 's'} from saved rectangular data.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to recover polygon zones');
+    } finally {
+      setRecoveringPolygonZones(false);
+    }
+  }, [deviceZoneLabels, resolveZoneRestoreContext, savedRectangularZones]);
+
+  const handleRestoreLatestZoneBackup = useCallback(async () => {
+    if (!latestZoneBackup) {
+      setError('No zone backup is available to restore');
+      return;
+    }
+
+    const context = await resolveZoneRestoreContext();
+    if (!context) {
+      return;
+    }
+
+    setRecoveringPolygonZones(true);
+    setError(null);
+
+    try {
+      const result = await restoreZoneBackup(latestZoneBackup.id, {
+        deviceId: context.deviceId,
+        profileId: context.profileId,
+        entityNamePrefix: context.entityNamePrefix ?? undefined,
+        entityMappings: context.entityMappings,
+      });
+
+      if (!result.ok) {
+        throw new Error('Restore completed with errors. Check warnings and try again.');
+      }
+
+      const restoredZones = await fetchPolygonZonesFromDevice(
+        context.deviceId,
+        context.profileId,
+        context.entityNamePrefix ?? undefined,
+        context.entityMappings,
+      );
+      setPolygonZones(restoredZones);
+      setPolygonModeStatus((current) => ({ ...current, supported: true, enabled: true }));
+      clearCache(context.deviceId);
+      const labels = await getZoneLabels(context.deviceId);
+      setDeviceZoneLabels(labels);
+
+      if (result.warnings && result.warnings.length > 0) {
+        setWarning(`Restored latest backup with ${result.warnings.length} warning(s).`);
+      } else {
+        setWarning('Restored latest backup as polygon zones.');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to restore latest zone backup');
+    } finally {
+      setRecoveringPolygonZones(false);
+    }
+  }, [clearCache, latestZoneBackup, resolveZoneRestoreContext]);
+
+  useEffect(() => {
+    const shouldCheckBackups =
+      Boolean(selectedRoom?.deviceId) &&
+      polygonOnlyZones &&
+      polygonModeStatus.enabled &&
+      polygonZones.length === 0;
+
+    if (!shouldCheckBackups || !selectedRoom?.deviceId) {
+      setLatestZoneBackup(null);
+      setLoadingLatestZoneBackup(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingLatestZoneBackup(true);
+
+    void fetchZoneBackups(selectedRoom.deviceId)
+      .then(({ backups }) => {
+        if (cancelled) return;
+        const latest = [...(backups ?? [])]
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0] ?? null;
+        setLatestZoneBackup(latest);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLatestZoneBackup(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingLatestZoneBackup(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [polygonModeStatus.enabled, polygonOnlyZones, polygonZones.length, selectedRoom?.deviceId]);
 
   const persistCeilingSliceConfig = useCallback(async (config: CeilingSliceConfig | null = pendingCeilingSliceConfigRef.current) => {
     if (!selectedRoom || !config) return;
@@ -1179,6 +1392,44 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       {warning && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-amber-500/50 bg-amber-500/10 backdrop-blur px-6 py-3 text-amber-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
           {warning}
+        </div>
+      )}
+      {polygonModeStatus.enabled && polygonZones.length === 0 && (hasSavedRectangularRecovery || hasBackupRecovery || loadingLatestZoneBackup) && (
+        <div className="absolute top-36 left-1/2 -translate-x-1/2 z-50 w-[min(42rem,calc(100vw-2rem))] rounded-2xl border border-sky-500/40 bg-slate-900/90 px-5 py-4 text-slate-100 shadow-2xl backdrop-blur">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-sky-300">Polygon Recovery Available</div>
+              <div className="mt-1 text-sm text-slate-300">
+                {hasSavedRectangularRecovery ? (
+                  <>This device is using polygon-only zones, but room storage still has {savedRectangularZones.length} saved rectangular zone{savedRectangularZones.length === 1 ? '' : 's'}. Recover them to the device as polygons.</>
+                ) : hasBackupRecovery ? (
+                  <>This device is using polygon-only zones and room storage no longer has the old rectangles. Restore the latest saved zone backup to repopulate polygon zones.</>
+                ) : (
+                  <>Checking for saved zone backups that can be restored to this polygon-only device.</>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {hasSavedRectangularRecovery && (
+                <button
+                  onClick={() => { void handleRecoverPolygonZones(); }}
+                  disabled={recoveringPolygonZones}
+                  className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {recoveringPolygonZones ? 'Recovering...' : 'Recover Room Zones'}
+                </button>
+              )}
+              {hasBackupRecovery && (
+                <button
+                  onClick={() => { void handleRestoreLatestZoneBackup(); }}
+                  disabled={recoveringPolygonZones}
+                  className="rounded-xl border border-sky-400/50 bg-slate-800 px-4 py-2 text-sm font-semibold text-sky-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {recoveringPolygonZones ? 'Restoring...' : 'Restore Latest Backup'}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

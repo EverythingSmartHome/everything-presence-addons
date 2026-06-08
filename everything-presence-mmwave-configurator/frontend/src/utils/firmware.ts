@@ -88,6 +88,17 @@ export function requiresZoneMigration(
   return currentCompare < 0 && targetCompare >= 0;
 }
 
+export function usesPolygonOnlyZones(
+  firmwareVersion: string | undefined | null,
+  model?: string | null
+): boolean | null {
+  const threshold = getZoneMigrationThreshold(model);
+  if (!threshold) return false;
+  const comparison = compareVersions(firmwareVersion, threshold);
+  if (comparison === null) return null;
+  return comparison >= 0;
+}
+
 /**
  * Check if a firmware version meets the minimum requirement
  * @param firmwareVersion The device's firmware version

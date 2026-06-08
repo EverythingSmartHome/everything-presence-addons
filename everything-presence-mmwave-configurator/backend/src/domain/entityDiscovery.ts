@@ -7,6 +7,7 @@ import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../co
 import { logger } from '../logger';
 import { telemetry } from '../logger/telemetry';
 import { normalizeMappingKeys } from './mappingUtils';
+import { isEplPolygonOnlyDevice } from './firmwareVersionUtils';
 import {
   deriveEntityPrefixFromRegistryEntries,
   extractEsphomeNodeName,
@@ -137,24 +138,35 @@ export class EntityDiscoveryService {
     const deviceEntities = await this.getDeviceEntities(deviceId, profileId);
     logger.info({ deviceId, entityCount: deviceEntities.length }, 'Found device entities');
 
+    // Fetch device info early so discovery can be version-aware for breaking changes.
+    let rawSwVersion: string | undefined;
+    let firmwareVersion: string | undefined;
+    let esphomeVersion: string | undefined;
+    let esphomeNodeName: string | undefined;
+    try {
+      const devices = await this.readTransport.listDevices();
+      const device = devices.find(d => d.id === deviceId);
+      if (device?.sw_version) {
+        rawSwVersion = device.sw_version;
+        const parsed = parseFirmwareVersion(device.sw_version);
+        firmwareVersion = parsed.firmwareVersion;
+        esphomeVersion = parsed.esphomeVersion;
+        logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Parsed firmware version');
+      }
+      if (device) {
+        esphomeNodeName = this.extractEsphomeNodeName(device);
+      }
+    } catch (err) {
+      logger.warn({ err, deviceId }, 'Failed to fetch device firmware version, continuing without it');
+    }
+
     // Attempt ESPHome service discovery in parallel with entity discovery.
     // This mirrors the entity auto-match flow: try to find services now,
     // but don't persist until the user saves.
     let serviceMappings: Record<string, string> | undefined;
     try {
       const existingMapping = deviceMappingStorage.getMapping(deviceId);
-      let esphomeNodeName = existingMapping?.esphomeNodeName;
-      if (!esphomeNodeName) {
-        try {
-          const devices = await this.readTransport.listDevices();
-          const device = devices.find(d => d.id === deviceId);
-          if (device) {
-            esphomeNodeName = this.extractEsphomeNodeName(device);
-          }
-        } catch (err) {
-          logger.warn({ err, deviceId }, 'Failed to fetch device info for service discovery, continuing without it');
-        }
-      }
+      esphomeNodeName = esphomeNodeName ?? existingMapping?.esphomeNodeName;
 
       const discoveredBuildFlags = await this.discoverServiceBySuffix(
         deviceId,
@@ -204,8 +216,17 @@ export class EntityDiscoveryService {
 
     // Check for new entities metadata format
     const profileEntities = (profile as unknown as Record<string, unknown>).entities as Record<string, EntityDefinitionWithTemplate> | undefined;
-    const entityMap = (profile as unknown as Record<string, unknown>).entityMap as Record<string, unknown>;
+    const rawEntityMap = (profile as unknown as Record<string, unknown>).entityMap as Record<string, unknown>;
     const capabilities = profile.capabilities as Record<string, unknown>;
+    const polygonOnlyEpl = isEplPolygonOnlyDevice({
+      profileId,
+      firmwareVersion,
+      model: (profile as unknown as Record<string, unknown>).model as string | undefined,
+    });
+    const profileEntitiesForDiscovery = profileEntities
+      ? this.filterProfileEntitiesForFirmware(profileEntities, polygonOnlyEpl)
+      : undefined;
+    const entityMap = this.filterLegacyEntityMapForFirmware(rawEntityMap, polygonOnlyEpl);
 
     // Match all entities
     const results: EntityMatchResult[] = [];
@@ -216,10 +237,10 @@ export class EntityDiscoveryService {
     };
 
     // Use profile.entities metadata when available (preferred)
-    if (profileEntities) {
+    if (profileEntitiesForDiscovery) {
       logger.info({ deviceId, profileId }, 'Using profile.entities metadata for discovery');
       this.discoverUsingEntitiesMetadata(
-        profileEntities,
+        profileEntitiesForDiscovery,
         deviceEntities,
         entitiesByDomain,
         results,
@@ -821,6 +842,43 @@ export class EntityDiscoveryService {
     (trackingTargets[targetKey] as unknown as Record<string, string>)[property] = entityId;
   }
 
+  private filterProfileEntitiesForFirmware(
+    profileEntities: Record<string, EntityDefinitionWithTemplate>,
+    polygonOnlyEpl: boolean
+  ): Record<string, EntityDefinitionWithTemplate> {
+    if (!polygonOnlyEpl) {
+      return profileEntities;
+    }
+
+    return Object.fromEntries(
+      Object.entries(profileEntities).filter(([entityKey, def]) => {
+        if (entityKey === 'polygonZonesEnabled') {
+          return false;
+        }
+        if (def.category !== 'zone') {
+          return true;
+        }
+        return !['regular', 'exclusion', 'entry'].includes(def.zoneType ?? '');
+      })
+    );
+  }
+
+  private filterLegacyEntityMapForFirmware(
+    entityMap: Record<string, unknown>,
+    polygonOnlyEpl: boolean
+  ): Record<string, unknown> {
+    if (!polygonOnlyEpl) {
+      return entityMap;
+    }
+
+    const filtered = { ...entityMap };
+    delete filtered.polygonZonesEnabledEntity;
+    delete filtered.zoneConfigEntities;
+    delete filtered.exclusionZoneConfigEntities;
+    delete filtered.entryZoneConfigEntities;
+    return filtered;
+  }
+
   /**
    * Discover entities using legacy entityMap format.
    * This is the fallback for profiles without the new entities metadata.
@@ -960,6 +1018,11 @@ export class EntityDiscoveryService {
     deviceId?: string
   ): Promise<{ valid: boolean; errors: Array<{ key: string; entityId: string; error: string }> }> {
     const errors: Array<{ key: string; entityId: string; error: string }> = [];
+    const existingMapping = deviceId ? deviceMappingStorage.getMapping(deviceId) : null;
+    const skipLegacyRectangles = isEplPolygonOnlyDevice({
+      profileId: existingMapping?.profileId,
+      firmwareVersion: existingMapping?.firmwareVersion,
+    });
 
     let registryById: Map<string, EntityRegistryEntry> = new Map();
     try {
@@ -1006,7 +1069,7 @@ export class EntityDiscoveryService {
       'speedEntity', 'energyEntity', 'targetCountEntity', 'modeEntity',
       'maxDistanceEntity', 'installationAngleEntity', 'upsideDownMountingEntity', 'polygonZonesEnabledEntity',
       'trackingTargetCountEntity', 'firmwareUpdateEntity', 'assumedPresentEntity', 'assumedPresentRemainingEntity',
-    ];
+    ].filter((key) => !(skipLegacyRectangles && key === 'polygonZonesEnabledEntity'));
 
     for (const key of flatKeys) {
       const entityId = (mappings as Record<string, unknown>)[key];
@@ -1016,7 +1079,9 @@ export class EntityDiscoveryService {
     }
 
     // Check zone entities
-    const zoneGroups = ['zoneConfigEntities', 'exclusionZoneConfigEntities', 'entryZoneConfigEntities'];
+    const zoneGroups = skipLegacyRectangles
+      ? []
+      : ['zoneConfigEntities', 'exclusionZoneConfigEntities', 'entryZoneConfigEntities'];
     for (const groupKey of zoneGroups) {
       const group = (mappings as Record<string, unknown>)[groupKey];
       if (group && typeof group === 'object') {
@@ -1092,7 +1157,7 @@ export class EntityDiscoveryService {
     // Fetch unit_of_measurement for tracking entities (x/y coordinates)
     const entityUnits = await this.fetchEntityUnits(flatMappings);
 
-    // Fetch device info to get firmware version
+    // Fetch device info for firmware metadata and ESPHome node name.
     let rawSwVersion: string | undefined;
     let firmwareVersion: string | undefined;
     let esphomeVersion: string | undefined;
@@ -1105,7 +1170,6 @@ export class EntityDiscoveryService {
         const parsed = parseFirmwareVersion(device.sw_version);
         firmwareVersion = parsed.firmwareVersion;
         esphomeVersion = parsed.esphomeVersion;
-      logger.debug({ deviceId, rawSwVersion, firmwareVersion, esphomeVersion }, 'Parsed firmware version');
       }
       if (device) {
         esphomeNodeName = this.extractEsphomeNodeName(device);

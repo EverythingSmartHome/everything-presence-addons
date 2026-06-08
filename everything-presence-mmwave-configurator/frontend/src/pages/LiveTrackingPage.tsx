@@ -29,6 +29,7 @@ import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { useDeviceMappings, useDeviceMapping } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import { usesPolygonOnlyZones } from '../utils/firmware';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -143,6 +144,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     () => profiles.find((p) => p.id === (selectedRoom?.profileId ?? selectedProfileId)) ?? null,
     [profiles, selectedRoom, selectedProfileId],
   );
+  const selectedDevice = useMemo(
+    () => (selectedRoom?.deviceId ? devices.find((d) => d.id === selectedRoom.deviceId) ?? null : null),
+    [devices, selectedRoom?.deviceId],
+  );
   const deviceTypeLabel = useMemo(() => {
     return selectedProfile?.label ?? 'Device';
   }, [selectedProfile?.label]);
@@ -248,9 +253,21 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     [ceilingSliceConfig, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
   );
   const displayPolygonZones = isCeilingSliceMode ? [...ceilingSliceDisplayZones, ...ceilingExclusionDisplayZones] : polygonZones;
+  const polygonOnlyZones = useMemo(() => (
+    usesPolygonOnlyZones(
+      selectedDevice?.firmwareVersion ?? deviceMapping?.firmwareVersion ?? null,
+      selectedDevice?.model ?? selectedProfile?.label ?? null,
+    ) === true
+  ), [
+    deviceMapping?.firmwareVersion,
+    selectedDevice?.firmwareVersion,
+    selectedDevice?.model,
+    selectedProfile?.label,
+  ]);
+  const displayedRectZones = polygonOnlyZones ? [] : selectedRoom?.zones ?? [];
   const getZoneLabel = useCallback((zoneNum: number): string => {
     const candidates = [`Zone ${zoneNum}`, `zone${zoneNum}`, `zone_${zoneNum}`, `zone-${zoneNum}`];
-    const source = polygonModeStatus.enabled ? displayPolygonZones : selectedRoom?.zones ?? [];
+    const source = polygonModeStatus.enabled ? displayPolygonZones : displayedRectZones;
     const regularZones = source.filter((zone) => zone.type === 'regular');
     const matchingZone =
       source.find((zone) => candidates.includes(zone.id)) ??
@@ -273,9 +290,9 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   }, [
     deviceMapping?.zoneLabels,
     displayPolygonZones,
+    displayedRectZones,
     isCeilingSliceMode,
     polygonModeStatus.enabled,
-    selectedRoom?.zones,
   ]);
   const zoneOccupancyNumbers = useMemo(() => {
     const configuredMax = selectedProfile?.limits?.maxZones ?? 4;
@@ -569,6 +586,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       try {
         // Skip entityMappings if device has valid mappings stored
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
+        if (polygonOnlyZones) {
+          lastZonesFetchedRoomId.current = selectedRoom.id;
+          return;
+        }
         const deviceZones = await fetchZonesFromDevice(
           selectedRoom.deviceId,
           selectedRoom.profileId,
@@ -617,6 +638,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     devices,
     mappingLoading,
     deviceHasValidMappings,
+    polygonOnlyZones,
   ]);
 
   useEffect(() => {
@@ -1070,7 +1092,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           }}
         >
           <ZoneCanvas
-            zones={selectedRoom.zones ?? []}
+            zones={displayedRectZones}
             onZonesChange={() => {}}
             // Polygon zones support - show polygon zones when polygon mode is enabled
             polygonZones={displayPolygonZones}
@@ -1694,11 +1716,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                       )
                     ) : (
                       // Rectangle zones legend
-                      selectedRoom?.zones && selectedRoom.zones.filter(z => z.type === 'regular').length > 0 && (
+                      displayedRectZones.filter(z => z.type === 'regular').length > 0 && (
                         <div className="flex flex-wrap items-center gap-2 text-[11px]">
                           {(() => {
                             const regularZoneColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4'];
-                            const regularZones = selectedRoom.zones.filter(z => z.type === 'regular');
+                            const regularZones = displayedRectZones.filter(z => z.type === 'regular');
 
                             return regularZones.map((zone, index) => (
                               <div key={zone.id} className="flex items-center gap-1.5">

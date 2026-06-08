@@ -8,7 +8,8 @@ import { ZoneReader } from '../ha/zoneReader';
 import { RoomConfig, ZonePolygon, EntityMappings } from '../domain/types';
 import { EntityResolver } from '../domain/entityResolver';
 import { deviceEntityService } from '../domain/deviceEntityService';
-import { deviceMappingStorage } from '../config/deviceMappingStorage';
+import { deviceMappingStorage, parseFirmwareVersion } from '../config/deviceMappingStorage';
+import { isEplPolygonOnlyDevice } from '../domain/firmwareVersionUtils';
 import { logger } from '../logger';
 
 export interface DevicesRouterDependencies {
@@ -34,6 +35,24 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const normalized = normalizeStateValue(state);
     // Treat "unknown" as available for readiness purposes; it's common immediately after reboot.
     return normalized === 'unavailable';
+  };
+  const getDeviceFirmwareVersion = async (deviceId: string): Promise<string | undefined> => {
+    const existingMapping = deviceMappingStorage.getMapping(deviceId);
+    if (existingMapping?.firmwareVersion) {
+      return existingMapping.firmwareVersion;
+    }
+
+    try {
+      const devices = await readTransport.listDevices();
+      const device = devices.find((candidate) => candidate.id === deviceId);
+      if (!device?.sw_version) {
+        return undefined;
+      }
+      return parseFirmwareVersion(device.sw_version).firmwareVersion;
+    } catch (error) {
+      logger.warn({ error, deviceId }, 'Failed to fetch firmware version for device route');
+      return undefined;
+    }
   };
 
   router.get('/', async (_req, res) => {
@@ -380,6 +399,12 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
 
     // Check if device has device-level mappings (preferred)
     const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
+    const firmwareVersion = await getDeviceFirmwareVersion(deviceId);
+    const polygonOnlyEpl = isEplPolygonOnlyDevice({
+      profileId: profile.id,
+      firmwareVersion,
+      model: (profile as unknown as { model?: string }).model,
+    });
 
     try {
       const entityRegistry = await readTransport.listEntityRegistry();
@@ -407,7 +432,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       };
 
       // Check regular zones
-      if (zoneMap.zoneConfigEntities || hasDeviceMapping) {
+      if (!polygonOnlyEpl && (zoneMap.zoneConfigEntities || hasDeviceMapping)) {
         const zoneKeys = Object.keys(zoneMap.zoneConfigEntities || {});
         for (const zoneKey of zoneKeys) {
           const zoneEntities = (zoneMap.zoneConfigEntities?.[zoneKey] || {}) as Record<string, string>;
@@ -420,7 +445,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       }
 
       // Check exclusion zones
-      if (zoneMap.exclusionZoneConfigEntities || hasDeviceMapping) {
+      if (!polygonOnlyEpl && (zoneMap.exclusionZoneConfigEntities || hasDeviceMapping)) {
         const zoneKeys = Object.keys(zoneMap.exclusionZoneConfigEntities || {});
         for (const zoneKey of zoneKeys) {
           const zoneEntities = (zoneMap.exclusionZoneConfigEntities?.[zoneKey] || {}) as Record<string, string>;
@@ -433,7 +458,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       }
 
       // Check entry zones
-      if (zoneMap.entryZoneConfigEntities || hasDeviceMapping) {
+      if (!polygonOnlyEpl && (zoneMap.entryZoneConfigEntities || hasDeviceMapping)) {
         const zoneKeys = Object.keys(zoneMap.entryZoneConfigEntities || {});
         for (const zoneKey of zoneKeys) {
           const zoneEntities = (zoneMap.entryZoneConfigEntities?.[zoneKey] || {}) as Record<string, string>;
@@ -559,26 +584,46 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         polygonZonesAvailable = !!polygonEntry;
       }
 
-      // Check entry zone 1 entity existence - try device mapping first
-      let entryZone1BeginX: string | null = null;
-      if (hasDeviceMapping) {
-        const entryZoneSet = deviceEntityService.getZoneEntitySet(deviceId, 'entry', 1);
-        entryZone1BeginX = entryZoneSet?.beginX || null;
-      }
-      if (!entryZone1BeginX && zoneMap.entryZoneConfigEntities?.entry1) {
-        const entryEntities = zoneMap.entryZoneConfigEntities.entry1 as Record<string, string>;
-        const entryZoneSet = EntityResolver.resolveZoneEntitySet(
-          entityMappings,
-          prefix,
-          'entryZoneConfigEntities',
-          'entry1',
-          entryEntities
-        );
-        entryZone1BeginX = entryZoneSet?.beginX || null;
-      }
-      if (entryZone1BeginX) {
-        const entryEntry = entityRegistry.find((e) => e.entity_id === entryZone1BeginX);
-        entryZonesAvailable = !!entryEntry;
+      if (polygonOnlyEpl) {
+        let polygonEntry1Entity: string | null = null;
+        if (hasDeviceMapping) {
+          polygonEntry1Entity = deviceEntityService.getPolygonZoneEntity(deviceId, 'polygonEntry', 1);
+        }
+        if (!polygonEntry1Entity && zoneMap.polygonEntryEntities?.entry1) {
+          polygonEntry1Entity = EntityResolver.resolvePolygonZoneEntity(
+            entityMappings,
+            prefix,
+            'polygonEntryEntities',
+            'entry1',
+            zoneMap.polygonEntryEntities.entry1
+          );
+        }
+        if (polygonEntry1Entity) {
+          const entryEntry = entityRegistry.find((e) => e.entity_id === polygonEntry1Entity);
+          entryZonesAvailable = !!entryEntry;
+        }
+      } else {
+        // Check entry zone 1 entity existence - try device mapping first
+        let entryZone1BeginX: string | null = null;
+        if (hasDeviceMapping) {
+          const entryZoneSet = deviceEntityService.getZoneEntitySet(deviceId, 'entry', 1);
+          entryZone1BeginX = entryZoneSet?.beginX || null;
+        }
+        if (!entryZone1BeginX && zoneMap.entryZoneConfigEntities?.entry1) {
+          const entryEntities = zoneMap.entryZoneConfigEntities.entry1 as Record<string, string>;
+          const entryZoneSet = EntityResolver.resolveZoneEntitySet(
+            entityMappings,
+            prefix,
+            'entryZoneConfigEntities',
+            'entry1',
+            entryEntities
+          );
+          entryZone1BeginX = entryZoneSet?.beginX || null;
+        }
+        if (entryZone1BeginX) {
+          const entryEntry = entityRegistry.find((e) => e.entity_id === entryZone1BeginX);
+          entryZonesAvailable = !!entryEntry;
+        }
       }
 
       return res.json({ availability, polygonAvailability, polygonZonesAvailable, entryZonesAvailable });

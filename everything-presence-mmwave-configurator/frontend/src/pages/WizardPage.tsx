@@ -26,6 +26,7 @@ import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
+import { usesPolygonOnlyZones } from '../utils/firmware';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -213,6 +214,12 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     () => profiles.find((p) => p.id === (selectedRoom?.profileId ?? profileId ?? undefined)) ?? null,
     [profiles, profileId, selectedRoom?.profileId],
   );
+  const polygonOnlyZones = useMemo(() => (
+    usesPolygonOnlyZones(
+      selectedDevice?.firmwareVersion ?? null,
+      selectedDevice?.model ?? currentProfile?.label ?? null,
+    ) === true
+  ), [selectedDevice?.firmwareVersion, selectedDevice?.model, currentProfile?.label]);
 
   const deviceIconUrl = useMemo(
     () => getDeviceIconUrl(currentProfile, selectedRoom?.devicePlacement),
@@ -470,7 +477,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const displayZones = useMemo(() => {
     if (!selectedRoom) return allPossibleZones;
 
-    const deviceZones = selectedRoom.zones ?? [];
+    const deviceZones = polygonOnlyZones ? [] : selectedRoom.zones ?? [];
     const merged = [...allPossibleZones];
 
     // Match device zones to slots by type and index
@@ -482,7 +489,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     });
 
     return merged;
-  }, [selectedRoom, allPossibleZones]);
+  }, [selectedRoom, allPossibleZones, polygonOnlyZones]);
 
   // Only enabled zones should show on canvas
   const enabledZones = useMemo(() => {
@@ -860,6 +867,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       zonesLoadedRef.current.add(roomKey);
 
       try {
+        if (polygonOnlyZones) {
+          setZonesLoadingComplete(roomKey);
+          return;
+        }
         // Skip entityMappings if device has valid mappings stored
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
         // fetchZonesFromDevice returns ZoneRect[] directly, not { zones: ZoneRect[] }
@@ -877,6 +888,11 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           setZonesLoadingComplete(roomKey);
         }, 0);
       } catch (err) {
+        // Preserve stored rectangles for polygon-only recovery flows.
+        if (polygonOnlyZones) {
+          setZonesLoadingComplete(roomKey);
+          return;
+        }
         // Clear zones on error to prevent showing stale zones
         const updatedRoom: RoomConfig = { ...selectedRoom, zones: [] };
         await updateRoom(selectedRoom.id, updatedRoom);
@@ -889,7 +905,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, devices, onRoomUpdate, deviceHasValidMappings]);
+  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, devices, onRoomUpdate, deviceHasValidMappings, polygonOnlyZones]);
 
   // Fetch polygon mode status when entering zones step
   // This runs AFTER zones have been loaded to ensure room is fully initialized
