@@ -1,8 +1,6 @@
 import type { IHaReadTransport } from '../ha/readTransport';
 import { logger } from '../logger';
 import {
-  deriveEntityPrefixFromRegistryEntries,
-  extractEsphomeNodeName,
   filterEverythingPresenceDevices,
   normalizeManufacturer,
 } from './everythingPresenceDevices';
@@ -22,29 +20,6 @@ export class DeviceDiscoveryService {
 
   constructor(readTransport: IHaReadTransport) {
     this.readTransport = readTransport;
-  }
-
-  private async getEntityNamePrefixForDevice(deviceId: string): Promise<string | undefined> {
-    try {
-      const devices = await this.readTransport.listDevices();
-      const device = filterEverythingPresenceDevices(devices).find((entry) => entry.id === deviceId);
-      if (device) {
-        const esphomePrefix = extractEsphomeNodeName(device);
-        if (esphomePrefix) {
-          return esphomePrefix;
-        }
-      }
-
-      const entityRegistry = await this.readTransport.listEntityRegistry();
-      const deviceEntities = entityRegistry.filter((entry) => entry.device_id === deviceId);
-      const registryPrefix = deriveEntityPrefixFromRegistryEntries(deviceEntities);
-      if (registryPrefix) {
-        return registryPrefix;
-      }
-    } catch (error) {
-      logger.warn({ error: (error as Error).message, deviceId }, 'Failed to get entity prefix for device');
-    }
-    return undefined;
   }
 
   async discover(): Promise<DiscoveredDevice[]> {
@@ -82,18 +57,12 @@ export class DeviceDiscoveryService {
       }))
     );
 
-    // Enrich with entity name prefix and area name
-    const enrichedDevices = await Promise.all(
-      filteredDevices.map(async (device) => {
-        const { areaId, ...rest } = device;
-        return {
-          ...rest,
-          entityNamePrefix: await this.getEntityNamePrefixForDevice(device.id),
-          areaName: areaId ? areaMap.get(areaId) : undefined,
-        };
-      })
-    );
-
-    return enrichedDevices;
+    return filteredDevices.map((device) => {
+      const { areaId, ...rest } = device;
+      return {
+        ...rest,
+        areaName: areaId ? areaMap.get(areaId) : undefined,
+      };
+    });
   }
 }
