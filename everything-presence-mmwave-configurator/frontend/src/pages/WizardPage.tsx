@@ -936,12 +936,18 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       try {
         // Skip entityMappings if device has valid mappings stored
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
-        const status = await fetchPolygonModeStatus(
+        let status = await fetchPolygonModeStatus(
           selectedRoom.deviceId,
           selectedRoom.profileId,
           entityNamePrefix,
           entityMappingsToUse
         );
+        // Polygon-only firmware has no rectangle mode: never let a stale mode toggle
+        // (e.g. a ghost switch entity left behind by the firmware update) push the
+        // wizard into rectangle mode, where zone slots can't be enabled.
+        if (polygonOnlyZones && (!status.enabled || !status.supported)) {
+          status = { supported: true, enabled: true, controllable: false };
+        }
         setPolygonModeStatus(status);
 
         // If polygon mode is enabled, fetch polygon zones
@@ -967,12 +973,16 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         // entities do exist.
       } catch (err) {
         console.error('Failed to fetch polygon mode status:', err);
-        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+        if (polygonOnlyZones) {
+          setPolygonModeStatus({ supported: true, enabled: true, controllable: false });
+        } else {
+          setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+        }
       }
     };
 
     loadPolygonModeStatus();
-  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, zonesLoadingComplete, deviceHasValidMappings]);
+  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, zonesLoadingComplete, deviceHasValidMappings, polygonOnlyZones]);
 
   // Track if we've auto-enabled Zone 1 for this room to avoid re-enabling if user manually disables
   const autoEnabledZoneRef = useRef<Set<string>>(new Set());

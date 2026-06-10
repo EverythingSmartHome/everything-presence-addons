@@ -630,14 +630,25 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           entityNamePrefix,
           entityMappingsToUse
         );
-        setPolygonModeStatus(status);
+        // Polygon-only firmware has no rectangle mode: never let a stale mode toggle
+        // (e.g. a ghost switch entity left behind by the firmware update) push the
+        // editor into rectangle mode, where all zone slots are hidden.
+        if (polygonOnlyZones && (!status.enabled || !status.supported)) {
+          setPolygonModeStatus({ supported: true, enabled: true, controllable: false });
+        } else {
+          setPolygonModeStatus(status);
+        }
       } catch (err) {
-        setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+        if (polygonOnlyZones) {
+          setPolygonModeStatus({ supported: true, enabled: true, controllable: false });
+        } else {
+          setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+        }
       }
     };
 
     loadPolygonModeStatus();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings, polygonOnlyZones]);
 
   // Fetch polygon zones when polygon mode is enabled
   useEffect(() => {
