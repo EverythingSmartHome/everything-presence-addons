@@ -676,11 +676,22 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           entityMappingsToUse
         );
         if (!cancelled) {
-          setPolygonModeStatus(status);
+          // Polygon-only firmware has no rectangle mode: never let a stale mode toggle
+          // (e.g. a ghost switch entity left behind by the firmware update) report
+          // rectangle mode, which would hide every zone overlay.
+          if (polygonOnlyZones && (!status.enabled || !status.supported)) {
+            setPolygonModeStatus({ supported: true, enabled: true, controllable: false });
+          } else {
+            setPolygonModeStatus(status);
+          }
         }
       } catch (err) {
         if (!cancelled) {
-          setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+          if (polygonOnlyZones) {
+            setPolygonModeStatus({ supported: true, enabled: true, controllable: false });
+          } else {
+            setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
+          }
         }
       }
     };
@@ -699,6 +710,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     devices,
     mappingLoading,
     deviceHasValidMappings,
+    polygonOnlyZones,
   ]);
 
   useEffect(() => {

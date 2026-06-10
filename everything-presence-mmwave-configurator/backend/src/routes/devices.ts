@@ -9,7 +9,7 @@ import { RoomConfig, ZonePolygon, EntityMappings } from '../domain/types';
 import { EntityResolver } from '../domain/entityResolver';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { deviceMappingStorage, parseFirmwareVersion } from '../config/deviceMappingStorage';
-import { isEplPolygonOnlyDevice } from '../domain/firmwareVersionUtils';
+import { isPolygonOnlyDevice } from '../domain/firmwareVersionUtils';
 import { logger } from '../logger';
 
 export interface DevicesRouterDependencies {
@@ -37,22 +37,21 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     return normalized === 'unavailable';
   };
   const getDeviceFirmwareVersion = async (deviceId: string): Promise<string | undefined> => {
-    const existingMapping = deviceMappingStorage.getMapping(deviceId);
-    if (existingMapping?.firmwareVersion) {
-      return existingMapping.firmwareVersion;
-    }
 
     try {
       const devices = await readTransport.listDevices();
       const device = devices.find((candidate) => candidate.id === deviceId);
-      if (!device?.sw_version) {
-        return undefined;
+      if (device?.sw_version) {
+        const parsed = parseFirmwareVersion(device.sw_version).firmwareVersion;
+        if (parsed) {
+          return parsed;
+        }
       }
-      return parseFirmwareVersion(device.sw_version).firmwareVersion;
     } catch (error) {
       logger.warn({ error, deviceId }, 'Failed to fetch firmware version for device route');
-      return undefined;
     }
+
+    return deviceMappingStorage.getMapping(deviceId)?.firmwareVersion;
   };
 
   router.get('/', async (_req, res) => {
@@ -400,7 +399,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     // Check if device has device-level mappings (preferred)
     const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
     const firmwareVersion = await getDeviceFirmwareVersion(deviceId);
-    const polygonOnlyEpl = isEplPolygonOnlyDevice({
+    const polygonOnlyEpl = isPolygonOnlyDevice({
       profileId: profile.id,
       firmwareVersion,
       model: (profile as unknown as { model?: string }).model,
@@ -725,6 +724,19 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       return res.json({ supported: false, enabled: false, controllable: false });
     }
 
+    // Firmware-version check first: polygon-only firmware has no mode toggle, and the
+    // legacy switch entity may linger in HA as a restored "unavailable" ghost that would
+    // otherwise be read as "polygon mode off". The registry sw_version is reliable even
+    // when the device is offline.
+    const firmwareVersion = await getDeviceFirmwareVersion(deviceId);
+    if (isPolygonOnlyDevice({
+      profileId: profile.id,
+      firmwareVersion,
+      model: (profile as unknown as { model?: string }).model,
+    })) {
+      return res.json({ supported: true, enabled: true, controllable: false });
+    }
+
     const entityMap = profile.entityMap as any;
     const entityTemplate = entityMap?.polygonZonesEnabledEntity;
 
@@ -796,9 +808,14 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         statesMapSize: states.size
       }, 'Polygon mode entity state lookup result');
 
-      // If the old toggle entity no longer exists, fall back to polygon-only detection.
-      if (!state) {
-        logger.info({ entityId: switchEntityId }, 'Polygon mode entity not found - checking polygon-only zone entities');
+      // If the old toggle entity no longer exists (or only lingers as a restored
+      // "unavailable" ghost after a polygon-only firmware update), fall back to
+      // polygon-only detection via the polygon zone text entities.
+      if (!state || isUnavailableState(state.state)) {
+        logger.info(
+          { entityId: switchEntityId, stateValue: state?.state ?? null },
+          'Polygon mode entity missing or unavailable - checking polygon-only zone entities'
+        );
 
         let polygonZoneEntity: string | null = null;
         if (hasDeviceMapping) {
@@ -819,7 +836,10 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
 
         const polygonStates = await readTransport.getStates([polygonZoneEntity]);
         const polygonState = polygonStates.get(polygonZoneEntity);
-        if (!polygonState) {
+        // Require a live polygon zone state: an offline pre-migration device reports
+        // every entity (including the real toggle) as unavailable, and must not be
+        // mistaken for a polygon-only device.
+        if (!polygonState || isReadinessUnavailableState(polygonState.state)) {
           return res.json({ supported: false, enabled: false, controllable: true });
         }
 
@@ -860,6 +880,23 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     const entityMap = profile.entityMap as any;
 
     try {
+      // Polygon-only firmware has no mode toggle: writing the legacy switch would
+      // silently no-op against a ghost entity and revert on the next status read.
+      const firmwareVersion = await getDeviceFirmwareVersion(deviceId);
+      if (isPolygonOnlyDevice({
+        profileId: profile.id,
+        firmwareVersion,
+        model: (profile as unknown as { model?: string }).model,
+      })) {
+        if (!enabled) {
+          return res.status(409).json({
+            message: 'This firmware only supports polygon zones; rectangle mode is no longer available.',
+            code: 'POLYGON_ONLY_FIRMWARE',
+          });
+        }
+        return res.json({ ok: true, enabled: true });
+      }
+
       await zoneWriter.setPolygonMode(entityMap, entityNamePrefix, enabled, entityMappings, deviceId);
       return res.json({ ok: true, enabled });
     } catch (error) {

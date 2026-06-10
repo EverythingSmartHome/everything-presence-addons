@@ -4,7 +4,10 @@ export interface ParsedVersion {
   patch: number;
 }
 
+// Firmware versions where rectangular zones are removed per device model.
+// Must stay in sync with frontend/src/utils/firmware.ts ZONE_MIGRATION_VERSION_BY_MODEL.
 const EPL_POLYGON_ONLY_VERSION = '1.5.0';
+const EPP_POLYGON_ONLY_VERSION = '1.2.0';
 
 export function parseVersion(version: string | undefined | null): ParsedVersion | null {
   if (!version) return null;
@@ -44,16 +47,34 @@ export function isEverythingPresenceLite(profileId?: string | null, model?: stri
   return normalized.includes('everything presence lite') || normalized.includes('everything-presence-lite');
 }
 
-export function isEplPolygonOnlyDevice(args: {
+export function isEverythingPresencePro(profileId?: string | null, model?: string | null): boolean {
+  if (profileId === 'everything_presence_pro') return true;
+  const normalized = normalizeModel(model);
+  return normalized.includes('everything presence pro') || normalized.includes('everything-presence-pro');
+}
+
+/**
+ * Whether the device firmware only supports polygon zones (rectangular zones removed).
+ * Covers every model with a polygon-only migration threshold (EPL >= 1.5.0, EP Pro >= 1.2.0).
+ * Returns false when the firmware version is unknown or unparseable so callers
+ * fall back to entity-based detection.
+ */
+export function isPolygonOnlyDevice(args: {
   profileId?: string | null;
   firmwareVersion?: string | null;
   model?: string | null;
 }): boolean {
-  if (!isEverythingPresenceLite(args.profileId, args.model)) {
+  let threshold: string | null = null;
+  if (isEverythingPresenceLite(args.profileId, args.model)) {
+    threshold = EPL_POLYGON_ONLY_VERSION;
+  } else if (isEverythingPresencePro(args.profileId, args.model)) {
+    threshold = EPP_POLYGON_ONLY_VERSION;
+  }
+  if (!threshold) {
     return false;
   }
 
-  const comparison = compareVersions(args.firmwareVersion, EPL_POLYGON_ONLY_VERSION);
+  const comparison = compareVersions(args.firmwareVersion, threshold);
   return comparison !== null && comparison >= 0;
 }
 

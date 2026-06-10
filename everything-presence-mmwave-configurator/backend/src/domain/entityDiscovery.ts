@@ -1,4 +1,4 @@
-import type { IHaReadTransport } from '../ha/readTransport';
+﻿import type { IHaReadTransport } from '../ha/readTransport';
 import type { EntityRegistryEntry } from '../ha/types';
 import type { DeviceRegistryEntry } from '../ha/readTransport';
 import type { DeviceProfile, DeviceProfileLoader } from './deviceProfiles';
@@ -7,7 +7,7 @@ import { deviceMappingStorage, DeviceMapping, parseFirmwareVersion } from '../co
 import { logger } from '../logger';
 import { telemetry } from '../logger/telemetry';
 import { normalizeMappingKeys } from './mappingUtils';
-import { isEplPolygonOnlyDevice } from './firmwareVersionUtils';
+import { isPolygonOnlyDevice } from './firmwareVersionUtils';
 import {
   deriveEntityPrefixFromRegistryEntries,
   extractEsphomeNodeName,
@@ -248,7 +248,7 @@ export class EntityDiscoveryService {
     const profileEntities = (profile as unknown as Record<string, unknown>).entities as Record<string, EntityDefinitionWithTemplate> | undefined;
     const rawEntityMap = (profile as unknown as Record<string, unknown>).entityMap as Record<string, unknown>;
     const capabilities = profile.capabilities as Record<string, unknown>;
-    const polygonOnlyEpl = isEplPolygonOnlyDevice({
+    const polygonOnlyEpl = isPolygonOnlyDevice({
       profileId,
       firmwareVersion,
       model: (profile as unknown as Record<string, unknown>).model as string | undefined,
@@ -1049,7 +1049,7 @@ export class EntityDiscoveryService {
   ): Promise<{ valid: boolean; errors: Array<{ key: string; entityId: string; error: string }> }> {
     const errors: Array<{ key: string; entityId: string; error: string }> = [];
     const existingMapping = deviceId ? deviceMappingStorage.getMapping(deviceId) : null;
-    const skipLegacyRectangles = isEplPolygonOnlyDevice({
+    const skipLegacyRectangles = isPolygonOnlyDevice({
       profileId: existingMapping?.profileId,
       firmwareVersion: existingMapping?.firmwareVersion,
     });
