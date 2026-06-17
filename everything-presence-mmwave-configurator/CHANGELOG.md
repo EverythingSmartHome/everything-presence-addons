@@ -1,3 +1,8 @@
+## 2.2.4
+* Reduce startup load from device discovery by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/363
+* Fix polygon zone editing failing after polygon only firmware updates by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/364
+* Fix zone editor not working when room prefix is missing by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/369
+
 ## 2.2.3
 * Fix: Reduce broad Home Assistant entity discovery devices by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/351
 * Fix: Handle EPL 1.5.0 polygon migration more cleanly by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/357
