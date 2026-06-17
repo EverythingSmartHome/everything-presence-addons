@@ -128,8 +128,8 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
     }
 
     const prefix =
-      entityNamePrefix ||
       deviceEntityService.getDeviceNamePrefix(deviceId) ||
+      entityNamePrefix ||
       undefined;
     if (!prefix) {
       return res.status(400).json({ message: 'entityNamePrefix is required when device mapping is missing' });
@@ -246,8 +246,8 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
     }
 
     const prefix =
-      entityNamePrefix ||
       deviceEntityService.getDeviceNamePrefix(deviceId) ||
+      entityNamePrefix ||
       undefined;
     if (!prefix) {
       return res.status(400).json({ message: 'entityNamePrefix is required when device mapping is missing' });

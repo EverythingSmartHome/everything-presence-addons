@@ -4,6 +4,7 @@ import {
   filterEverythingPresenceDevices,
   normalizeManufacturer,
 } from './everythingPresenceDevices';
+import { deviceEntityService } from './deviceEntityService';
 
 export interface DiscoveredDevice {
   id: string;
@@ -61,6 +62,7 @@ export class DeviceDiscoveryService {
       const { areaId, ...rest } = device;
       return {
         ...rest,
+        entityNamePrefix: deviceEntityService.getDeviceNamePrefix(device.id) ?? undefined,
         areaName: areaId ? areaMap.get(areaId) : undefined,
       };
     });

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../config/storage';
+import { deviceEntityService } from '../domain/deviceEntityService';
 import { DevicePlacement, Door, EntityMappings, FurnitureInstance, RoomConfig, RoomShell, ZoneRect, ZoneEntitySet, TargetEntitySet } from '../domain/types';
 
 export const createRoomsRouter = (): Router => {
@@ -250,6 +251,22 @@ export const createRoomsRouter = (): Router => {
     metadata: body?.metadata ?? {},
   });
 
+  const applyDeviceMappingPrefix = (room: RoomConfig): RoomConfig => {
+    if (room.entityNamePrefix || !room.deviceId) {
+      return room;
+    }
+
+    const mappingPrefix = deviceEntityService.getDeviceNamePrefix(room.deviceId);
+    if (!mappingPrefix) {
+      return room;
+    }
+
+    return {
+      ...room,
+      entityNamePrefix: mappingPrefix,
+    };
+  };
+
   router.get('/', (_req, res) => {
     res.json({ rooms: storage.listRooms() });
   });
@@ -263,7 +280,7 @@ export const createRoomsRouter = (): Router => {
   });
 
   router.post('/', (req, res) => {
-    const room = normalizeRoom(req.body);
+    const room = applyDeviceMappingPrefix(normalizeRoom(req.body));
     storage.saveRoom(room);
     res.json({ room });
   });
@@ -273,7 +290,7 @@ export const createRoomsRouter = (): Router => {
     if (!existing) {
       return res.status(404).json({ message: 'Room not found' });
     }
-    const room = normalizeRoom({ ...existing, ...req.body }, existing.id);
+    const room = applyDeviceMappingPrefix(normalizeRoom({ ...existing, ...req.body }, existing.id));
     storage.saveRoom(room);
     return res.json({ room });
   });
