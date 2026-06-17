@@ -36,6 +36,9 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     // Treat "unknown" as available for readiness purposes; it's common immediately after reboot.
     return normalized === 'unavailable';
   };
+  const resolveEntityNamePrefix = (deviceId: string, explicitPrefix?: string | null): string | null => {
+    return deviceEntityService.getDeviceNamePrefix(deviceId) ?? explicitPrefix?.trim() ?? null;
+  };
   const getDeviceFirmwareVersion = async (deviceId: string): Promise<string | undefined> => {
 
     try {
@@ -370,7 +373,11 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
 
   router.get('/:deviceId/zone-availability', async (req, res) => {
     const { deviceId } = req.params;
-    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
+    const { profileId, entityMappings: entityMappingsJson } = req.query;
+    const entityNamePrefix = resolveEntityNamePrefix(
+      deviceId,
+      typeof req.query?.entityNamePrefix === 'string' ? req.query.entityNamePrefix : null
+    );
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -634,7 +641,11 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
 
   router.get('/:deviceId/zones', async (req, res) => {
     const { deviceId } = req.params;
-    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
+    const { profileId, entityMappings: entityMappingsJson } = req.query;
+    const entityNamePrefix = resolveEntityNamePrefix(
+      deviceId,
+      typeof req.query?.entityNamePrefix === 'string' ? req.query.entityNamePrefix : null
+    );
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -661,7 +672,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     }
 
     try {
-      const zones = await zoneReader.readZones(zoneMap, entityNamePrefix as string, entityMappings, deviceId);
+      const zones = await zoneReader.readZones(zoneMap, entityNamePrefix, entityMappings, deviceId);
       return res.json({ zones });
     } catch (error) {
       logger.error({ error }, 'Failed to read zones');
@@ -672,7 +683,10 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
   router.post('/:deviceId/zones', async (req, res) => {
     const { deviceId } = req.params;
     const profileId = (req.body?.profileId as string | undefined) ?? (req.body?.profile_id as string | undefined);
-    const entityNamePrefix = (req.body?.entityNamePrefix as string | undefined) ?? (req.body?.entity_name_prefix as string | undefined);
+    const entityNamePrefix = resolveEntityNamePrefix(
+      deviceId,
+      (req.body?.entityNamePrefix as string | undefined) ?? (req.body?.entity_name_prefix as string | undefined) ?? null
+    );
     const zones = (req.body?.zones as RoomConfig['zones']) ?? [];
     const entityMappings = req.body?.entityMappings as EntityMappings | undefined;
 
@@ -708,7 +722,11 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
    */
   router.get('/:deviceId/polygon-mode', async (req, res) => {
     const { deviceId } = req.params;
-    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
+    const { profileId, entityMappings: entityMappingsJson } = req.query;
+    const entityNamePrefix = resolveEntityNamePrefix(
+      deviceId,
+      typeof req.query?.entityNamePrefix === 'string' ? req.query.entityNamePrefix : null
+    );
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -762,7 +780,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       if (!switchEntityId) {
         switchEntityId = EntityResolver.resolve(
           entityMappings,
-          entityNamePrefix as string,
+          entityNamePrefix,
           'polygonZonesEnabledEntity',
           entityTemplate
         );
@@ -777,7 +795,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         if (!polygonZoneEntity && entityMap?.polygonZoneEntities?.zone1) {
           polygonZoneEntity = EntityResolver.resolvePolygonZoneEntity(
             entityMappings,
-            entityNamePrefix as string,
+            entityNamePrefix,
             'polygonZoneEntities',
             'zone1',
             entityMap.polygonZoneEntities.zone1
@@ -824,7 +842,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         if (!polygonZoneEntity && entityMap?.polygonZoneEntities?.zone1) {
           polygonZoneEntity = EntityResolver.resolvePolygonZoneEntity(
             entityMappings,
-            entityNamePrefix as string,
+            entityNamePrefix,
             'polygonZoneEntities',
             'zone1',
             entityMap.polygonZoneEntities.zone1
@@ -864,7 +882,10 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
   router.post('/:deviceId/polygon-mode', async (req, res) => {
     const { deviceId } = req.params;
     const profileId = req.body?.profileId as string | undefined;
-    const entityNamePrefix = req.body?.entityNamePrefix as string | undefined;
+    const entityNamePrefix = resolveEntityNamePrefix(
+      deviceId,
+      (req.body?.entityNamePrefix as string | undefined) ?? null
+    );
     const enabled = req.body?.enabled as boolean | undefined;
     const entityMappings = req.body?.entityMappings as EntityMappings | undefined;
 
@@ -910,7 +931,11 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
    */
   router.get('/:deviceId/polygon-zones', async (req, res) => {
     const { deviceId } = req.params;
-    const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
+    const { profileId, entityMappings: entityMappingsJson } = req.query;
+    const entityNamePrefix = resolveEntityNamePrefix(
+      deviceId,
+      typeof req.query?.entityNamePrefix === 'string' ? req.query.entityNamePrefix : null
+    );
 
     if (!profileId || !entityNamePrefix) {
       return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
@@ -934,7 +959,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
     }
 
     try {
-      const zones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string, entityMappings, deviceId);
+      const zones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix, entityMappings, deviceId);
       return res.json({ zones });
     } catch (error) {
       logger.error({ error }, 'Failed to read polygon zones');
@@ -948,7 +973,10 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
   router.post('/:deviceId/polygon-zones', async (req, res) => {
     const { deviceId } = req.params;
     const profileId = req.body?.profileId as string | undefined;
-    const entityNamePrefix = req.body?.entityNamePrefix as string | undefined;
+    const entityNamePrefix = resolveEntityNamePrefix(
+      deviceId,
+      (req.body?.entityNamePrefix as string | undefined) ?? null
+    );
     const zones = req.body?.zones as ZonePolygon[] | undefined;
     const entityMappings = req.body?.entityMappings as EntityMappings | undefined;
 

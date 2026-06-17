@@ -268,6 +268,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
       const updatedProfileId = savedMapping.profileId || syncingRoom.profileId;
       const result = await updateRoom(syncingRoom.id, {
         entityMappings: mappings,
+        entityNamePrefix: savedMapping.esphomeNodeName ?? syncingRoom.entityNamePrefix,
         profileId: updatedProfileId,
       });
       const updatedRoom = result.room;
