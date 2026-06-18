@@ -23,7 +23,7 @@ export function createLiveRouter(
   router.get('/:deviceId/state', async (req, res) => {
     try {
       const { deviceId } = req.params;
-      const { profileId, entityNamePrefix, entityMappings: entityMappingsJson } = req.query;
+      const { profileId, entityMappings: entityMappingsJson } = req.query;
 
       if (!deviceId) {
         return res.status(400).json({ error: 'deviceId required' });
@@ -32,14 +32,6 @@ export function createLiveRouter(
       const profile = profileId ? profileLoader.getProfileById(profileId as string) : null;
       if (!profile) {
         return res.status(404).json({ error: 'Profile not found' });
-      }
-
-      // Use entityNamePrefix if provided, otherwise try to extract from deviceId
-      const deviceName = (entityNamePrefix as string) ||
-        deviceId.replace(/^(sensor|binary_sensor|number)\./, '').replace(/_occupancy$|_mmwave_target_distance$/, '');
-
-      if (!deviceName) {
-        return res.status(400).json({ error: 'Could not determine entity name prefix' });
       }
 
       // Parse entityMappings if provided (JSON string in query param)
@@ -52,13 +44,14 @@ export function createLiveRouter(
         }
       }
 
-      // Check if device has device-level mappings (preferred)
       const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
       const hasMappings = hasDeviceMapping || !!entityMappings;
 
-      // Log warning if no mappings found
       if (!hasMappings) {
-        logger.warn({ deviceId, profileId }, 'No device mappings found - entity resolution may fail');
+        return res.status(409).json({
+          error: 'Device mapping not found. Run entity re-sync to create mappings.',
+          code: 'MAPPING_NOT_FOUND',
+        });
       }
 
       const liveState: any = {
@@ -103,16 +96,15 @@ export function createLiveRouter(
         return null;
       };
 
-      // Helper to get entity state by pattern - tries device mapping first, then legacy
+      // Helper to get entity state by mapping key, with room-stored mappings as a compatibility layer.
       const getEntityState = async (mappingKey: string, template: string | null) => {
         // Try device-level mapping first (preferred)
         let entityId: string | null = null;
         if (hasDeviceMapping) {
           entityId = deviceEntityService.getEntityId(deviceId, mappingKey);
         }
-        // Fallback to legacy resolution
         if (!entityId) {
-          entityId = EntityResolver.resolve(entityMappings, deviceName, mappingKey, template);
+          entityId = EntityResolver.resolve(entityMappings, undefined, mappingKey, template);
         }
         if (!entityId) return null;
         try {
@@ -240,7 +232,7 @@ export function createLiveRouter(
           return value;
         };
 
-        // Helper to get target entity state - tries device mapping first, then legacy
+        // Helper to get target entity state - tries device mapping first, then room-stored mappings.
         const getTargetState = async (targetNum: number, property: 'x' | 'y' | 'speed' | 'resolution' | 'angle' | 'distance' | 'active') => {
           let entityId: string | null = null;
           // Try device-level mapping first
@@ -250,9 +242,8 @@ export function createLiveRouter(
               entityId = targetSet[property] as string;
             }
           }
-          // Fallback to legacy resolution
           if (!entityId) {
-            entityId = EntityResolver.resolveTargetEntity(entityMappings, deviceName, targetNum, property);
+            entityId = EntityResolver.resolveTargetEntity(entityMappings, undefined, targetNum, property);
           }
           if (!entityId) return null;
           try {

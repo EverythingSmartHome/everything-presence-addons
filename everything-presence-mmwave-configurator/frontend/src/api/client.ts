@@ -240,17 +240,19 @@ export const deleteCustomFurniture = async (id: string) => {
 export const fetchHeatmap = async (
   deviceId: string,
   profileId: string,
-  entityNamePrefix: string,
+  entityNamePrefix: string | null,
   hours: number = 24,
   resolution: number = 400,
   entityMappings?: EntityMappings
 ): Promise<HeatmapResponse> => {
   const params = new URLSearchParams({
     profileId,
-    entityNamePrefix,
     hours: hours.toString(),
     resolution: resolution.toString(),
   });
+  if (entityNamePrefix) {
+    params.set('entityNamePrefix', entityNamePrefix);
+  }
   if (entityMappings) {
     params.set('entityMappings', JSON.stringify(entityMappings));
   }

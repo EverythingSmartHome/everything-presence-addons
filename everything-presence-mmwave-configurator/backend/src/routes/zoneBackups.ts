@@ -112,7 +112,6 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
   router.post('/', async (req, res) => {
     const deviceId = req.body?.deviceId as string | undefined;
     const profileId = req.body?.profileId as string | undefined;
-    const entityNamePrefix = req.body?.entityNamePrefix as string | undefined;
     const entityMappings = parseEntityMappings(req.body?.entityMappings);
 
     if (!deviceId) {
@@ -127,19 +126,16 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
       return res.status(404).json({ message: 'Profile not found' });
     }
 
-    const prefix =
-      deviceEntityService.getDeviceNamePrefix(deviceId) ||
-      entityNamePrefix ||
-      undefined;
-    if (!prefix) {
-      return res.status(400).json({ message: 'entityNamePrefix is required when device mapping is missing' });
+    const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
+    if (!hasDeviceMapping && !entityMappings) {
+      return res.status(409).json({ message: 'Device mapping not found. Run entity re-sync to create mappings.', code: 'MAPPING_NOT_FOUND' });
     }
 
     try {
-      const polygonZones = await zoneReader.readPolygonZones(profile.entityMap as any, prefix, entityMappings, deviceId);
+      const polygonZones = await zoneReader.readPolygonZones(profile.entityMap as any, undefined, entityMappings, deviceId);
       const zones = polygonZones.length > 0
         ? polygonZones
-        : await zoneReader.readZones(profile.entityMap as any, prefix, entityMappings, deviceId);
+        : await zoneReader.readZones(profile.entityMap as any, undefined, entityMappings, deviceId);
       const mapping = deviceMappingStorage.getMapping(deviceId);
       const backup: ZoneBackup = {
         id: generateId(),
@@ -153,7 +149,7 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
         zones,
         zoneLabels: mapping?.zoneLabels ?? undefined,
         metadata: {
-          entityNamePrefix: prefix,
+          entityNamePrefix: deviceEntityService.getDeviceNamePrefix(deviceId) ?? undefined,
           notes: polygonZones.length > 0 ? 'polygon' : 'rectangular',
         },
       };
@@ -225,7 +221,6 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
 
     const deviceId = (req.body?.deviceId as string | undefined) ?? backup.deviceId;
     const profileId = (req.body?.profileId as string | undefined) ?? backup.profileId;
-    const entityNamePrefix = req.body?.entityNamePrefix as string | undefined;
     const entityMappings = parseEntityMappings(req.body?.entityMappings);
 
     if (!deviceId) {
@@ -245,12 +240,9 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
       return res.status(409).json({ message: 'Polygon zones are not supported for this device profile' });
     }
 
-    const prefix =
-      deviceEntityService.getDeviceNamePrefix(deviceId) ||
-      entityNamePrefix ||
-      undefined;
-    if (!prefix) {
-      return res.status(400).json({ message: 'entityNamePrefix is required when device mapping is missing' });
+    const hasDeviceMapping = deviceMappingStorage.hasMapping(deviceId);
+    if (!hasDeviceMapping && !entityMappings) {
+      return res.status(409).json({ message: 'Device mapping not found. Run entity re-sync to create mappings.', code: 'MAPPING_NOT_FOUND' });
     }
 
     const limits = profile.limits ?? {};
@@ -319,8 +311,8 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
     ].filter((zone) => isValidPolygon(zone.vertices));
 
     try {
-      await zoneWriter.setPolygonMode(profile.entityMap as any, prefix, true, entityMappings, deviceId);
-      const result = await zoneWriter.applyPolygonZones(profile.entityMap as any, polygons, prefix, entityMappings, deviceId);
+      await zoneWriter.setPolygonMode(profile.entityMap as any, undefined, true, entityMappings, deviceId);
+      const result = await zoneWriter.applyPolygonZones(profile.entityMap as any, polygons, undefined, entityMappings, deviceId);
 
       const warnings = [...result.failures];
       if (backup.zoneLabels) {

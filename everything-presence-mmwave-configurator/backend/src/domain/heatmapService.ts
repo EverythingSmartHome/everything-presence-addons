@@ -109,7 +109,7 @@ export class HeatmapService {
    * @param deviceId - Device ID for device-level mapping lookup (preferred)
    */
   async generateHeatmap(
-    entityNamePrefix: string,
+    entityNamePrefix: string | undefined,
     hours: number,
     resolution: number,
     zones?: Zone[],
@@ -174,7 +174,7 @@ export class HeatmapService {
    * Uses device mappings first, then EntityResolver for legacy fallback.
    * Returns both the entity list and target info for correlation.
    */
-  private getTrackingEntities(entityNamePrefix: string, entityMappings?: EntityMappings, deviceId?: string): { entities: string[]; targetInfo: TargetEntityInfo[] } {
+  private getTrackingEntities(entityNamePrefix: string | undefined, entityMappings?: EntityMappings, deviceId?: string): { entities: string[]; targetInfo: TargetEntityInfo[] } {
     const entities: string[] = [];
     const targetInfo: TargetEntityInfo[] = [];
     const hasDeviceMapping = deviceId ? deviceMappingStorage.hasMapping(deviceId) : false;

@@ -364,17 +364,14 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
     let cancelled = false;
 
-    const loadLiveState = async () => {
+      const loadLiveState = async () => {
       try {
-        const entityParam = selectedRoom.entityNamePrefix
-          ? `&entityNamePrefix=${encodeURIComponent(selectedRoom.entityNamePrefix)}`
-          : '';
         const mappingsParam = selectedRoom.entityMappings
           ? `&entityMappings=${encodeURIComponent(JSON.stringify(selectedRoom.entityMappings))}`
           : '';
         const res = await fetch(
           ingressAware(
-            `api/live/${selectedRoom.deviceId}/state?profileId=${selectedRoom.profileId}${entityParam}${mappingsParam}`
+            `api/live/${selectedRoom.deviceId}/state?profileId=${selectedRoom.profileId}${mappingsParam}`
           )
         );
         if (!res.ok) {
