@@ -39,10 +39,11 @@ import {
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
-import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
+import { useDeviceMapping, useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
 import { usesPolygonOnlyZones } from '../utils/firmware';
+import { resolveEntityPrefix } from '../utils/entityUtils';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -244,6 +245,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
   // Device mappings context - used to check if device has valid entity mappings
   const { hasValidMappings, clearCache, getMapping } = useDeviceMappings();
+  const { mapping: selectedDeviceMapping } = useDeviceMapping(selectedRoom?.deviceId);
   const deviceHasValidMappings = selectedRoom?.deviceId ? hasValidMappings(selectedRoom.deviceId) : false;
   const hasPropLiveStateForRoom = Boolean(
     propLiveState && selectedRoom?.deviceId && propLiveState.deviceId === selectedRoom.deviceId
@@ -504,12 +506,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
       loadedRoomRef.current = selectedRoom.id;
 
-      // Try to get entityNamePrefix from the room, or look it up from devices
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: selectedDeviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         return;
@@ -564,11 +566,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         return;
       }
 
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: selectedDeviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         setZoneAvailability({});
@@ -610,11 +613,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         return;
       }
 
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: selectedDeviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
@@ -658,11 +662,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         return;
       }
 
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: selectedDeviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         setPolygonZones([]);
@@ -783,14 +788,14 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const resolveZoneRestoreContext = useCallback(async () => {
     if (!selectedRoom?.deviceId) return null;
 
-    const device = devices.find((entry) => entry.id === selectedRoom.deviceId);
     const mapping = await getMapping(selectedRoom.deviceId);
     const profileId = selectedRoom.profileId || mapping?.profileId || null;
-    const entityNamePrefix =
-      selectedRoom.entityNamePrefix ||
-      device?.entityNamePrefix ||
-      mapping?.esphomeNodeName ||
-      null;
+    const entityNamePrefix = resolveEntityPrefix({
+      entityMappings: selectedRoom.entityMappings,
+      entityNamePrefix: selectedRoom.entityNamePrefix,
+      mappingPrefix: mapping?.esphomeNodeName,
+      devicePrefix: selectedDevice?.entityNamePrefix,
+    });
 
     if (!profileId) {
       setError('Device profile not found. Run entity discovery to sync the device.');
@@ -1048,11 +1053,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const handleTogglePolygonMode = async () => {
     if (!selectedRoom?.deviceId || !selectedRoom?.profileId) return;
 
-    let entityNamePrefix = selectedRoom.entityNamePrefix;
-    if (!entityNamePrefix) {
-      const device = devices.find(d => d.id === selectedRoom.deviceId);
-      entityNamePrefix = device?.entityNamePrefix;
-    }
+    const entityNamePrefix = resolveEntityPrefix({
+      entityMappings: selectedRoom.entityMappings,
+      entityNamePrefix: selectedRoom.entityNamePrefix,
+      mappingPrefix: selectedDeviceMapping?.esphomeNodeName,
+      devicePrefix: selectedDevice?.entityNamePrefix,
+    });
 
     if (!entityNamePrefix) return;
 
@@ -1175,12 +1181,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     try {
       const effectiveProfile = selectedRoom.profileId ?? selectedProfileId;
 
-      // Get entityNamePrefix from room or device
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: selectedDeviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (selectedRoom.deviceId && effectiveProfile && entityNamePrefix) {
         // Skip entityMappings if device has valid mappings stored

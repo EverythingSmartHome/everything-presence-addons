@@ -39,6 +39,7 @@ import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { DeviceMapping, discoverAndSaveMapping } from '../api/deviceMappings';
 import { fetchPolygonZonesFromDevice } from '../api/zones';
 import { compareVersions, getZoneMigrationThreshold, requiresZoneMigration } from '../utils/firmware';
+import { resolveEntityPrefix } from '../utils/entityUtils';
 import polygonMigrationGraphic from '../assets/polygon-migration.png';
 
 interface FirmwareUpdateSectionProps {
@@ -882,7 +883,10 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
     const mapping = backupMapping ?? (await getMapping(selectedDeviceId));
     const profileId = mapping?.profileId ?? getDeviceProfile(device)?.id ?? '';
-    const entityNamePrefix = device.entityNamePrefix || undefined;
+    const entityNamePrefix = resolveEntityPrefix({
+      mappingPrefix: mapping?.esphomeNodeName,
+      devicePrefix: device.entityNamePrefix,
+    }) ?? undefined;
 
     if (!profileId) {
       onErrorRef.current('Device profile not found. Run entity discovery to sync the device.');
@@ -1409,6 +1413,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     const deviceName =
       backupMapping?.deviceName ??
       device.name ??
+      backupMapping?.esphomeNodeName ??
       device.entityNamePrefix ??
       device.model ??
       'Device';
@@ -1907,6 +1912,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       const deviceName =
         backupMapping?.deviceName ??
         device.name ??
+        backupMapping?.esphomeNodeName ??
         device.entityNamePrefix ??
         device.model ??
         'Device';
@@ -1949,8 +1955,10 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       }
 
       // Before restoring zones, wait for polygon entities to become available after the update.
-      const entityNamePrefix =
-        device.entityNamePrefix ?? result.mapping?.esphomeNodeName ?? backupMapping?.esphomeNodeName ?? null;
+      const entityNamePrefix = resolveEntityPrefix({
+        mappingPrefix: result.mapping?.esphomeNodeName ?? backupMapping?.esphomeNodeName,
+        devicePrefix: device.entityNamePrefix,
+      });
       if (entityNamePrefix) {
         const backupId = migrationBackupId ?? lastBackupId ?? latestBackup?.id ?? null;
         const backup = backupId ? zoneBackups.find((item) => item.id === backupId) ?? null : null;

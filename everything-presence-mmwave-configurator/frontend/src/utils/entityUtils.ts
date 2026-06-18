@@ -68,3 +68,21 @@ export const getEffectiveEntityPrefix = (
   const derived = deriveEntityPrefix(entityMappings);
   return derived || entityNamePrefix || null;
 };
+
+/**
+ * Resolve the best available entity prefix across room state, saved mappings,
+ * and legacy device discovery fields.
+ */
+export const resolveEntityPrefix = (args: {
+  entityMappings?: EntityMappings;
+  entityNamePrefix?: string | null;
+  mappingPrefix?: string | null;
+  devicePrefix?: string | null;
+}): string | null => {
+  const derived = deriveEntityPrefix(args.entityMappings);
+  const explicitPrefix = args.entityNamePrefix?.trim();
+  const mappingPrefix = args.mappingPrefix?.trim();
+  const devicePrefix = args.devicePrefix?.trim();
+
+  return derived || explicitPrefix || mappingPrefix || devicePrefix || null;
+};
