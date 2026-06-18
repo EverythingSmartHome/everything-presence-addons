@@ -39,7 +39,7 @@ export class ZoneReader {
    */
   async readPolygonZones(
     entityMap: any,
-    entityNamePrefix: string,
+    entityNamePrefix: string | undefined,
     entityMappings?: EntityMappings,
     deviceId?: string
   ): Promise<ZonePolygon[]> {
@@ -190,7 +190,7 @@ export class ZoneReader {
    */
   async readZones(
     zoneMap: any,
-    entityNamePrefix: string,
+    entityNamePrefix: string | undefined,
     entityMappings?: EntityMappings,
     deviceId?: string
   ): Promise<ZoneRect[]> {

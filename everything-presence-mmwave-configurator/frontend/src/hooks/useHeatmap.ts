@@ -26,7 +26,7 @@ export const useHeatmap = (options: UseHeatmapOptions): UseHeatmapResult => {
   const { deviceId, profileId, entityNamePrefix, entityMappings, hours, enabled } = options;
 
   const load = useCallback(async () => {
-    if (!enabled || !deviceId || !profileId || !entityNamePrefix) {
+    if (!enabled || !deviceId || !profileId) {
       setData(null);
       return;
     }

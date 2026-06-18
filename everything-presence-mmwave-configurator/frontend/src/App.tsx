@@ -104,14 +104,11 @@ function App() {
       return;
     }
 
-    const entityParam = selectedRoom.entityNamePrefix
-      ? `&entityNamePrefix=${encodeURIComponent(selectedRoom.entityNamePrefix)}`
-      : '';
     const mappingsParam = selectedRoom.entityMappings
       ? `&entityMappings=${encodeURIComponent(JSON.stringify(selectedRoom.entityMappings))}`
       : '';
     const restUrl = ingressAware(
-      `api/live/${selectedRoom.deviceId}/state?profileId=${selectedProfile.id}${entityParam}${mappingsParam}`
+      `api/live/${selectedRoom.deviceId}/state?profileId=${selectedProfile.id}${mappingsParam}`
     );
 
     try {
@@ -172,7 +169,6 @@ function App() {
               type: 'subscribe',
               deviceId: selectedRoom.deviceId,
               profileId: selectedProfile.id,
-              entityNamePrefix: selectedRoom.entityNamePrefix,
               entityMappings: selectedRoom.entityMappings,
             }),
           );
@@ -182,7 +178,7 @@ function App() {
           try {
             const message = JSON.parse(event.data);
 
-            if (message.type === 'warning' && message.code === 'MAPPING_NOT_FOUND') {
+            if ((message.type === 'warning' || message.type === 'error') && message.code === 'MAPPING_NOT_FOUND') {
               // Device has no entity mappings - user should run entity discovery
               console.warn('MAPPING_NOT_FOUND:', message.message);
               // Set error to prompt user to configure entity mappings

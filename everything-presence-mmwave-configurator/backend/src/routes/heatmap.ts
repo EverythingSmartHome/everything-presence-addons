@@ -5,6 +5,7 @@ import { ZoneReader } from '../ha/zoneReader';
 import type { IHaReadTransport } from '../ha/readTransport';
 import type { HaAuthConfig } from '../ha/types';
 import type { EntityMappings } from '../domain/types';
+import { deviceMappingStorage } from '../config/deviceMappingStorage';
 import { logger } from '../logger';
 
 export interface HeatmapRouterDependencies {
@@ -25,10 +26,10 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
    * Generate heatmap data from HA history.
    */
   router.get('/:deviceId/heatmap', async (req, res) => {
-    const { profileId, entityNamePrefix, hours, resolution, entityMappings: entityMappingsJson } = req.query;
+    const { profileId, hours, resolution, entityMappings: entityMappingsJson } = req.query;
 
-    if (!profileId || !entityNamePrefix) {
-      return res.status(400).json({ message: 'profileId and entityNamePrefix are required' });
+    if (!profileId) {
+      return res.status(400).json({ message: 'profileId is required' });
     }
 
     const profile = profileLoader.getProfileById(profileId as string);
@@ -58,13 +59,16 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
     try {
       // Get deviceId from route params
       const { deviceId } = req.params;
+      if (!deviceMappingStorage.hasMapping(deviceId) && !entityMappings) {
+        return res.status(409).json({ message: 'Device mapping not found. Run entity re-sync to create mappings.', code: 'MAPPING_NOT_FOUND' });
+      }
 
       // Get current zones for zone stats calculation
       const entityMap = profile.entityMap as Record<string, unknown>;
       let zones;
       try {
-        const polygonZones = await zoneReader.readPolygonZones(entityMap, entityNamePrefix as string, entityMappings, deviceId);
-        const rectZones = await zoneReader.readZones(entityMap, entityNamePrefix as string, entityMappings, deviceId);
+        const polygonZones = await zoneReader.readPolygonZones(entityMap, undefined, entityMappings, deviceId);
+        const rectZones = await zoneReader.readZones(entityMap, undefined, entityMappings, deviceId);
         // Deduplicate zones by ID (prefer polygon zones if both exist)
         const zoneMap = new Map<string, typeof polygonZones[0] | typeof rectZones[0]>();
         for (const zone of rectZones) {
@@ -80,7 +84,7 @@ export const createHeatmapRouter = (deps: HeatmapRouterDependencies): Router => 
       }
 
       const heatmap = await heatmapService.generateHeatmap(
-        entityNamePrefix as string,
+        undefined,
         hoursNum,
         resolutionNum,
         zones,

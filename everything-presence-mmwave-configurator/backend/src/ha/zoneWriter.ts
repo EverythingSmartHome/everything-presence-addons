@@ -110,7 +110,7 @@ export class ZoneWriter {
   async applyPolygonZones(
     entityMap: any,
     zones: ZonePolygon[],
-    entityNamePrefix: string,
+    entityNamePrefix: string | undefined,
     entityMappings?: EntityMappings,
     deviceId?: string
   ): Promise<ZoneWriteResult> {
@@ -240,7 +240,7 @@ export class ZoneWriter {
    */
   async setPolygonMode(
     entityMap: any,
-    entityNamePrefix: string,
+    entityNamePrefix: string | undefined,
     enabled: boolean,
     entityMappings?: EntityMappings,
     deviceId?: string
@@ -287,7 +287,7 @@ export class ZoneWriter {
   async applyZones(
     zoneMap: any,
     zones: ZoneRect[],
-    entityNamePrefix: string,
+    entityNamePrefix: string | undefined,
     entityMappings?: EntityMappings,
     deviceId?: string
   ): Promise<ZoneWriteResult> {
