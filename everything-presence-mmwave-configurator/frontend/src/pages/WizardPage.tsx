@@ -27,6 +27,7 @@ import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import { usesPolygonOnlyZones } from '../utils/firmware';
+import { resolveEntityPrefix } from '../utils/entityUtils';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -362,11 +363,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         return;
       }
 
-      let entityNamePrefix = selectedRoom?.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === currentDeviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const mapping = await getMapping(currentDeviceId);
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom?.entityMappings,
+        entityNamePrefix: selectedRoom?.entityNamePrefix,
+        mappingPrefix: mapping?.esphomeNodeName,
+        devicePrefix: devices.find((device) => device.id === currentDeviceId)?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         setEntryZonesAvailable(null);
@@ -840,12 +843,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         return;
       }
 
-      // Get entityNamePrefix from room or fall back to device
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const mapping = await getMapping(selectedRoom.deviceId);
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: mapping?.esphomeNodeName,
+        devicePrefix: devices.find((device) => device.id === selectedRoom.deviceId)?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         console.warn('Cannot load zones: entityNamePrefix not found for room or device');
@@ -922,11 +926,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         return;
       }
 
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const mapping = await getMapping(selectedRoom.deviceId);
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: mapping?.esphomeNodeName,
+        devicePrefix: devices.find((device) => device.id === selectedRoom.deviceId)?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
@@ -1194,12 +1200,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       return;
     }
 
-    // Get entityNamePrefix from room or device
-    let entityNamePrefix = selectedRoom?.entityNamePrefix;
-    if (!entityNamePrefix) {
-      const device = devices.find(d => d.id === deviceId);
-      entityNamePrefix = device?.entityNamePrefix;
-    }
+    const mapping = await getMapping(deviceId);
+    const entityNamePrefix = resolveEntityPrefix({
+      entityMappings: selectedRoom?.entityMappings,
+      entityNamePrefix: selectedRoom?.entityNamePrefix,
+      mappingPrefix: mapping?.esphomeNodeName,
+      devicePrefix: devices.find((device) => device.id === deviceId)?.entityNamePrefix,
+    });
 
     if (!entityNamePrefix) {
       setError('Cannot push zones: device entity name prefix not found');
@@ -1242,11 +1249,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const handleEnablePolygonMode = async () => {
     if (!selectedRoom?.deviceId || !selectedRoom?.profileId) return;
 
-    let entityNamePrefix = selectedRoom.entityNamePrefix;
-    if (!entityNamePrefix) {
-      const device = devices.find(d => d.id === selectedRoom.deviceId);
-      entityNamePrefix = device?.entityNamePrefix;
-    }
+    const mapping = await getMapping(selectedRoom.deviceId);
+    const entityNamePrefix = resolveEntityPrefix({
+      entityMappings: selectedRoom.entityMappings,
+      entityNamePrefix: selectedRoom.entityNamePrefix,
+      mappingPrefix: mapping?.esphomeNodeName,
+      devicePrefix: devices.find((device) => device.id === selectedRoom.deviceId)?.entityNamePrefix,
+    });
 
     if (!entityNamePrefix) {
       setError('Cannot enable polygon mode: device entity name prefix not found');

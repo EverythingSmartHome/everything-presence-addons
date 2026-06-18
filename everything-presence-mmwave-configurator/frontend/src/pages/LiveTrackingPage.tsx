@@ -30,6 +30,7 @@ import { useDeviceMappings, useDeviceMapping } from '../contexts/DeviceMappingsC
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
 import { usesPolygonOnlyZones } from '../utils/firmware';
+import { resolveEntityPrefix } from '../utils/entityUtils';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -321,10 +322,18 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
 
   // Derive entityNamePrefix for heatmap
   const entityNamePrefix = useMemo(() => {
-    if (selectedRoom?.entityNamePrefix) return selectedRoom.entityNamePrefix;
-    const device = devices.find(d => d.id === selectedRoom?.deviceId);
-    return device?.entityNamePrefix ?? null;
-  }, [selectedRoom, devices]);
+    return resolveEntityPrefix({
+      entityMappings: selectedRoom?.entityMappings,
+      entityNamePrefix: selectedRoom?.entityNamePrefix,
+      mappingPrefix: deviceMapping?.esphomeNodeName,
+      devicePrefix: selectedDevice?.entityNamePrefix,
+    });
+  }, [
+    deviceMapping?.esphomeNodeName,
+    selectedDevice?.entityNamePrefix,
+    selectedRoom?.entityMappings,
+    selectedRoom?.entityNamePrefix,
+  ]);
 
   // Heatmap data - skip entityMappings if device has valid mappings stored
   const { data: heatmapData, loading: heatmapLoading, refresh: refreshHeatmap } = useHeatmap({
@@ -572,12 +581,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
-      // Try to get entityNamePrefix from the room, or look it up from devices
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: deviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         return;
@@ -655,11 +664,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: deviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         setPolygonModeStatus({ supported: false, enabled: false, controllable: false });
@@ -722,11 +732,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
-      let entityNamePrefix = selectedRoom.entityNamePrefix;
-      if (!entityNamePrefix) {
-        const device = devices.find(d => d.id === selectedRoom.deviceId);
-        entityNamePrefix = device?.entityNamePrefix;
-      }
+      const entityNamePrefix = resolveEntityPrefix({
+        entityMappings: selectedRoom.entityMappings,
+        entityNamePrefix: selectedRoom.entityNamePrefix,
+        mappingPrefix: deviceMapping?.esphomeNodeName,
+        devicePrefix: selectedDevice?.entityNamePrefix,
+      });
 
       if (!entityNamePrefix) {
         setPolygonZones([]);
