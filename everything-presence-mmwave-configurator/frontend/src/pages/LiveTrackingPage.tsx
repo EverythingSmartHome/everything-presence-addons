@@ -177,8 +177,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     hasLiveStateForRoom && typeof liveState?.config?.installationAngle === 'number'
       ? liveState.config.installationAngle
       : 0;
-  const upsideDownMounting =
-    hasLiveStateForRoom && liveState?.config?.upsideDownMounting === true;
 
   const heightCoverageConfig = useMemo(() => {
     if (!selectedRoom?.devicePlacement || !isCeilingMount) return null;
@@ -213,12 +211,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     const angleRad = (((rotationDeg ?? 0) + installationAngle) * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
-    const localX = upsideDownMounting ? -deviceX : deviceX;
+    // Orientation (upside-down mounting) is normalised on-device by the firmware,
+    // so Target X is already in the correct frame here — do not re-flip it.
+    const localX = deviceX;
     return {
       x: localX * cos - deviceY * sin + x,
       y: localX * sin + deviceY * cos + y,
     };
-  }, [installationAngle, selectedRoom?.devicePlacement, upsideDownMounting]);
+  }, [installationAngle, selectedRoom?.devicePlacement]);
 
   const showCoverageOverlay = showDeviceRadar;
 
@@ -1157,7 +1157,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               // Heatmap overlay (renders behind everything else)
               // Pass devicePlacement to transform device-relative coordinates to room coordinates
               const heatmapOverlay = showLiveOverlays ? (
-                <HeatmapOverlay data={heatmapData} visible={heatmapEnabled} toCanvas={toCanvas} devicePlacement={selectedRoom?.devicePlacement} installationAngle={installationAngle} upsideDownMounting={upsideDownMounting} intensityThreshold={heatmapThreshold} roomShellPoints={roomShellPoints} />
+                <HeatmapOverlay data={heatmapData} visible={heatmapEnabled} toCanvas={toCanvas} devicePlacement={selectedRoom?.devicePlacement} installationAngle={installationAngle} intensityThreshold={heatmapThreshold} roomShellPoints={roomShellPoints} />
               ) : null;
 
               // Define colors for each target (up to 3 targets)
