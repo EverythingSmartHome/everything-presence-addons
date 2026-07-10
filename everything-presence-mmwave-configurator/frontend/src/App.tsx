@@ -503,8 +503,6 @@ function App() {
   // Transform device-relative coordinates to room coordinates
   const installationAngle =
     typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
-  const upsideDownMounting = liveState?.config?.upsideDownMounting === true;
-
   const deviceToRoom = React.useCallback((deviceX: number, deviceY: number) => {
     if (!selectedRoom?.devicePlacement) {
       return { x: deviceX, y: deviceY };
@@ -515,7 +513,9 @@ function App() {
     const angleRad = (effectiveRotationDeg * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
-    const localX = upsideDownMounting ? -deviceX : deviceX;
+    // Orientation (upside-down mounting) is normalised on-device by the firmware,
+    // so Target X is already in the correct frame here — do not re-flip it.
+    const localX = deviceX;
 
     const rotatedX = localX * cos - deviceY * sin;
     const rotatedY = localX * sin + deviceY * cos;
@@ -524,7 +524,7 @@ function App() {
       x: rotatedX + x,
       y: rotatedY + y,
     };
-  }, [selectedRoom, installationAngle, upsideDownMounting]);
+  }, [selectedRoom, installationAngle]);
 
   // Compute target positions in room coordinates
   const targetPositions = useMemo(() => {
