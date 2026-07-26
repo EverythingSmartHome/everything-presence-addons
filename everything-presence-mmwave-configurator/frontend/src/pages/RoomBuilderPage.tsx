@@ -88,7 +88,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [angleSnapEnabled, setAngleSnapEnabled] = useState(false);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [cursorDelta, setCursorDelta] = useState<{ dx: number; dy: number; len: number } | null>(null);
-  const [displayUnits, setDisplayUnits] = useState<'metric' | 'imperial'>('metric');
   const [zoom, setZoom] = useState(1.1);
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -107,6 +106,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     showZoneLabels, setShowZoneLabels,
     zoneLabelScale, setZoneLabelScale,
     clipRadarToWalls, setClipRadarToWalls,
+    units: displayUnits, setUnits: setDisplayUnits,
   } = useDisplaySettings();
   const isMobileCanvas = useIsMobileCanvas();
   const [panOffsetMm, setPanOffsetMm] = useState<{ x: number; y: number }>({ x: 0, y: 0 });

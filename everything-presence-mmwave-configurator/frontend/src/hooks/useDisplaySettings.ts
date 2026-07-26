@@ -15,6 +15,7 @@ export interface DisplaySettings {
   zoneLabelScale: number;
   showAlignedDirection: boolean;
   clipRadarToWalls: boolean;
+  units: 'metric' | 'imperial';
   // Heatmap settings
   heatmapEnabled: boolean;
   heatmapHours: number;
@@ -38,6 +39,7 @@ const defaultSettings: DisplaySettings = {
   zoneLabelScale: 1,
   showAlignedDirection: false,
   clipRadarToWalls: true,
+  units: 'metric',
   // Heatmap defaults
   heatmapEnabled: false,
   heatmapHours: 24,
@@ -131,6 +133,10 @@ export const useDisplaySettings = () => {
     setSettings((prev) => ({ ...prev, clipRadarToWalls: value }));
   }, []);
 
+  const setUnits = useCallback((value: 'metric' | 'imperial') => {
+    setSettings((prev) => ({ ...prev, units: value }));
+  }, []);
+
   const setHeatmapEnabled = useCallback((value: boolean) => {
     setSettings((prev) => ({ ...prev, heatmapEnabled: value }));
   }, []);
@@ -159,6 +165,7 @@ export const useDisplaySettings = () => {
     zoneLabelScale: settings.zoneLabelScale,
     showAlignedDirection: settings.showAlignedDirection,
     clipRadarToWalls: settings.clipRadarToWalls,
+    units: settings.units,
     heatmapEnabled: settings.heatmapEnabled,
     heatmapHours: settings.heatmapHours,
     heatmapThreshold: settings.heatmapThreshold,
@@ -177,6 +184,7 @@ export const useDisplaySettings = () => {
     setZoneLabelScale,
     setShowAlignedDirection,
     setClipRadarToWalls,
+    setUnits,
     setHeatmapEnabled,
     setHeatmapHours,
     setHeatmapThreshold,
