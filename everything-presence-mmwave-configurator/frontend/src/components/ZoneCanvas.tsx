@@ -641,6 +641,10 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
           // Get device rotation for SVG transform
           const rotationDeg = devicePlacement ? effectiveRotationDeg : 0;
 
+          // Label anchor in canvas space, so the label can be drawn upright
+          // (untransformed) at the zone centre like polygon zone labels are
+          const canvasCenter = toCanvas(deviceToRoom(zone.x + zone.width / 2, zone.y + zone.height / 2));
+
           const isSelected = selectedId === zone.id;
 
           // Zone colors: different colors for each regular zone, fixed colors for special types
@@ -703,14 +707,14 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
               />
               {showZoneLabels && (
                 <text
-                  x={canvasWidth / 2}
-                  y={20 * effectiveZoneLabelScale}
+                  x={canvasCenter.x}
+                  y={canvasCenter.y}
                   fill="white"
                   fontSize={13 * effectiveZoneLabelScale}
                   fontWeight="600"
                   textAnchor="middle"
+                  dominantBaseline="middle"
                   pointerEvents="none"
-                  transform={`translate(${canvasTopLeft.x}, ${canvasTopLeft.y}) rotate(${rotationDeg})`}
                   style={{
                     filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.8))',
                     textShadow: '0 1px 3px rgba(0,0,0,0.8)'
