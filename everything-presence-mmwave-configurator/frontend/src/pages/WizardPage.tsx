@@ -104,7 +104,6 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [roomId, setRoomId] = useState<string | null>(rooms[0]?.id ?? null);
   const [roomPath, setRoomPath] = useState<'new' | 'existing' | 'skip' | null>(null);
   const [newRoomName, setNewRoomName] = useState('');
-  const [units, setUnits] = useState<'metric' | 'imperial'>('metric');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pushingZones, setPushingZones] = useState(false);
@@ -142,6 +141,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     showZoneLabels, setShowZoneLabels,
     zoneLabelScale, setZoneLabelScale,
     clipRadarToWalls, setClipRadarToWalls,
+    units, setUnits,
   } = useDisplaySettings();
 
   // Cursor position tracking
