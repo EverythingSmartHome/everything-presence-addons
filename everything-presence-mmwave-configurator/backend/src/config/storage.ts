@@ -45,6 +45,8 @@ const readSettings = (): AppSettings => {
     return {
       wizardCompleted: false,
       wizardStep: 'device',
+      wizardDeviceId: undefined,
+      wizardProfileId: undefined,
       outlineDone: false,
       placementDone: false,
       zonesReady: false,
@@ -56,9 +58,13 @@ const readSettings = (): AppSettings => {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
       const rawDefaultRoom = (parsed as any).defaultRoomId;
+      const rawWizardDeviceId = (parsed as any).wizardDeviceId;
+      const rawWizardProfileId = (parsed as any).wizardProfileId;
       return {
         wizardCompleted: Boolean((parsed as any).wizardCompleted),
         wizardStep: typeof (parsed as any).wizardStep === 'string' ? (parsed as any).wizardStep : 'device',
+        wizardDeviceId: typeof rawWizardDeviceId === 'string' ? rawWizardDeviceId : rawWizardDeviceId === null ? null : undefined,
+        wizardProfileId: typeof rawWizardProfileId === 'string' ? rawWizardProfileId : rawWizardProfileId === null ? null : undefined,
         outlineDone: Boolean((parsed as any).outlineDone),
         placementDone: Boolean((parsed as any).placementDone),
         zonesReady: Boolean((parsed as any).zonesReady),
@@ -73,6 +79,8 @@ const readSettings = (): AppSettings => {
     return {
       wizardCompleted: false,
       wizardStep: 'device',
+      wizardDeviceId: undefined,
+      wizardProfileId: undefined,
       outlineDone: false,
       placementDone: false,
       zonesReady: false,
@@ -83,6 +91,8 @@ const readSettings = (): AppSettings => {
     return {
       wizardCompleted: false,
       wizardStep: 'device',
+      wizardDeviceId: undefined,
+      wizardProfileId: undefined,
       outlineDone: false,
       placementDone: false,
       zonesReady: false,
