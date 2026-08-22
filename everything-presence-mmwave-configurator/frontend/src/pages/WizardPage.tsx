@@ -44,6 +44,7 @@ interface WizardPageProps {
   onRoomUpdate?: (room: RoomConfig) => void;
   initialStep?: string;
   onStepChange?: (key: StepKey) => void;
+  onSelectionChange?: (deviceId: string | null, profileId: string | null) => void;
   outlineDone: boolean;
   placementDone: boolean;
   zonesReady: boolean;
@@ -90,6 +91,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   onRoomUpdate,
   initialStep = 'device',
   onStepChange,
+  onSelectionChange,
   outlineDone,
   placementDone,
   zonesReady,
@@ -101,6 +103,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 }) => {
   const [deviceId, setDeviceId] = useState<string | null>(selectedDeviceId ?? null);
   const [profileId, setProfileId] = useState<string | null>(selectedProfileId ?? null);
+
   const [roomId, setRoomId] = useState<string | null>(rooms[0]?.id ?? null);
   const [roomPath, setRoomPath] = useState<'new' | 'existing' | 'skip' | null>(null);
   const [newRoomName, setNewRoomName] = useState('');
@@ -112,6 +115,15 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Entity discovery mappings (discovered after device selection)
   const [discoveredMappings, setDiscoveredMappings] = useState<EntityMappings | null>(null);
+
+  // Report device/profile selection changes to parent so they persist across reloads
+  const lastSelectionRef = useRef<{ deviceId: string | null; profileId: string | null } | null>(null);
+  useEffect(() => {
+    const prev = lastSelectionRef.current;
+    if (prev?.deviceId === deviceId && prev?.profileId === profileId) return;
+    lastSelectionRef.current = { deviceId, profileId };
+    onSelectionChange?.(deviceId, profileId);
+  }, [deviceId, profileId, onSelectionChange]);
 
   // Canvas controls for embedded room drawing
   const [canvasZoom, setCanvasZoom] = useState(1.1);

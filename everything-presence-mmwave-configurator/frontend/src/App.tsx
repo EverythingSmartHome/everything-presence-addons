@@ -29,6 +29,8 @@ function App() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [wizardCompleted, setWizardCompleted] = useState<boolean>(false);
   const [wizardStep, setWizardStep] = useState<string>('device');
+  const [wizardDeviceId, setWizardDeviceId] = useState<string | null>(null);
+  const [wizardProfileId, setWizardProfileId] = useState<string | null>(null);
   const [wizardOutlineDone, setWizardOutlineDone] = useState<boolean>(false);
   const [wizardPlacementDone, setWizardPlacementDone] = useState<boolean>(false);
   const [wizardZonesReady, setWizardZonesReady] = useState<boolean>(false);
@@ -50,6 +52,8 @@ function App() {
         setRooms(roomsRes.rooms);
         setWizardCompleted(settingsRes.settings.wizardCompleted);
         setWizardStep(settingsRes.settings.wizardStep ?? 'device');
+        setWizardDeviceId(settingsRes.settings.wizardDeviceId ?? null);
+        setWizardProfileId(settingsRes.settings.wizardProfileId ?? null);
         setWizardOutlineDone(Boolean(settingsRes.settings.outlineDone));
         setWizardPlacementDone(Boolean(settingsRes.settings.placementDone));
         setWizardZonesReady(Boolean(settingsRes.settings.zonesReady));
@@ -586,7 +590,7 @@ function App() {
         // Reset wizard step when navigating to Add Device
         if (view === 'wizard') {
           setWizardStep('device');
-          updateSettings({ wizardStep: 'device' }).catch(() => null);
+          updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
         }
         setView(view);
       }}
@@ -611,12 +615,14 @@ function App() {
             devices={devices}
             profiles={profiles}
             rooms={rooms}
-            selectedDeviceId={newRoomDeviceId}
-            selectedProfileId={selectedProfileId}
+            selectedDeviceId={wizardDeviceId ?? newRoomDeviceId}
+            selectedProfileId={wizardProfileId ?? selectedProfileId}
             onBack={() => {
               // Reset wizard when going back
               setWizardStep('device');
-              updateSettings({ wizardStep: 'device' }).catch(() => null);
+              setWizardDeviceId(null);
+              setWizardProfileId(null);
+              updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               setView('dashboard');
             }}
             onCreateRoom={async (name, deviceId, profileId, entityMappings) => {
@@ -642,15 +648,22 @@ function App() {
               setRooms((prev) => prev.map((r) => (r.id === updatedRoom.id ? updatedRoom : r)));
             }}
             onComplete={() => {
-              updateSettings({ wizardCompleted: true }).catch(() => null);
+              updateSettings({ wizardCompleted: true, wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               setWizardCompleted(true);
               setWizardStep('finish');
+              setWizardDeviceId(null);
+              setWizardProfileId(null);
               setView('dashboard');
             }}
             initialStep={wizardStep}
             onStepChange={(key) => {
               setWizardStep(key);
               updateSettings({ wizardStep: key }).catch(() => null);
+            }}
+            onSelectionChange={(deviceId, profileId) => {
+              setWizardDeviceId(deviceId);
+              setWizardProfileId(profileId);
+              updateSettings({ wizardDeviceId: deviceId, wizardProfileId: profileId }).catch(() => null);
             }}
             outlineDone={wizardOutlineDone}
             placementDone={wizardPlacementDone}
@@ -676,7 +689,7 @@ function App() {
             onNavigate={(targetView) => {
               if (targetView === 'wizard') {
                 setWizardStep('device');
-                updateSettings({ wizardStep: 'device' }).catch(() => null);
+                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               }
               // Map 'liveDashboard' to 'dashboard' for the main live tracking view
               const mappedView = targetView === 'liveDashboard' ? 'dashboard' : targetView;
@@ -702,7 +715,7 @@ function App() {
             onNavigate={(targetView) => {
               if (targetView === 'wizard') {
                 setWizardStep('device');
-                updateSettings({ wizardStep: 'device' }).catch(() => null);
+                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               }
               // Map 'liveDashboard' to 'dashboard' for the main live tracking view
               const mappedView = targetView === 'liveDashboard' ? 'dashboard' : targetView;
@@ -732,7 +745,7 @@ function App() {
               // Reset wizard step when navigating to Add Device
               if (view === 'wizard') {
                 setWizardStep('device');
-                updateSettings({ wizardStep: 'device' }).catch(() => null);
+                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               }
               setView(view);
             }}

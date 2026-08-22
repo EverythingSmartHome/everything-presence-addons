@@ -226,6 +226,8 @@ export interface RoomConfig {
 export interface AppSettings {
   wizardCompleted: boolean;
   wizardStep?: string;
+  wizardDeviceId?: string | null;
+  wizardProfileId?: string | null;
   outlineDone?: boolean;
   placementDone?: boolean;
   zonesReady?: boolean;
