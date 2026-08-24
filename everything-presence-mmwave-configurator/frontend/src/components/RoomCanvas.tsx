@@ -81,6 +81,8 @@ interface RoomCanvasProps {
     deviceElement?: React.ReactNode;
   }) => React.ReactNode;
   lockShell?: boolean;
+  showAllWallLengthLabels?: boolean;
+  onWallLengthChange?: (segmentIndex: number, lengthMm: number) => void;
   furniture?: FurnitureInstance[];
   selectedFurnitureId?: string | null;
   onFurnitureSelect?: (id: string | null) => void;
@@ -547,6 +549,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   onSegmentInsert,
   renderOverlay,
   lockShell = false,
+  showAllWallLengthLabels = false,
+  onWallLengthChange,
   furniture = [],
   selectedFurnitureId,
   onFurnitureSelect,
@@ -592,6 +596,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [editingWallLength, setEditingWallLength] = useState<number | null>(null);
+  const [wallLengthDraft, setWallLengthDraft] = useState('');
   const [dragDevice, setDragDevice] = useState<boolean>(false);
   const [panDrag, setPanDrag] = useState<{ start: Point; base: { x: number; y: number } } | null>(null);
   const [furnitureDrag, setFurnitureDrag] = useState<{ id: string; start: Point; basePos: Point; currentPos?: Point } | null>(null);
@@ -1166,6 +1172,64 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       vectorEffect="non-scaling-stroke"
                       onPointerDown={handleDragStart(idx)}
                     />
+                  </g>
+                );
+              })}
+            {showAllWallLengthLabels &&
+              safePoints.map((point, index) => {
+                const next = safePoints[(index + 1) % safePoints.length];
+                const start = toCanvasCoord(point);
+                const end = toCanvasCoord(next);
+                const midX = (start.x + end.x) / 2;
+                const midY = (start.y + end.y) / 2;
+                const lengthMm = Math.hypot(next.x - point.x, next.y - point.y);
+                const label = formatLength(lengthMm);
+                const isEditing = editingWallLength === index;
+                const commit = () => {
+                  const scale = displayUnits === 'imperial' ? 304.8 : 1000;
+                  const nextLength = Number(wallLengthDraft) * scale;
+                  if (Number.isFinite(nextLength) && nextLength > 0) onWallLengthChange?.(index, nextLength);
+                  setEditingWallLength(null);
+                };
+                if (isEditing) {
+                  return (
+                    <foreignObject key={`locked-length-${index}`} x={midX - 38} y={midY - 16} width={76} height={32}>
+                      <input
+                        autoFocus
+                        aria-label={`Wall ${index + 1} length in ${displayUnits === 'imperial' ? 'feet' : 'meters'}`}
+                        type="number"
+                        min="0"
+                        step={displayUnits === 'imperial' ? 0.25 : 0.1}
+                        value={wallLengthDraft}
+                        onChange={(event) => setWallLengthDraft(event.target.value)}
+                        onBlur={commit}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === 'Enter') event.currentTarget.blur();
+                          if (event.key === 'Escape') setEditingWallLength(null);
+                        }}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        className="h-8 w-full rounded-md border border-aqua-400 bg-slate-950 px-1 text-center text-xs font-semibold text-white outline-none"
+                      />
+                    </foreignObject>
+                  );
+                }
+                return (
+                  <g
+                    key={`locked-length-${index}`}
+                    role={onWallLengthChange ? 'button' : undefined}
+                    aria-label={onWallLengthChange ? `Edit wall ${index + 1} length, currently ${label}` : undefined}
+                    className={onWallLengthChange ? 'cursor-pointer' : undefined}
+                    onClick={(event) => {
+                      if (!onWallLengthChange) return;
+                      event.stopPropagation();
+                      const scale = displayUnits === 'imperial' ? 304.8 : 1000;
+                      setWallLengthDraft(String(Number((lengthMm / scale).toFixed(2))));
+                      setEditingWallLength(index);
+                    }}
+                  >
+                    <rect x={midX - 27} y={midY - 10} width={54} height={20} rx={5} fill={canvasColors.outsideRoom} stroke="#22d3ee99" />
+                    <text x={midX} y={midY + 4} fill={isDark ? '#e2e8f0' : '#1e293b'} fontSize="11" fontWeight="600" textAnchor="middle">{label}</text>
                   </g>
                 );
               })}
