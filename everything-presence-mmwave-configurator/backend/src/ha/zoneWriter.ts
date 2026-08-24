@@ -1,6 +1,6 @@
 import { IHaWriteClient } from './writeClient';
 import { ZoneRect, ZonePolygon, EntityMappings } from '../domain/types';
-import { polygonToText } from '../domain/polygonUtils';
+import { isValidPolygon, polygonToText } from '../domain/polygonUtils';
 import { EntityResolver } from '../domain/entityResolver';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { logger } from '../logger';
@@ -138,6 +138,10 @@ export class ZoneWriter {
         const key = `zone${idx + 1}`;
         const entityId = resolvePolygon('polygon', idx + 1, 'polygonZoneEntities', key, polyMap[key]);
         if (entityId) {
+          if (!isValidPolygon(zone.vertices)) {
+            logger.warn({ entityId, zoneId: zone.id, vertices: zone.vertices.length }, 'Skipping polygon zone with fewer than 3 distinct vertices');
+            return;
+          }
           const textValue = polygonToText(zone.vertices);
           logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting polygon zone');
           tasks.push({
@@ -170,6 +174,10 @@ export class ZoneWriter {
         const key = `exclusion${idx + 1}`;
         const entityId = resolvePolygon('polygonExclusion', idx + 1, 'polygonExclusionEntities', key, polyMap[key]);
         if (entityId) {
+          if (!isValidPolygon(zone.vertices)) {
+            logger.warn({ entityId, zoneId: zone.id, vertices: zone.vertices.length }, 'Skipping exclusion polygon with fewer than 3 distinct vertices');
+            return;
+          }
           const textValue = polygonToText(zone.vertices);
           logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting exclusion polygon');
           tasks.push({
@@ -201,6 +209,10 @@ export class ZoneWriter {
         const key = `entry${idx + 1}`;
         const entityId = resolvePolygon('polygonEntry', idx + 1, 'polygonEntryEntities', key, polyMap[key]);
         if (entityId) {
+          if (!isValidPolygon(zone.vertices)) {
+            logger.warn({ entityId, zoneId: zone.id, vertices: zone.vertices.length }, 'Skipping entry polygon with fewer than 3 distinct vertices');
+            return;
+          }
           const textValue = polygonToText(zone.vertices);
           logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting entry polygon');
           tasks.push({

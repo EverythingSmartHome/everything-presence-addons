@@ -44,6 +44,7 @@ import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { MIN_POLYGON_VERTICES, canDeleteVertex, deleteVertex } from '../utils/polygonVertices';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -89,6 +90,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const [rooms, setRooms] = useState<RoomConfig[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  // Selected polygon node (vertex) for deletion; null when no node is picked.
+  const [selectedVertex, setSelectedVertex] = useState<{ zoneId: string; vertexIndex: number } | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [rangeMm, setRangeMm] = useState(15000);
   const [error, setError] = useState<string | null>(null);
@@ -781,6 +784,84 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       setSelectedZoneId(nextZones[0].id);
     }
   };
+
+  const handleVertexSelect = useCallback((selection: { zoneId: string; vertexIndex: number } | null) => {
+    // Ceiling slice polygons are generated from slice config, so their nodes
+    // are not hand-editable.
+    if (isCeilingSliceMode || !polygonModeStatus.enabled) {
+      setSelectedVertex(null);
+      return;
+    }
+    setSelectedVertex(selection);
+  }, [isCeilingSliceMode, polygonModeStatus.enabled]);
+
+  const deletePolygonVertex = useCallback((zoneId: string, vertexIndex: number) => {
+    if (isCeilingSliceMode || !polygonModeStatus.enabled) return;
+    const target = polygonZones.find((zone) => zone.id === zoneId);
+    if (!target) return;
+    if (!canDeleteVertex(target.vertices, vertexIndex)) {
+      setWarning(`Polygon zones need at least ${MIN_POLYGON_VERTICES} nodes, so this one cannot be deleted.`);
+      return;
+    }
+    setPolygonZones(polygonZones.map((zone) => (
+      zone.id === zoneId
+        ? { ...zone, vertices: deleteVertex(zone.vertices, vertexIndex) }
+        : zone
+    )));
+    setSelectedVertex(null);
+  }, [isCeilingSliceMode, polygonModeStatus.enabled, polygonZones]);
+
+  const deleteSelectedVertex = useCallback(() => {
+    if (!selectedVertex) return;
+    deletePolygonVertex(selectedVertex.zoneId, selectedVertex.vertexIndex);
+  }, [deletePolygonVertex, selectedVertex]);
+
+  // Drop the node selection whenever it stops pointing at an editable node
+  // (zone deleted/renumbered, node removed, mode switched, zone deselected).
+  useEffect(() => {
+    if (!selectedVertex) return;
+    if (!polygonModeStatus.enabled || isCeilingSliceMode) {
+      setSelectedVertex(null);
+      return;
+    }
+    if (selectedZoneId !== selectedVertex.zoneId) {
+      setSelectedVertex(null);
+      return;
+    }
+    const zone = polygonZones.find((candidate) => candidate.id === selectedVertex.zoneId);
+    if (!zone || selectedVertex.vertexIndex >= zone.vertices.length) {
+      setSelectedVertex(null);
+    }
+  }, [isCeilingSliceMode, polygonModeStatus.enabled, polygonZones, selectedVertex, selectedZoneId]);
+
+  // Delete/Backspace removes the selected polygon node; Escape clears it.
+  useEffect(() => {
+    if (!selectedVertex || !polygonModeStatus.enabled || isCeilingSliceMode) return;
+
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isEditable =
+        target?.isContentEditable ||
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        tag === 'button';
+      if (isEditable) return;
+
+      if (e.key === 'Escape') {
+        setSelectedVertex(null);
+        return;
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault();
+        deleteSelectedVertex();
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [deleteSelectedVertex, isCeilingSliceMode, polygonModeStatus.enabled, selectedVertex]);
 
   const resolveZoneRestoreContext = useCallback(async () => {
     if (!selectedRoom?.deviceId) return null;
@@ -1706,6 +1787,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             polygonLateralOnlyAxis={isCeilingSliceMode ? ceilingSliceConfig.axis : undefined}
             selectedId={selectedZoneId}
             onSelect={(id) => setSelectedZoneId(id)}
+            selectedVertex={isCeilingSliceMode ? null : selectedVertex}
+            onVertexSelect={isCeilingSliceMode ? undefined : handleVertexSelect}
+            onVertexDelete={isCeilingSliceMode ? undefined : deletePolygonVertex}
             rangeMm={rangeMm}
             snapGridMm={snapGridMm}
             height="100%"
@@ -2228,6 +2312,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     activePolygonZones.map((polygon) => {
                       const isSelected = selectedZoneId === polygon.id;
                       const polygonStatus = getPolygonStatus(polygon.id);
+                      const zoneSelectedVertex =
+                        selectedVertex && selectedVertex.zoneId === polygon.id ? selectedVertex : null;
+                      const canDeleteSelectedVertex = zoneSelectedVertex
+                        ? canDeleteVertex(polygon.vertices, zoneSelectedVertex.vertexIndex)
+                        : false;
                       return (
                         <div
                           key={polygon.id}
@@ -2329,6 +2418,34 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                               }}
                             />
                           </div>
+                          {/* Node (vertex) editing */}
+                          {isSelected && !isCeilingSliceMode && (
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <span className="text-[10px] text-slate-400">
+                                {zoneSelectedVertex
+                                  ? `Node ${zoneSelectedVertex.vertexIndex + 1} of ${polygon.vertices.length} selected`
+                                  : 'Tap a node on the canvas to select it'}
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!zoneSelectedVertex) return;
+                                  deletePolygonVertex(polygon.id, zoneSelectedVertex.vertexIndex);
+                                }}
+                                disabled={!canDeleteSelectedVertex}
+                                title={
+                                  polygon.vertices.length <= MIN_POLYGON_VERTICES
+                                    ? `Polygon zones need at least ${MIN_POLYGON_VERTICES} nodes`
+                                    : zoneSelectedVertex
+                                      ? 'Delete the selected node'
+                                      : 'Select a node on the canvas first'
+                                }
+                                className="shrink-0 rounded-lg border border-rose-500/70 px-2.5 py-1 text-[11px] font-semibold text-rose-100 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500 disabled:hover:bg-transparent"
+                              >
+                                Delete node
+                              </button>
+                            </div>
+                          )}
                           {/* Vertex info */}
                           <div className="text-[10px] text-slate-400 font-mono">
                             {polygon.vertices.slice(0, 3).map((v, i) => (
