@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { fetchDevices, fetchProfiles, ingressAware } from '../api/client';
 import { fetchRooms, updateRoom } from '../api/rooms';
+import type { RoomUpdatePayload } from '../api/rooms';
 import { RoomCanvas } from '../components/RoomCanvas';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, FurnitureInstance, FurnitureType, Door, DevicePlacement } from '../api/types';
 import { useWallDrawing } from '../hooks/useWallDrawing';
@@ -48,8 +49,28 @@ interface RoomBuilderPageProps {
 
 type MobileRoomBuilderSheet = 'navigation' | 'tools' | 'zoom' | null;
 type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor';
+type RoomBuilderView = 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard';
+type PendingLeave = { type: 'navigate'; view: RoomBuilderView } | { type: 'back' };
 
 const clampNumber = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+
+// Stable, key-order independent stringify so a room reserialised by the backend
+// compares equal to the identical room held in local state.
+const stableStringify = (value: unknown): string => {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value ?? null) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
+  return `{${entries.join(',')}}`;
+};
+
+const roomSignature = (room: RoomConfig | null | undefined): string => (room ? stableStringify(room) : '');
 
 export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   onBack,
@@ -70,6 +91,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [heightMm, setHeightMm] = useState(4000);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Last state each room was known to have on the server; the baseline for
+  // "do I have unsaved changes?" and for discarding them again.
+  const [savedRooms, setSavedRooms] = useState<Record<string, RoomConfig>>({});
+  const [pendingLeave, setPendingLeave] = useState<PendingLeave | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearedPoints, setClearedPoints] = useState<{ x: number; y: number }[] | null>(null);
   const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
   const [wallLengthInput, setWallLengthInput] = useState('');
@@ -598,6 +625,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         setDevices(deviceRes.devices);
         setProfiles(profileRes.profiles);
         setRooms(roomRes.rooms);
+        setSavedRooms(Object.fromEntries(roomRes.rooms.map((room) => [room.id, room])));
 
         const initialRoom =
           (initialRoomId && roomRes.rooms.find((r) => r.id === initialRoomId)) || roomRes.rooms[0] || null;
@@ -618,6 +646,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   useEffect(() => {
     // reset pan when switching rooms
     setPanOffsetMm({ x: 0, y: 0 });
+    setClearedPoints(null);
+    setShowClearConfirm(false);
   }, [selectedRoomId]);
 
   useEffect(() => {
@@ -652,8 +682,30 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleClear = () => {
     if (!selectedRoom) return;
+    if (!selectedRoom.roomShell?.points?.length) {
+      stopDrawing();
+      return;
+    }
+    // Clearing removes every wall at once and cannot be undone with Undo (Del),
+    // so ask first.
+    setShowClearConfirm(true);
+  };
+
+  const confirmClear = () => {
+    if (!selectedRoom) {
+      setShowClearConfirm(false);
+      return;
+    }
+    setClearedPoints(selectedRoom.roomShell?.points ?? null);
     handlePointsChange([]);
     stopDrawing();
+    setShowClearConfirm(false);
+  };
+
+  const restoreClearedPoints = () => {
+    if (!clearedPoints?.length) return;
+    handlePointsChange(clearedPoints);
+    setClearedPoints(null);
   };
 
   const handleCloseLoop = () => {
@@ -1069,12 +1121,26 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   };
 
-  const handleSaveRoom = async (): Promise<boolean> => {
+  const hasUnsavedChanges = useMemo(() => {
+    if (!selectedRoom) return false;
+    const saved = savedRooms[selectedRoom.id];
+    if (!saved) return false;
+    return roomSignature(saved) !== roomSignature(selectedRoom);
+  }, [savedRooms, selectedRoom]);
+
+  const handleSaveRoom = useCallback(async (): Promise<boolean> => {
     if (!selectedRoom) return false;
     setSaving(true);
     try {
-      const result = await updateRoom(selectedRoom.id, selectedRoom);
+      // The backend only removes a stored outline on an explicit `roomShell: null`,
+      // so an intentional save of an emptied room has to say so.
+      const payload: RoomUpdatePayload = {
+        ...selectedRoom,
+        roomShell: selectedRoom.roomShell?.points?.length ? selectedRoom.roomShell : null,
+      };
+      const result = await updateRoom(selectedRoom.id, payload);
       setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? result.room : r)));
+      setSavedRooms((prev) => ({ ...prev, [result.room.id]: result.room }));
       onWizardProgress?.({ outlineDone: true, placementDone: true });
       setError(null);
       return true;
@@ -1084,19 +1150,72 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     } finally {
       setSaving(false);
     }
-  };
+  }, [onWizardProgress, selectedRoom]);
 
-  const navigateWithSave = useCallback(
-    async (view: 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard') => {
-      if (!onNavigate) return;
-      if (selectedRoom) {
-        const saved = await handleSaveRoom();
-        if (!saved) return;
+  const leave = useCallback(
+    (target: PendingLeave) => {
+      if (target.type === 'back') {
+        onBack?.();
+        return;
       }
-      onNavigate(view);
+      onNavigate?.(target.view);
     },
-    [onNavigate, selectedRoom, handleSaveRoom]
+    [onBack, onNavigate]
   );
+
+  // Leaving the Room Builder never writes silently: unsaved edits (including
+  // deleted walls) prompt for Save / Discard / Cancel first.
+  const requestLeave = useCallback(
+    (target: PendingLeave) => {
+      if (target.type === 'navigate' && !onNavigate) return;
+      if (target.type === 'back' && !onBack) return;
+      if (selectedRoom && hasUnsavedChanges) {
+        setPendingLeave(target);
+        return;
+      }
+      leave(target);
+    },
+    [hasUnsavedChanges, leave, onBack, onNavigate, selectedRoom]
+  );
+
+  const navigateTo = useCallback(
+    (view: RoomBuilderView) => requestLeave({ type: 'navigate', view }),
+    [requestLeave]
+  );
+
+  const handlePendingSaveAndLeave = useCallback(async () => {
+    const target = pendingLeave;
+    if (!target) return;
+    const saved = await handleSaveRoom();
+    if (!saved) return; // keep the prompt open; the error toast explains why
+    setPendingLeave(null);
+    leave(target);
+  }, [handleSaveRoom, leave, pendingLeave]);
+
+  const handlePendingDiscardAndLeave = useCallback(() => {
+    const target = pendingLeave;
+    if (!target) return;
+    if (selectedRoom) {
+      const saved = savedRooms[selectedRoom.id];
+      if (saved) {
+        setRooms((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
+      }
+    }
+    setClearedPoints(null);
+    setPendingLeave(null);
+    leave(target);
+  }, [leave, pendingLeave, savedRooms, selectedRoom]);
+
+  // Reloading or closing the tab also discards unsaved room edits - warn first.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   const handleAutoZoom = useCallback((room: RoomConfig | null) => {
     if (!room?.roomShell?.points?.length) {
@@ -1234,12 +1353,107 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         </div>
       )}
 
+      {/* Unsaved changes prompt - shown instead of silently saving when leaving */}
+      {pendingLeave && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setPendingLeave(null)} />
+          <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl animate-in zoom-in-95 fade-in duration-200">
+            <div className="p-6">
+              <h3 className="text-xl font-bold text-white text-center mb-2">Unsaved changes</h3>
+              <p className="text-sm text-slate-300 text-center mb-5">
+                This room has changes that have not been saved yet. Save them before leaving, or discard them and keep
+                the last saved version of the room.
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handlePendingSaveAndLeave}
+                  disabled={saving}
+                  className="w-full rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl disabled:opacity-50 active:scale-95"
+                >
+                  {saving ? 'Saving...' : 'Save and leave'}
+                </button>
+                <button
+                  onClick={handlePendingDiscardAndLeave}
+                  disabled={saving}
+                  className="w-full rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 text-sm font-semibold text-rose-100 transition-all hover:bg-rose-600/20 disabled:opacity-50 active:scale-95"
+                >
+                  Discard changes
+                </button>
+                <button
+                  onClick={() => setPendingLeave(null)}
+                  disabled={saving}
+                  className="w-full rounded-xl border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 disabled:opacity-50 active:scale-95"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear walls confirmation */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowClearConfirm(false)} />
+          <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl animate-in zoom-in-95 fade-in duration-200">
+            <div className="p-6">
+              <div className="flex justify-center mb-4">
+                <div className="w-12 h-12 rounded-full bg-rose-500/20 flex items-center justify-center">
+                  <span className="text-xl">🗑️</span>
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-white text-center mb-2">Delete all walls?</h3>
+              <p className="text-sm text-slate-300 text-center mb-5">
+                This removes the entire outline of {selectedRoom?.name ?? 'this room'}. Undo (Del) cannot bring it back
+                once cleared - only the saved version on disk can.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="flex-1 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmClear}
+                  className="flex-1 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-500/30 transition-all hover:shadow-xl active:scale-95"
+                >
+                  Delete walls
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-session recovery for a cleared outline */}
+      {clearedPoints?.length && !(selectedRoom?.roomShell?.points?.length) ? (
+        <div className="absolute bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-amber-500/40 bg-slate-900/95 px-4 py-3 text-sm text-amber-100 shadow-2xl backdrop-blur md:bottom-6">
+          <span>Walls cleared. Nothing is saved until you press Save Room.</span>
+          <button
+            type="button"
+            onClick={restoreClearedPoints}
+            className="rounded-lg border border-amber-500/50 bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-100 transition-all hover:bg-amber-500/30 active:scale-95"
+          >
+            Restore walls
+          </button>
+          <button
+            type="button"
+            onClick={() => setClearedPoints(null)}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-all hover:bg-slate-800 active:scale-95"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       <div className="md:hidden">
         <CanvasTopBar
           left={onBack && !onNavigate ? (
             <button
               type="button"
-              onClick={onBack}
+              onClick={() => requestLeave({ type: 'back' })}
               className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
             >
               Back
@@ -1274,7 +1488,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               disabled={saving || !selectedRoom}
               className="min-h-[40px] rounded-lg bg-aqua-600 px-3 text-xs font-bold text-white shadow-lg shadow-aqua-500/20 disabled:opacity-50"
             >
-              {saving ? 'Saving' : 'Save'}
+              {saving ? 'Saving' : hasUnsavedChanges ? 'Save •' : 'Save'}
             </button>
           )}
         />
@@ -1283,7 +1497,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       {/* Navigation (top left) */}
       {onBack && !onNavigate && (
         <button
-          onClick={onBack}
+          onClick={() => requestLeave({ type: 'back' })}
           className="absolute top-6 left-6 z-40 hidden group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95 md:block"
         >
           <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span> Back
@@ -1311,36 +1525,36 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               <div className="absolute top-14 left-0 z-50 min-w-[200px] rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl overflow-hidden">
                 <div className="p-2 space-y-1">
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('liveDashboard');
+                    onClick={() => {
                       setShowNavMenu(false);
+                      navigateTo('liveDashboard');
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
                   >
                     📡 Live Dashboard
                   </button>
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('wizard');
+                    onClick={() => {
                       setShowNavMenu(false);
+                      navigateTo('wizard');
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
                   >
                     ➕ Add Device
                   </button>
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('zoneEditor');
+                    onClick={() => {
                       setShowNavMenu(false);
+                      navigateTo('zoneEditor');
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
                   >
                     📐 Zone Editor
                   </button>
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('settings');
+                    onClick={() => {
                       setShowNavMenu(false);
+                      navigateTo('settings');
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
                   >
@@ -1359,8 +1573,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         disabled={saving}
         className={`absolute top-6 z-40 hidden rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95 md:block ${desktopEditorOpen ? 'right-[22rem]' : 'right-6'}`}
       >
-        {saving ? 'Saving...' : 'Save Room'}
+        {saving ? 'Saving...' : hasUnsavedChanges ? 'Save Room •' : 'Save Room'}
       </button>
+      {hasUnsavedChanges && !saving && (
+        <div
+          className={`pointer-events-none absolute top-[4.25rem] z-40 hidden rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 backdrop-blur md:block ${
+            desktopEditorOpen ? 'right-[22rem]' : 'right-6'
+          }`}
+        >
+          Unsaved changes
+        </div>
+      )}
 
       {/* Canvas Content - Full Page */}
       {!selectedRoom && (
@@ -2584,9 +2807,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             <>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('liveDashboard');
+                onClick={() => {
                   setActiveMobileSheet(null);
+                  navigateTo('liveDashboard');
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
               >
@@ -2594,9 +2817,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('wizard');
+                onClick={() => {
                   setActiveMobileSheet(null);
+                  navigateTo('wizard');
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
               >
@@ -2604,9 +2827,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('zoneEditor');
+                onClick={() => {
                   setActiveMobileSheet(null);
+                  navigateTo('zoneEditor');
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
               >
@@ -2614,9 +2837,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('settings');
+                onClick={() => {
                   setActiveMobileSheet(null);
+                  navigateTo('settings');
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
               >
