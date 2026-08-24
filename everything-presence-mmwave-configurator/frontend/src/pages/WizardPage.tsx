@@ -15,6 +15,8 @@ import {
   CanvasTopBar,
 } from '../components/CanvasLayout';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { BasicRoomShapesPicker, resizeBasicRoomShapeWall, type BasicRoomShapeSelection } from '../components/BasicRoomShapesPicker';
+import type { RoomShapePoint } from '../utils/roomShapes';
 import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
@@ -130,6 +132,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [canvasSnap, setCanvasSnap] = useState(100);
   const [canvasPan, setCanvasPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [showOutlineShapeChoice, setShowOutlineShapeChoice] = useState(false);
+  const [activeBasicShape, setActiveBasicShape] = useState<BasicRoomShapeSelection | null>(null);
 
   // Zone selection for embedded zone drawing
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
@@ -753,12 +757,39 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     stopDrawing();
   }, [selectedRoom, handleRoomOutlineChange, stopDrawing]);
 
-  // Auto-enable drawing mode when on outline step
+  // New outlines begin with a simple method choice; saved outlines resume in review mode.
   useEffect(() => {
     if (currentStep === 'outline') {
-      setIsDrawingWall(true);
+      const hasUsableOutline = (selectedRoom?.roomShell?.points?.length ?? 0) >= 3;
+      setShowOutlineShapeChoice(!hasUsableOutline);
+      setIsDrawingWall(false);
     }
-  }, [currentStep, setIsDrawingWall]);
+  }, [currentStep, selectedRoom?.id, setIsDrawingWall]);
+
+  const handleApplyWizardShape = useCallback(async (points: RoomShapePoint[], selection: BasicRoomShapeSelection) => {
+    if (!selectedRoom) return;
+    if (selectedRoom.roomShell?.points?.length && !window.confirm(
+      'Replace the current walls? Manual wall adjustments and doors attached to those walls will be removed.'
+    )) return;
+    const updatedRoom: RoomConfig = { ...selectedRoom, roomShell: { points }, doors: [] };
+    onRoomUpdate?.(updatedRoom);
+    try {
+      await updateRoom(selectedRoom.id, updatedRoom);
+      setError(null);
+      setShowOutlineShapeChoice(false);
+      setActiveBasicShape(selection);
+      setIsDrawingWall(false);
+      setCanvasPan({ x: 0, y: 0 });
+      const maxDimension = Math.max(
+        Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+        Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+      );
+      setCanvasZoom(Math.min(5, Math.max(0.1, (0.8 * 15000) / Math.max(100, maxDimension + 1000))));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to update room outline');
+      onRoomUpdate?.(selectedRoom);
+    }
+  }, [onRoomUpdate, selectedRoom, setIsDrawingWall]);
 
   // Keyboard shortcuts for outline step
   useEffect(() => {
@@ -780,7 +811,12 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       }
       if (e.key === 'a' || e.key === 'A') {
         e.preventDefault();
-        setIsDrawingWall((prev) => !prev);
+        if (activeBasicShape) {
+          setActiveBasicShape(null);
+          setIsDrawingWall(true);
+        } else {
+          setIsDrawingWall((prev) => !prev);
+        }
         return;
       }
       if (e.key === 'Enter') {
@@ -799,7 +835,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [currentStep, isDrawingWall, selectedRoom?.roomShell?.points, stopDrawing, setIsDrawingWall, removeLastPoint, handleCloseLoop]);
+  }, [currentStep, isDrawingWall, activeBasicShape, selectedRoom?.roomShell?.points, stopDrawing, setIsDrawingWall, removeLastPoint, handleCloseLoop]);
 
   // Auto-initialize device placement to room center when entering placement step
   useEffect(() => {
@@ -1413,6 +1449,23 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     const mobileZonesBadge = polygonModeStatus.enabled ? polygonZones.length : `${enabledZones.length}/${displayZones.length}`;
     const currentRoomName = selectedRoom?.name ?? 'Setup Wizard';
 
+    if (currentStep === 'outline' && showOutlineShapeChoice) {
+      return (
+        <div className="fixed inset-0 flex items-center justify-center overflow-y-auto bg-slate-950 p-4">
+          <BasicRoomShapesPicker
+            units={units}
+            onApply={handleApplyWizardShape}
+            onDrawOwn={() => {
+              setShowOutlineShapeChoice(false);
+              setActiveBasicShape(null);
+              setShowWelcomePopup(false);
+              setIsDrawingWall(true);
+            }}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="fixed inset-0 bg-slate-950 overflow-hidden">
         {/* Welcome Popup */}
@@ -1584,12 +1637,28 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           }}
         >
           {currentStep === 'outline' && (
+            <>
             <RoomCanvas
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={handleRoomOutlineChange}
               onCanvasClick={wallDrawingClick}
               onCanvasMove={wallDrawingMove}
               onDragStateChange={setIsCanvasDragging}
+              lockShell={!!activeBasicShape}
+              showAllWallLengthLabels={!!activeBasicShape}
+              onWallLengthChange={activeBasicShape ? (segmentIndex, lengthMm) => {
+                try {
+                  const resized = resizeBasicRoomShapeWall(activeBasicShape, segmentIndex, lengthMm);
+                  setActiveBasicShape(resized.selection);
+                  void handleRoomOutlineChange(resized.points);
+                  setCanvasPan({ x: 0, y: 0 });
+                  const maxDimension = Math.max(
+                    Math.max(...resized.points.map((point) => point.x)) - Math.min(...resized.points.map((point) => point.x)),
+                    Math.max(...resized.points.map((point) => point.y)) - Math.min(...resized.points.map((point) => point.y)),
+                  );
+                  setCanvasZoom(Math.min(5, Math.max(0.1, (0.8 * 15000) / Math.max(100, maxDimension + 1000))));
+                } catch { /* Invalid dimensions leave the last valid centered outline unchanged. */ }
+              } : undefined}
               previewFrom={pendingStart}
               previewTo={pendingStart && previewPoint ? previewPoint : null}
               rangeMm={15000}
@@ -1603,6 +1672,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               displayUnits={units}
               showWalls={showWalls}
             />
+            </>
           )}
 
           {currentStep === 'doors' && (
@@ -1935,12 +2005,24 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           {currentStep === 'outline' && (
             <div className="absolute top-24 left-6 z-40 hidden flex-col gap-2 md:flex">
               <button
+                className="rounded-xl border border-aqua-600/50 bg-aqua-600/10 px-4 py-2.5 text-sm font-semibold text-aqua-100 shadow-lg hover:bg-aqua-600/20"
+                onClick={() => {
+                  stopDrawing();
+                  setShowOutlineShapeChoice(true);
+                }}
+              >
+                ▭ Basic Shapes
+              </button>
+              <button
                 className={`rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition-all active:scale-95 ${
                   isDrawingWall
                     ? 'border-rose-600/50 bg-rose-600/10 text-rose-100 hover:bg-rose-600/20'
                     : 'border-aqua-600/50 bg-aqua-600/10 text-aqua-100 hover:bg-aqua-600/20'
                 }`}
-                onClick={() => setIsDrawingWall((prev) => !prev)}
+                onClick={() => {
+                  if (activeBasicShape) setActiveBasicShape(null);
+                  setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+                }}
               >
                 {isDrawingWall ? '✕ Stop (Esc)' : '✏️ Add wall (A)'}
               </button>
@@ -2268,12 +2350,25 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               {currentStep === 'outline' && (
                 <div className="space-y-3">
                   <button
+                    className="w-full rounded-lg border border-aqua-600/50 bg-aqua-600/20 px-4 py-3 text-sm font-semibold text-aqua-100"
+                    onClick={() => {
+                      setActiveMobileCanvasSheet(null);
+                      stopDrawing();
+                      setShowOutlineShapeChoice(true);
+                    }}
+                  >
+                    Basic Shapes
+                  </button>
+                  <button
                     className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold ${
                       isDrawingWall
                         ? 'border-rose-600/50 bg-rose-600/20 text-rose-100'
                         : 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100'
                     }`}
-                    onClick={() => setIsDrawingWall((prev) => !prev)}
+                    onClick={() => {
+                      if (activeBasicShape) setActiveBasicShape(null);
+                      setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+                    }}
                   >
                     {isDrawingWall ? 'Stop Drawing' : 'Add Wall'}
                   </button>
@@ -3898,4 +3993,3 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     </div>
   );
 };
-

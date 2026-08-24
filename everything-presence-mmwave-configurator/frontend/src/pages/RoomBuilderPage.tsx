@@ -16,6 +16,8 @@ import {
   CanvasTopBar,
 } from '../components/CanvasLayout';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { BasicRoomShapesPicker, resizeBasicRoomShapeWall, type BasicRoomShapeSelection } from '../components/BasicRoomShapesPicker';
+import type { RoomShapePoint } from '../utils/roomShapes';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
@@ -52,8 +54,6 @@ type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor';
 type RoomBuilderView = 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard';
 type PendingLeave = { type: 'navigate'; view: RoomBuilderView } | { type: 'back' };
 
-const clampNumber = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
-
 // Stable, key-order independent stringify so a room reserialised by the backend
 // compares equal to the identical room held in local state.
 const stableStringify = (value: unknown): string => {
@@ -87,8 +87,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [rangeMm, setRangeMm] = useState(15000);
-  const [widthMm, setWidthMm] = useState(4000);
-  const [heightMm, setHeightMm] = useState(4000);
+  const [showBasicShapes, setShowBasicShapes] = useState(false);
+  const [activeBasicShape, setActiveBasicShape] = useState<BasicRoomShapeSelection | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Last state each room was known to have on the server; the baseline for
@@ -648,18 +648,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setPanOffsetMm({ x: 0, y: 0 });
     setClearedPoints(null);
     setShowClearConfirm(false);
+    setActiveBasicShape(null);
   }, [selectedRoomId]);
-
-  useEffect(() => {
-    if (!selectedRoom?.roomShell?.points?.length) return;
-    const pts = selectedRoom.roomShell.points;
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const width = Math.max(...xs) - Math.min(...xs);
-    const height = Math.max(...ys) - Math.min(...ys);
-    if (Number.isFinite(width)) setWidthMm(Math.round(width));
-    if (Number.isFinite(height)) setHeightMm(Math.round(height));
-  }, [selectedRoom?.roomShell?.points]);
 
   const handleAddPoint = (p: { x: number; y: number }) => {
     if (!selectedRoom) return;
@@ -667,17 +657,31 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     handlePointsChange(nextPoints);
   };
 
-  const handleSetRectangle = () => {
+  const handleApplyBasicShape = (points: RoomShapePoint[], selection: BasicRoomShapeSelection) => {
     if (!selectedRoom) return;
-    const w = clampNumber(widthMm, 500, 20000);
-    const h = clampNumber(heightMm, 500, 20000);
-    const pts = [
-      { x: -w / 2, y: -h / 2 },
-      { x: w / 2, y: -h / 2 },
-      { x: w / 2, y: h / 2 },
-      { x: -w / 2, y: h / 2 },
-    ];
-    handlePointsChange(pts);
+    if (selectedRoom.roomShell?.points?.length && !window.confirm(
+      'Replace the current walls? Manual wall adjustments and doors attached to those walls will be removed.'
+    )) return;
+    const nextRoom: RoomConfig = { ...selectedRoom, roomShell: { points }, doors: [] };
+    setRooms((prev) => prev.map((room) => room.id === selectedRoom.id ? nextRoom : room));
+    stopDrawing();
+    setIsDoorPlacementMode(false);
+    setSelectedSegment(null);
+    setSegmentDragIndex(null);
+    setSegmentDragStart(null);
+    setSegmentDragBase(null);
+    setEndpointDrag(null);
+    setDoorDrag(null);
+    setSelectedDoorId(null);
+    setActiveBasicShape(selection);
+    setShowBasicShapes(false);
+    setActiveMobileSheet(null);
+    const maxDimension = Math.max(
+      Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+      Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+    );
+    setZoom(Math.min(5, Math.max(0.1, (0.8 * rangeMm) / Math.max(100, maxDimension + 1000))));
+    setPanOffsetMm({ x: 0, y: 0 });
   };
 
   const handleClear = () => {
@@ -698,6 +702,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
     setClearedPoints(selectedRoom.roomShell?.points ?? null);
     handlePointsChange([]);
+    setActiveBasicShape(null);
     stopDrawing();
     setShowClearConfirm(false);
   };
@@ -773,7 +778,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       }
       if (e.key === 'a' || e.key === 'A') {
         e.preventDefault();
-        setIsDrawingWall((prev) => !prev);
+        if (activeBasicShape) {
+          setActiveBasicShape(null);
+          setIsDrawingWall(true);
+        } else {
+          setIsDrawingWall((prev) => !prev);
+        }
         return;
       }
       if (e.key === 'Enter') {
@@ -799,6 +809,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     deleteSelectedWallPoint,
     handleCloseLoop,
     isDrawingWall,
+    activeBasicShape,
     removeLastPoint,
     selectedRoom?.roomShell?.points,
     selectedSegment,
@@ -1293,6 +1304,22 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         </div>
       )}
 
+      {showBasicShapes && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+          <BasicRoomShapesPicker
+            units={displayUnits}
+            onApply={handleApplyBasicShape}
+            onDrawOwn={() => {
+              setShowBasicShapes(false);
+              setActiveBasicShape(null);
+              setIsDoorPlacementMode(false);
+              setIsDrawingWall(true);
+            }}
+            onCancel={() => setShowBasicShapes(false)}
+          />
+        </div>
+      )}
+
       {/* Installation Angle Suggestion Modal */}
       {showRotationSuggestion && rotationSuggestion && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -1630,6 +1657,21 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     setIsCanvasDragging(false);
                   }}
                   onDragStateChange={setIsCanvasDragging}
+                  lockShell={!!activeBasicShape}
+                  showAllWallLengthLabels={!!activeBasicShape}
+                  onWallLengthChange={activeBasicShape ? (segmentIndex, lengthMm) => {
+                    try {
+                      const resized = resizeBasicRoomShapeWall(activeBasicShape, segmentIndex, lengthMm);
+                      setActiveBasicShape(resized.selection);
+                      handlePointsChange(resized.points);
+                      setPanOffsetMm({ x: 0, y: 0 });
+                      const maxDimension = Math.max(
+                        Math.max(...resized.points.map((point) => point.x)) - Math.min(...resized.points.map((point) => point.x)),
+                        Math.max(...resized.points.map((point) => point.y)) - Math.min(...resized.points.map((point) => point.y)),
+                      );
+                      setZoom(Math.min(5, Math.max(0.1, (0.8 * rangeMm) / Math.max(100, maxDimension + 1000))));
+                    } catch { /* Invalid dimensions leave the last valid centered outline unchanged. */ }
+                  } : undefined}
                   rangeMm={rangeMm}
                   gridSpacingMm={1000}
                   snapGridMm={snapGridMm}
@@ -1870,12 +1912,22 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
           <div className="absolute top-24 left-6 z-40 hidden rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-3 shadow-xl md:block">
             <div className="flex flex-col gap-2 text-sm">
               <button
+                className="rounded-xl border border-aqua-600/50 bg-aqua-600/10 px-4 py-2.5 font-semibold text-aqua-100 shadow-lg transition-all hover:bg-aqua-600/20"
+                onClick={() => setShowBasicShapes(true)}
+                disabled={!selectedRoom}
+              >
+                ▭ Basic Shapes
+              </button>
+              <button
                 className={`rounded-xl border px-4 py-2.5 font-semibold shadow-lg transition-all active:scale-95 ${
                   isDrawingWall
                     ? 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100 hover:bg-aqua-600/30'
                     : 'border-slate-700/50 bg-slate-800/50 text-slate-200 hover:border-slate-600'
                 }`}
-                onClick={() => setIsDrawingWall((prev) => !prev)}
+                onClick={() => {
+                  if (activeBasicShape) setActiveBasicShape(null);
+                  setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+                }}
               >
                 {isDrawingWall ? '✕ Stop (Esc)' : '✏️ Add wall (A)'}
               </button>
@@ -2859,12 +2911,23 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         <div className="grid grid-cols-2 gap-2 text-sm">
           <button
             type="button"
+            className="col-span-2 rounded-lg border border-aqua-600/60 bg-aqua-600/20 px-3 py-3 font-semibold text-aqua-100 disabled:opacity-40"
+            onClick={() => setShowBasicShapes(true)}
+            disabled={!selectedRoom}
+          >
+            Basic Shapes
+          </button>
+          <button
+            type="button"
             className={`rounded-lg border px-3 py-3 font-semibold ${
               isDrawingWall
                 ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
                 : 'border-slate-700 bg-slate-800 text-slate-100'
             }`}
-            onClick={() => setIsDrawingWall((prev) => !prev)}
+            onClick={() => {
+              if (activeBasicShape) setActiveBasicShape(null);
+              setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+            }}
           >
             {isDrawingWall ? 'Stop Drawing' : 'Add Wall'}
           </button>
@@ -3055,6 +3118,3 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     </div>
   );
 };
-
-
-
