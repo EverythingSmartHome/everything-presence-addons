@@ -17,6 +17,7 @@ import {
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import { BasicRoomShapesPicker, resizeBasicRoomShapeWall, type BasicRoomShapeSelection } from '../components/BasicRoomShapesPicker';
 import type { RoomShapePoint } from '../utils/roomShapes';
+import { clampDoorPosition } from '../utils/doorGeometry';
 import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
@@ -713,10 +714,17 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const handleWallSegmentClick = useCallback(async (segmentIndex: number, positionOnSegment: number) => {
     if (!isDoorPlacementMode || !selectedRoom) return;
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[segmentIndex];
+    const end = points[(segmentIndex + 1) % points.length];
+    const boundedPosition = start && end
+      ? clampDoorPosition(positionOnSegment, 850, Math.hypot(end.x - start.x, end.y - start.y))
+      : positionOnSegment;
     const newDoor: Door = {
       id: generateId(),
+      style: 'single',
       segmentIndex,
-      positionOnSegment,
+      positionOnSegment: boundedPosition,
       widthMm: 850,
       swingDirection: 'in',
       swingSide: 'left',
@@ -738,9 +746,20 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const handleDoorChange = useCallback(async (updatedDoor: Door) => {
     if (!selectedRoom) return;
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[updatedDoor.segmentIndex];
+    const end = points[(updatedDoor.segmentIndex + 1) % points.length];
+    const boundedDoor = start && end ? {
+      ...updatedDoor,
+      positionOnSegment: clampDoorPosition(
+        updatedDoor.positionOnSegment,
+        updatedDoor.widthMm,
+        Math.hypot(end.x - start.x, end.y - start.y),
+      ),
+    } : updatedDoor;
     const updatedRoom: RoomConfig = {
       ...selectedRoom,
-      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? updatedDoor : d)),
+      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? boundedDoor : d)),
     };
     onRoomUpdate?.(updatedRoom);
     try {

@@ -6,6 +6,7 @@ import { FloorMaterialDefs, getFloorFill } from './FloorMaterials';
 import { useThemeContext } from '../contexts/ThemeContext';
 import { useCustomAssets } from '../hooks/useCustomAssets';
 import { formatLengthLabel } from '../utils/lengthLabels';
+import { getDoorGeometry } from '../utils/doorGeometry';
 
 export interface Point {
   x: number;
@@ -1579,6 +1580,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           // Convert to canvas coordinates
           const canvasDoorPos = toCanvasCoord({ x: doorX, y: doorY });
           const canvasDoorWidth = toCanvas(door.widthMm, effectiveRangeMm);
+          const doorStyle = door.style ?? 'single';
           // Make swing radius same as door width in world coordinates (so it's proportional)
           const swingRadius = canvasDoorWidth;
 
@@ -1615,6 +1617,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           const endVector = { x: arcEndX - hingeOffset, y: arcEndY };
           const crossProduct = (startVector.x * endVector.y) - (startVector.y * endVector.x);
           const sweepFlag = crossProduct > 0 ? 1 : 0;
+          const geometry = getDoorGeometry(
+            { ...door, style: doorStyle, widthMm: canvasDoorWidth },
+            inwardNormalSign,
+            { padding: 8, shallowDepth: 14 },
+          );
+          const hit = geometry.hitBounds;
 
           return (
             <g key={door.id}>
@@ -1623,10 +1631,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                 {/* Selection highlight (when selected) */}
                 {isSelected && (
                   <rect
-                    x={-canvasDoorWidth / 2 - 10}
-                    y={Math.min(-15, arcEndY - 15)}
-                    width={canvasDoorWidth + 20}
-                    height={Math.abs(arcEndY) + 30}
+                    x={hit.x}
+                    y={hit.y}
+                    width={hit.width}
+                    height={hit.height}
                     fill={showDoorLock ? 'rgba(251, 191, 36, 0.1)' : 'rgba(6, 182, 212, 0.1)'}
                     stroke={showDoorLock ? '#fbbf24' : '#06b6d4'}
                     strokeWidth={2}
@@ -1638,10 +1646,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
 
                 {/* Invisible clickable area for easier selection */}
                 <rect
-                  x={-canvasDoorWidth / 2 - 10}
-                  y={Math.min(-15, arcEndY - 15)}
-                  width={canvasDoorWidth + 20}
-                  height={Math.abs(arcEndY) + 30}
+                  x={hit.x}
+                  y={hit.y}
+                  width={hit.width}
+                  height={hit.height}
                   fill="transparent"
                   style={{
                     cursor: isLockedDoor ? 'not-allowed' : isSelected ? 'grab' : 'pointer',
@@ -1685,8 +1693,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   style={{ cursor: 'pointer', pointerEvents: 'none' }}
                 />
 
-                {/* Door swing arc - 90 degree arc showing door swing path */}
-                {door.swingDirection && (
+                {/* Single hinged leaf and swing clearance. */}
+                {doorStyle === 'single' && door.swingDirection && (
                   <path
                     d={`M ${arcStartX} ${arcStartY} A ${swingRadius} ${swingRadius} 0 ${largeArcFlag} ${sweepFlag} ${arcEndX} ${arcEndY}`}
                     stroke={isSelected ? '#06b6d4' : '#000000'}
@@ -1698,8 +1706,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   />
                 )}
 
-                {/* Door panel - wooden brown color, showing closed position */}
-                <line
+                {doorStyle === 'single' && <line
                   x1={hingeOffset}
                   y1={0}
                   x2={hingeOffset}
@@ -1708,10 +1715,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   strokeWidth={4}
                   vectorEffect="non-scaling-stroke"
                   style={{ pointerEvents: 'none' }}
-                />
+                />}
 
                 {/* Hinge indicator - metallic look */}
-                <circle
+                {doorStyle === 'single' && <circle
                   cx={hingeOffset}
                   cy={0}
                   r={4}
@@ -1719,7 +1726,47 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   stroke={isSelected ? '#0891b2' : '#52525b'}
                   strokeWidth={1}
                   style={{ pointerEvents: 'none' }}
-                />
+                />}
+
+                {/* A single centred opening symbol with one slide-direction arrow. */}
+                {doorStyle === 'sliding' && geometry.slidingPanel && (() => {
+                  const panel = geometry.slidingPanel;
+                  const colour = isSelected ? '#06b6d4' : '#475569';
+                  const centreX = (panel.startX + panel.endX) / 2;
+                  const arrowLength = Math.min(18, Math.abs(panel.endX - panel.startX) * 0.3);
+                  const arrowTipX = centreX + panel.direction * arrowLength / 2;
+                  const arrowTailX = centreX - panel.direction * arrowLength / 2;
+                  return <g style={{ pointerEvents: 'none' }}>
+                    <line x1={panel.startX} y1={panel.y} x2={panel.endX} y2={panel.y} stroke={colour} strokeWidth={3} strokeLinecap="square" vectorEffect="non-scaling-stroke" />
+                    <line x1={panel.startX} y1={panel.y - 8} x2={panel.startX} y2={panel.y + 8} stroke={colour} strokeWidth={3} vectorEffect="non-scaling-stroke" />
+                    <line x1={panel.endX} y1={panel.y - 8} x2={panel.endX} y2={panel.y + 8} stroke={colour} strokeWidth={3} vectorEffect="non-scaling-stroke" />
+                    <path
+                      d={`M ${arrowTailX} ${panel.y} L ${arrowTipX} ${panel.y} M ${arrowTipX - panel.direction * 4} ${panel.y - 3} L ${arrowTipX} ${panel.y} L ${arrowTipX - panel.direction * 4} ${panel.y + 3}`}
+                      stroke={colour}
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      fill="none"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </g>;
+                })()}
+
+                {/* Opening-only style has jambs but no leaf or clearance arc. */}
+                {doorStyle === 'opening' && <>
+                  <line x1={-canvasDoorWidth / 2} y1={-8} x2={-canvasDoorWidth / 2} y2={8} stroke={isSelected ? '#06b6d4' : '#71717a'} strokeWidth={4} vectorEffect="non-scaling-stroke" />
+                  <line x1={canvasDoorWidth / 2} y1={-8} x2={canvasDoorWidth / 2} y2={8} stroke={isSelected ? '#06b6d4' : '#71717a'} strokeWidth={4} vectorEffect="non-scaling-stroke" />
+                </>}
+
+                {/* Opposing half-width leaves with mirrored clearance arcs. */}
+                {doorStyle === 'double' && geometry.leaves?.map((leaf) => {
+                  const closedX = leaf.hingeX < 0 ? 0 : 0;
+                  return <g key={leaf.hingeX}>
+                    <path d={`M ${closedX} 0 A ${canvasDoorWidth / 2} ${canvasDoorWidth / 2} 0 0 ${leaf.sweep} ${leaf.endX} ${leaf.endY}`} stroke={isSelected ? '#06b6d4' : '#000000'} strokeWidth={2} fill="none" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+                    <line x1={leaf.hingeX} y1={0} x2={leaf.endX} y2={leaf.endY} stroke={isSelected ? '#06b6d4' : '#8b5a3c'} strokeWidth={4} vectorEffect="non-scaling-stroke" />
+                    <circle cx={leaf.hingeX} cy={0} r={4} fill={isSelected ? '#06b6d4' : '#71717a'} />
+                  </g>;
+                })}
               </g>
               {showDoorLock && (
                 <LockBadge

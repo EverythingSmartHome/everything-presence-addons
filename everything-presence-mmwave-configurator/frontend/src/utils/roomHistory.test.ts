@@ -20,7 +20,7 @@ const room = () => ({
   entityMappings: { installationAngleEntity: 'number.angle' },
   roomShell: { points: [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 1000, y: 1000 }] },
   furniture: [{ id: 'f1', typeId: 'sofa', x: 0, y: 0, width: 1000, depth: 500, height: 400, rotationDeg: 0 }],
-  doors: [{ id: 'd1', segmentIndex: 0, positionOnSegment: 0.5, widthMm: 800 }],
+  doors: [{ id: 'd1', style: 'sliding', segmentIndex: 0, positionOnSegment: 0.5, widthMm: 1600, swingDirection: 'out', swingSide: 'right' }],
   devicePlacement: { x: 0, y: 0, rotationDeg: 0 },
 });
 
@@ -41,6 +41,8 @@ test('snapshots only the room-builder subset and deep copies it', () => {
   original.furniture[0].x = 999;
   assert.equal(snapshot.roomShell.points[0].x, 0);
   assert.equal(snapshot.furniture[0].x, 0);
+  assert.equal(snapshot.doors[0].style, 'sliding');
+  assert.equal(snapshot.doors[0].swingDirection, 'out');
 });
 
 test('lock state is snapshotted and deep copied', () => {
