@@ -31,6 +31,7 @@ import {
   getCeilingSlicePosition,
   normalizeCeilingSliceConfig,
 } from '../utils/ceilingSlices';
+import { resolveLoadedRoomSelection } from '../utils/roomSelection';
 import { stableStringify } from '../utils/stableStringify';
 import {
   ROOM_HISTORY_LIMIT,
@@ -51,6 +52,7 @@ interface RoomBuilderPageProps {
   onNavigate?: (view: 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard') => void;
   initialRoomId?: string | null;
   initialProfileId?: string | null;
+  onRoomChange?: (roomId: string | null, profileId: string | null) => void;
   onWizardProgress?: (progress: { outlineDone?: boolean; placementDone?: boolean }) => void;
   liveState?: LiveState | null;
   targetPositions?: Array<{
@@ -81,6 +83,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   onNavigate,
   initialRoomId,
   initialProfileId,
+  onRoomChange,
   onWizardProgress,
   liveState,
   targetPositions,
@@ -168,6 +171,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const wallEditorDragPointerRef = useRef<number | null>(null);
   const wallEditorDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
+  // Mirrors of the current selection, so the one-shot loader can consult them
+  // without depending on (and therefore re-running off) its own state.
+  const selectedRoomIdRef = useRef(selectedRoomId);
+  const selectedProfileIdRef = useRef(selectedProfileId);
+  selectedRoomIdRef.current = selectedRoomId;
+  selectedProfileIdRef.current = selectedProfileId;
+  // Last `initialRoomId` we acted on, so the sync effect below can tell an actual
+  // prop change from a re-render.
+  const lastInitialRoomIdRef = useRef<string | null>(initialRoomId ?? null);
   const CANVAS_SIZE = 700;
   const HALF = CANVAS_SIZE / 2;
   const WALL_EDITOR_WIDTH = 280;
@@ -747,21 +759,46 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         setRooms(roomRes.rooms);
         setSavedRooms(Object.fromEntries(roomRes.rooms.map((room) => [room.id, room])));
 
-        const initialRoom =
-          (initialRoomId && roomRes.rooms.find((r) => r.id === initialRoomId)) || roomRes.rooms[0] || null;
-        if (initialRoom) {
-          setSelectedRoomId(initialRoom.id);
-          if (initialRoom.profileId) setSelectedProfileId(initialRoom.profileId);
+        // A room the user already picked wins over the incoming prop - the fetch
+        // can resolve after they used the header dropdown.
+        const initialRoom = resolveLoadedRoomSelection(roomRes.rooms, initialRoomId, selectedRoomIdRef.current);
+        let profileId = initialRoom?.profileId ?? selectedProfileIdRef.current ?? null;
+        if (!profileId && profileRes.profiles.length > 0) {
+          profileId = initialProfileId ?? profileRes.profiles[0].id;
         }
-        if (!initialRoom?.profileId && !selectedProfileId && profileRes.profiles.length > 0) {
-          setSelectedProfileId(initialProfileId ?? profileRes.profiles[0].id);
+
+        if (initialRoom) setSelectedRoomId(initialRoom.id);
+        if (profileId) setSelectedProfileId(profileId);
+        // Tell the app what we landed on, so `initialRoomId` tracks the builder
+        // instead of pulling it somewhere else later.
+        if (initialRoom || profileId) {
+          onRoomChange?.(initialRoom?.id ?? selectedRoomIdRef.current ?? null, profileId);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
       }
     };
     load();
-  }, [initialProfileId, initialRoomId, selectedProfileId]);
+    // Initialisation only: this effect writes `rooms`/`savedRooms` and the
+    // selection, so depending on any of them would refetch mid-edit and snap the
+    // user back to `initialRoomId`. External room changes are handled by the
+    // sync effect below.
+  }, []);
+
+  useEffect(() => {
+    // Follow the parent only when it actually points somewhere new, and without
+    // refetching: the builder owns the selection while it is open, so a prop
+    // that simply lags behind must never override the user's own pick.
+    const nextRoomId = initialRoomId ?? null;
+    if (!rooms.length) return; // wait for the load; the prop is handled there
+    const changed = nextRoomId !== lastInitialRoomIdRef.current;
+    lastInitialRoomIdRef.current = nextRoomId;
+    if (!changed || !nextRoomId || nextRoomId === selectedRoomId) return;
+    const room = rooms.find((r) => r.id === nextRoomId);
+    if (!room) return;
+    setSelectedRoomId(room.id);
+    if (room.profileId) setSelectedProfileId(room.profileId);
+  }, [initialRoomId, rooms, selectedRoomId]);
 
   useEffect(() => {
     // reset pan when switching rooms
@@ -1425,7 +1462,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setSelectedRoomId(roomId);
     const room = rooms.find((candidate) => candidate.id === roomId);
     if (room?.profileId) setSelectedProfileId(room.profileId);
-  }, [rooms]);
+    // Keep the rest of the app on the same room, so `initialRoomId` cannot pull
+    // the builder back and the choice survives navigating away and back.
+    onRoomChange?.(roomId, room?.profileId ?? selectedProfileId);
+  }, [onRoomChange, rooms, selectedProfileId]);
 
   const toggleMobileToolsSheet = () => {
     setShowSettings(false);
