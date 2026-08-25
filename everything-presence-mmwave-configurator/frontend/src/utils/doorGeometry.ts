@@ -44,7 +44,11 @@ export const getDoorGeometry = (
 ): DoorGeometry => {
   const door = normalizeDoor(doorValue);
   const halfWidth = door.widthMm / 2;
-  const normalSign = (door.swingDirection === 'in' ? inwardNormalSign : -inwardNormalSign) >= 0 ? 1 : -1;
+  const swingSign: 1 | -1 = (door.swingDirection === 'in' ? inwardNormalSign : -inwardNormalSign) >= 0 ? 1 : -1;
+  // Sliding leaves and cased openings have no swing, so they always sit on the room side.
+  const normalSign: 1 | -1 = door.style === 'sliding' || door.style === 'opening'
+    ? (inwardNormalSign >= 0 ? 1 : -1)
+    : swingSign;
   const padding = options.padding ?? 10;
   const depth = door.style === 'single'
     ? door.widthMm
@@ -76,12 +80,13 @@ export const getDoorGeometry = (
     ] };
   }
   if (door.style === 'sliding') {
-    return { ...base, slidingPanel: {
-      startX: -halfWidth,
-      endX: halfWidth,
-      y: 0,
-      direction: 1,
-    } };
+    // A patio-style slider that lives entirely within its opening: the leaf is half
+    // the opening wide and, like hinged leaves, is drawn in its open position - slid
+    // across the half on the side it slides toward, hugging the wall a quarter of the
+    // shallow depth into the room. The other half is the travel path.
+    const direction: 1 | -1 = door.swingSide === 'right' ? 1 : -1;
+    const startX = direction > 0 ? 0 : -halfWidth;
+    return { ...base, slidingPanel: { startX, endX: startX + halfWidth, y: normalSign * depth / 4, direction } };
   }
   return base;
 };

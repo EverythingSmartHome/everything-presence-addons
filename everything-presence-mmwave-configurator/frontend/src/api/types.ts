@@ -201,7 +201,7 @@ export interface Door {
   positionOnSegment: number; // 0.0 to 1.0 - position along the segment
   widthMm: number; // Door width in millimeters (typically 800-900mm)
   swingDirection: 'in' | 'out'; // Used by single/double doors; retained across style changes
-  swingSide: 'left' | 'right'; // Used by single doors; retained across style changes
+  swingSide: 'left' | 'right'; // Hinge side for single doors, slide side for sliding doors; retained across style changes
   locked?: boolean; // Pinned in place: not selectable or draggable on the canvas
 }
 

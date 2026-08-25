@@ -1,5 +1,6 @@
 import React from 'react';
 import { Door } from '../api/types';
+import { DoorStyleIcon } from './DoorStyleIcon';
 
 interface DoorEditorProps {
   door: Door;
@@ -33,11 +34,11 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
 
   const hasWarnings = validation && (validation.overlaps || validation.nearCorner || validation.tooWide);
   const style = door.style ?? 'single';
-  const styleOptions: Array<{ value: Door['style']; label: string; icon: string }> = [
-    { value: 'single', label: 'Single', icon: '↷' },
-    { value: 'sliding', label: 'Sliding', icon: '⇆' },
-    { value: 'opening', label: 'Opening', icon: '▯' },
-    { value: 'double', label: 'Double', icon: '↶↷' },
+  const styleOptions: Array<{ value: Door['style']; label: string }> = [
+    { value: 'single', label: 'Single' },
+    { value: 'sliding', label: 'Sliding' },
+    { value: 'opening', label: 'Opening' },
+    { value: 'double', label: 'Double' },
   ];
   const swingDirectionOptions: Array<{
     value: Door['swingDirection'];
@@ -69,6 +70,23 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
       value: 'right',
       label: 'Right',
       description: 'Hinge is on the right side of the doorway',
+    },
+  ];
+  // Sliding doors reuse swingSide for the side the panel stows on when open.
+  const slideSideOptions: Array<{
+    value: Door['swingSide'];
+    label: string;
+    description: string;
+  }> = [
+    {
+      value: 'left',
+      label: 'Left',
+      description: 'Panel slides to the left half of the opening to open',
+    },
+    {
+      value: 'right',
+      label: 'Right',
+      description: 'Panel slides to the right half of the opening to open',
     },
   ];
 
@@ -187,7 +205,7 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
                   ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
                   : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'}`}
               >
-                <span className="block text-xl" aria-hidden="true">{option.icon}</span>
+                <DoorStyleIcon style={option.value} className="mx-auto mb-1 h-8 w-12" />
                 <span className="text-sm font-medium">{option.label}</span>
               </button>
             ))}
@@ -296,6 +314,58 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
             })}
           </div>
           <p className="text-xs text-slate-400 mt-1">Shaded side is the room. Door swing matches the canvas.</p>
+        </div>}
+
+        {/* Slide Direction */}
+        {style === 'sliding' && <div>
+          <label className="block text-sm font-semibold text-slate-300 mb-3">Slides Toward</label>
+          <div className="grid grid-cols-2 gap-3">
+            {slideSideOptions.map((option) => {
+              const isLeft = option.value === 'left';
+              // Half-width leaf shown slid across its half of the opening (18-30).
+              const leafStart = isLeft ? 18 : 24;
+              const leafEnd = isLeft ? 24 : 30;
+              const leadingEdgeX = isLeft ? leafEnd : leafStart;
+              const farJambX = isLeft ? 30 : 18;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleChange({ swingSide: option.value })}
+                  className={`rounded-lg border p-3 transition-all ${
+                    door.swingSide === option.value
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                      : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                  }`}
+                  aria-label={option.description}
+                  title={option.description}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <svg className="h-12 w-12" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                      <rect x="3" y="21" width="42" height="24" fill="currentColor" opacity="0.1" rx="2" />
+                      <line x1="3" y1="20" x2="18" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <line x1="30" y1="20" x2="45" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <line
+                        x1={leadingEdgeX}
+                        y1="26"
+                        x2={farJambX}
+                        y2="26"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeOpacity="0.6"
+                        strokeDasharray="3 2"
+                        strokeLinecap="round"
+                      />
+                      <line x1={leafStart} y1="26" x2={leafEnd} y2="26" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                      <circle cx={farJambX} cy="26" r="2" fill="currentColor" />
+                    </svg>
+                    <span className="text-sm font-medium">{option.label}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-400 mt-1">The panel slides to this side of the opening; the other half is where it travels.</p>
         </div>}
 
         {/* Hinge Side */}
