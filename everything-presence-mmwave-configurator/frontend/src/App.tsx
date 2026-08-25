@@ -723,6 +723,10 @@ function App() {
             }}
             initialRoomId={selectedRoomId}
             initialProfileId={selectedProfileId}
+            onRoomChange={(roomId, profileId) => {
+              setSelectedRoomId(roomId);
+              setSelectedProfileId(profileId);
+            }}
             onWizardProgress={(p) => {
               if (p.outlineDone) {
                 setWizardOutlineDone(true);
