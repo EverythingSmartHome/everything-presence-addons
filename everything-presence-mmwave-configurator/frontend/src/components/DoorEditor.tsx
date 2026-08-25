@@ -6,6 +6,8 @@ interface DoorEditorProps {
   onChange: (door: Door) => void;
   onDelete: () => void;
   onClose?: () => void;
+  /** Pins this door so it can no longer be selected or dragged on the canvas. */
+  onToggleLock?: () => void;
   maxSegmentIndex: number; // Number of wall segments - 1
   validation?: {
     overlaps: boolean;
@@ -20,9 +22,11 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
   onChange,
   onDelete,
   onClose,
+  onToggleLock,
   maxSegmentIndex,
   validation,
 }) => {
+  const isLocked = !!door.locked;
   const handleChange = (updates: Partial<Door>) => {
     onChange({ ...door, ...updates });
   };
@@ -71,22 +75,51 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
           </div>
           <h2 className="text-lg font-semibold text-white">Door</h2>
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors"
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onToggleLock && (
+            <button
+              onClick={onToggleLock}
+              className={`transition-colors ${isLocked ? 'text-amber-400 hover:text-amber-300' : 'text-slate-400 hover:text-amber-300'}`}
+              aria-label={isLocked ? 'Unlock door' : 'Lock door'}
+              aria-pressed={isLocked}
+              title={isLocked ? 'Unlock this door' : 'Lock this door so it cannot be selected or moved'}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d={isLocked
+                    ? 'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18.75v-6a2.25 2.25 0 012.25-2.25z'
+                    : 'M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H3.75A2.25 2.25 0 011.5 18.75v-6a2.25 2.25 0 012.25-2.25z'}
+                />
+              </svg>
+            </button>
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Content */}
+      {isLocked && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs text-amber-200">
+          <span className="font-semibold">Locked.</span> This door is pinned in place, so it cannot be
+          moved, resized or deleted. Use the padlock above to unlock it first.
+        </div>
+      )}
+
+      {/* Content - inert while locked, so the padlock above is the only way forward */}
       <div
-        className="flex-1 overflow-y-auto px-6 py-4 space-y-6"
+        className={`flex-1 overflow-y-auto px-6 py-4 space-y-6 ${isLocked ? 'pointer-events-none opacity-50' : ''}`}
+        aria-disabled={isLocked || undefined}
         onWheelCapture={(e) => e.stopPropagation()}
       >
         {/* Validation Warnings */}
@@ -287,7 +320,9 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
       <div className="px-6 py-4 border-t border-slate-700">
         <button
           onClick={onDelete}
-          className="w-full px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-600/50 rounded-lg text-red-200 font-semibold transition-colors"
+          disabled={isLocked}
+          title={isLocked ? 'Unlock this door before deleting it' : undefined}
+          className="w-full px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-600/50 rounded-lg text-red-200 font-semibold transition-colors disabled:opacity-40 disabled:hover:bg-red-600/20"
         >
           Delete Door
         </button>

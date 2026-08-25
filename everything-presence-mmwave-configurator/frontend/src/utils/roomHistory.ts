@@ -39,7 +39,13 @@ export const createRoomHistory = (): RoomHistory => ({ past: [], future: [] });
 /** Copy the editable subset of a room, deeply enough that later edits cannot mutate it. */
 export const snapshotRoom = (room: RoomConfig): RoomSnapshot => ({
   roomShell: room.roomShell
-    ? { ...room.roomShell, points: (room.roomShell.points ?? []).map((point) => ({ ...point })) }
+    ? {
+      ...room.roomShell,
+      points: (room.roomShell.points ?? []).map((point) => ({ ...point })),
+      // Locked wall indices are an array too, so copy it or an undo would hand
+      // back the very array a later edit is about to rewrite.
+      ...(room.roomShell.lockedSegments ? { lockedSegments: [...room.roomShell.lockedSegments] } : {}),
+    }
     : room.roomShell,
   roomShellFillMode: room.roomShellFillMode,
   floorMaterial: room.floorMaterial,

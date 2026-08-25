@@ -143,6 +143,13 @@ export interface ZoneBackup {
 
 export interface RoomShell {
   points: Array<{ x: number; y: number }>;
+  /** Locks the whole outline: no wall is selectable or draggable. */
+  locked?: boolean;
+  /**
+   * Indices of individually locked wall segments. Segment `i` spans
+   * `points[i] -> points[(i + 1) % points.length]`, matching `Door.segmentIndex`.
+   */
+  lockedSegments?: number[];
 }
 
 export interface DevicePlacement {
@@ -155,6 +162,12 @@ export interface DevicePlacement {
   coveragePresetId?: string;
   horizontalFovDeg?: number;
   verticalFovDeg?: number;
+  /**
+   * Pins the device's position only. Rotation, mounting and coverage stay
+   * editable, because aiming a mounted sensor is the common adjustment while
+   * its physical position is the thing you do not want nudged.
+   */
+  locked?: boolean;
 }
 
 export interface FurnitureType {
@@ -178,6 +191,7 @@ export interface FurnitureInstance {
   height: number; // Vertical height in mm (for future use)
   rotationDeg: number; // 0-360 degrees
   aspectRatioLocked: boolean; // Whether aspect ratio is locked during resize
+  locked?: boolean; // Pinned in place: not selectable or draggable on the canvas
 }
 
 export interface Door {
@@ -187,6 +201,7 @@ export interface Door {
   widthMm: number; // Door width in millimeters (typically 800-900mm)
   swingDirection: 'in' | 'out'; // Door swing direction relative to room
   swingSide: 'left' | 'right'; // Which side the hinge is on
+  locked?: boolean; // Pinned in place: not selectable or draggable on the canvas
 }
 
 // ─────────────────────────────────────────────────────────────────

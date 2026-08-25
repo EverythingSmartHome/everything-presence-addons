@@ -22,6 +22,8 @@ export interface DevicePlacement {
   coveragePresetId?: string;
   horizontalFovDeg?: number;
   verticalFovDeg?: number;
+  /** Position-only lock: the icon cannot be dragged, but rotation still applies. */
+  locked?: boolean;
 }
 
 interface RoomCanvasProps {
@@ -39,6 +41,8 @@ interface RoomCanvasProps {
   zoom?: number;
   devicePlacement?: DevicePlacement;
   onDeviceChange?: (placement: DevicePlacement) => void;
+  /** Fired on a click that did not turn into a drag - opens the device settings. */
+  onDeviceClick?: () => void;
   fieldOfViewDeg?: number;
   maxRangeMeters?: number;
   deviceIconUrl?: string;
@@ -81,6 +85,18 @@ interface RoomCanvasProps {
     deviceElement?: React.ReactNode;
   }) => React.ReactNode;
   lockShell?: boolean;
+  /**
+   * Individually locked wall segments. A locked wall is removed from hit-testing
+   * entirely, so a click near it falls through to the next unlocked object
+   * instead of selecting it.
+   */
+  lockedSegments?: number[];
+  /**
+   * Draw padlocks and amber outlines on locked objects. Off by default: a lock
+   * is an editing affordance, so it belongs to the Room Builder and must not
+   * bleed into read-only views like the Live Dashboard or the Zone Editor.
+   */
+  showLockIndicators?: boolean;
   showAllWallLengthLabels?: boolean;
   onWallLengthChange?: (segmentIndex: number, lengthMm: number) => void;
   furniture?: FurnitureInstance[];
@@ -512,6 +528,30 @@ const lineIntersection = (
   return null;
 };
 
+/**
+ * Padlock drawn on a locked object. Purely an indicator: it never takes a
+ * click, so it can never swallow the click that selects the object. Unlocking
+ * happens in the editor panel that selecting it opens.
+ */
+const LockBadge: React.FC<{
+  x: number;
+  y: number;
+  label: string;
+}> = ({ x, y, label }) => (
+  <g transform={`translate(${x}, ${y})`} style={{ pointerEvents: 'none' }}>
+    <title>{label}</title>
+    <circle r={9} fill="#0f172acc" stroke="#fbbf24" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+    <path
+      d="M -3 -1 A 3 3 0 0 1 3 -1"
+      fill="none"
+      stroke="#fbbf24"
+      strokeWidth={1.5}
+      vectorEffect="non-scaling-stroke"
+    />
+    <rect x={-4} y={-1} width={8} height={6} rx={1.5} fill="#fbbf24" />
+  </g>
+);
+
 export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   points,
   onChange,
@@ -527,6 +567,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   zoom = 1,
   devicePlacement,
   onDeviceChange,
+  onDeviceClick,
   fieldOfViewDeg = 120,
   maxRangeMeters = 6,
   deviceIconUrl,
@@ -549,6 +590,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   onSegmentInsert,
   renderOverlay,
   lockShell = false,
+  lockedSegments,
+  showLockIndicators = false,
   showAllWallLengthLabels = false,
   onWallLengthChange,
   furniture = [],
@@ -573,6 +616,18 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   deviceInteractive = true,
 }) => {
   const safePoints = Array.isArray(points) ? points : [];
+  // Locked walls are dropped from every hit-test below, so a click near one
+  // falls through to whatever is behind it rather than grabbing the locked wall.
+  const lockedSegmentSet = useMemo(
+    () => new Set(Array.isArray(lockedSegments) ? lockedSegments : []),
+    [lockedSegments],
+  );
+  const isSegmentPinned = (index: number) => lockShell || lockedSegmentSet.has(index);
+  // A corner belongs to two walls; dragging it would move both.
+  const isVertexPinned = (index: number) =>
+    lockShell ||
+    (safePoints.length > 0 &&
+      (lockedSegmentSet.has(index) || lockedSegmentSet.has((index - 1 + safePoints.length) % safePoints.length)));
   const safePlacement: DevicePlacement = {
     x: Number.isFinite(devicePlacement?.x) ? (devicePlacement as DevicePlacement).x : 0,
     y: Number.isFinite(devicePlacement?.y) ? (devicePlacement as DevicePlacement).y : 0,
@@ -582,7 +637,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     pitchDeg: Number.isFinite(devicePlacement?.pitchDeg) ? devicePlacement?.pitchDeg : undefined,
     horizontalFovDeg: Number.isFinite(devicePlacement?.horizontalFovDeg) ? devicePlacement?.horizontalFovDeg : undefined,
     verticalFovDeg: Number.isFinite(devicePlacement?.verticalFovDeg) ? devicePlacement?.verticalFovDeg : undefined,
+    locked: devicePlacement?.locked ? true : undefined,
   };
+  // Position-only: the icon stops being draggable, but rotation is untouched.
+  const devicePositionLocked = !!devicePlacement?.locked;
 
   // Theme-aware colors for canvas
   const { isDark } = useThemeContext();
@@ -599,6 +657,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   const [editingWallLength, setEditingWallLength] = useState<number | null>(null);
   const [wallLengthDraft, setWallLengthDraft] = useState('');
   const [dragDevice, setDragDevice] = useState<boolean>(false);
+  // A press on the device that never really travels is a click, not a drag, so
+  // it opens the device settings instead of nudging the sensor by a pixel.
+  const devicePressRef = useRef<{ x: number; y: number } | null>(null);
+  const deviceMovedRef = useRef(false);
   const [panDrag, setPanDrag] = useState<{ start: Point; base: { x: number; y: number } } | null>(null);
   const [furnitureDrag, setFurnitureDrag] = useState<{ id: string; start: Point; basePos: Point; currentPos?: Point } | null>(null);
   const [furnitureResize, setFurnitureResize] = useState<{
@@ -976,16 +1038,50 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
       const next = [...safePoints];
       next[dragIdx] = snapPoint(pt);
       onChange(next);
-    } else if (dragDevice && onDeviceChange) {
+    } else if (dragDevice && onDeviceChange && !devicePositionLocked) {
       const snapped = snapPoint(pt);
       // Only allow device placement inside the room outline
       if (isPointInPolygon(snapped, safePoints)) {
+        deviceMovedRef.current = true;
         onDeviceChange({
           ...safePlacement,
           ...snapped,
         });
       }
     }
+  };
+
+  /**
+   * Shared by both device icon variants. A locked device still swallows the
+   * gesture (so nothing behind it reacts) but never begins a move; either way
+   * the press is remembered so pointer-up can tell a click from a drag.
+   */
+  const handleDevicePointerDown = (e: React.PointerEvent<SVGElement>) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    if (e.cancelable) e.preventDefault();
+    devicePressRef.current = { x: e.clientX, y: e.clientY };
+    deviceMovedRef.current = false;
+    // Never let the canvas treat this as a click on empty space.
+    suppressClickRef.current = true;
+    if (devicePositionLocked) return;
+    capturePointer(e);
+    setDragDevice(true);
+    onDragStateChange?.(true);
+  };
+
+  /**
+   * Deliberately does not stop propagation: the canvas-level pointer-up still
+   * has to run to clear the drag state.
+   */
+  const handleDevicePointerUp = (e: React.PointerEvent<SVGElement>) => {
+    const press = devicePressRef.current;
+    devicePressRef.current = null;
+    if (!press || !onDeviceClick) return;
+    if (deviceMovedRef.current) return;
+    // A few pixels of travel is still a click, not a reposition.
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4) return;
+    onDeviceClick();
   };
 
   const handlePointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -1020,9 +1116,15 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     const cx = svgPoint.x - HALF;
     const cy = svgPoint.y - HALF;
     const world = fromCanvasCoord(cx, cy);
+    // Unlocked walls are scored separately from locked ones so an unlocked
+    // neighbour always wins: editing the wall next to a locked one still works.
+    // A click that only lands on a locked wall still selects it, so the click
+    // visibly does something and the wall panel can explain the lock.
     let best: number | null = null;
     let bestDist = 250;
     let bestProj: Point | null = null;
+    let lockedBest: number | null = null;
+    let lockedBestDist = 250;
     safePoints.forEach((p, idx) => {
       const next = safePoints[(idx + 1) % safePoints.length];
       const dx = next.x - p.x;
@@ -1032,12 +1134,22 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
       const projX = p.x + t * dx;
       const projY = p.y + t * dy;
       const dist = Math.hypot(world.x - projX, world.y - projY);
+      if (isSegmentPinned(idx)) {
+        if (dist < lockedBestDist) {
+          lockedBestDist = dist;
+          lockedBest = idx;
+        }
+        return;
+      }
       if (dist < bestDist) {
         bestDist = dist;
         best = idx;
         bestProj = { x: projX, y: projY };
       }
     });
+    const picked = best ?? lockedBest;
+    // Splitting and dragging stay off limits for a locked wall; only selection
+    // falls through to it.
     if (!isDoorPlacementMode && e.shiftKey && onSegmentInsert && best !== null && bestProj) {
       e.preventDefault();
       e.stopPropagation();
@@ -1045,11 +1157,16 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
       suppressClickRef.current = true;
       return;
     }
-    onSegmentSelect?.(best);
+    onSegmentSelect?.(picked);
     if (best !== null && onSegmentDragStart) {
       onSegmentDragStart(best, world);
       suppressClickRef.current = true;
       onDragStateChange?.(true);
+    } else if (picked !== null) {
+      // Selecting a locked wall starts no drag, so without this the click that
+      // follows reaches the canvas as a "clicked empty space" deselect and the
+      // panel vanishes the moment the button comes back up.
+      suppressClickRef.current = true;
     }
   };
 
@@ -1079,6 +1196,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           let best: number | null = null;
           let bestDist = 250; // mm
           safePoints.forEach((p, idx) => {
+            if (isSegmentPinned(idx)) return;
             const next = safePoints[(idx + 1) % safePoints.length];
             const dx = next.x - p.x;
             const dy = next.y - p.y;
@@ -1159,6 +1277,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             })()}
             {!lockShell &&
               safePoints.map((p, idx) => {
+                // A corner shared with a locked wall would drag that wall too.
+                if (isVertexPinned(idx)) return null;
                 const { x: cx, y: cy } = toCanvasCoord(p);
                 return (
                   <g key={`pt-${idx}`}>
@@ -1171,6 +1291,35 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       strokeWidth={handleStrokeWidth}
                       vectorEffect="non-scaling-stroke"
                       onPointerDown={handleDragStart(idx)}
+                    />
+                  </g>
+                );
+              })}
+            {/* Locked walls: drawn amber so the pin is visible while editing. */}
+            {showWalls && showLockIndicators &&
+              safePoints.map((p, idx) => {
+                if (!lockedSegmentSet.has(idx)) return null;
+                const next = safePoints[(idx + 1) % safePoints.length];
+                if (!next) return null;
+                const { x: x1, y: y1 } = toCanvasCoord(p);
+                const { x: x2, y: y2 } = toCanvasCoord(next);
+                return (
+                  <g key={`locked-seg-${idx}`}>
+                    <line
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      stroke="#fbbf24"
+                      strokeWidth={selectedSegment === idx ? 5 : 3}
+                      strokeOpacity={selectedSegment === idx ? 1 : 0.75}
+                      vectorEffect="non-scaling-stroke"
+                      style={{ pointerEvents: 'none' }}
+                    />
+                    <LockBadge
+                      x={(x1 + x2) / 2}
+                      y={(y1 + y2) / 2}
+                      label={`Wall ${idx + 1} is locked - select it to unlock`}
                     />
                   </g>
                 );
@@ -1241,6 +1390,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                 const isHovered = hoveredSegment === idx;
                 const isSelected = selectedSegment === idx;
                 if (!isHovered && !isSelected) return null;
+                // A stale hover/selection must not survive the wall being locked.
+                if (isSegmentPinned(idx)) return null;
                 const midX = (x1 + x2) / 2;
                 const midY = (y1 + y2) / 2;
                 const lenLabel = formatLength(Math.hypot(next.x - p.x, next.y - p.y));
@@ -1274,6 +1425,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             {/* Clickable wall segments for door placement */}
             {isDoorPlacementMode &&
               safePoints.map((p, idx) => {
+                // No new doors on a locked wall.
+                if (isSegmentPinned(idx)) return null;
                 const next = safePoints[(idx + 1) % safePoints.length];
                 const { x: x1, y: y1 } = toCanvasCoord(p);
                 const { x: x2, y: y2 } = toCanvasCoord(next);
@@ -1313,6 +1466,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
               })}
             {!lockShell &&
               selectedSegment !== null &&
+              selectedSegment !== undefined &&
+              !isSegmentPinned(selectedSegment) &&
               (() => {
                 const p = safePoints[selectedSegment];
                 const next = safePoints[(selectedSegment + 1) % safePoints.length];
@@ -1427,6 +1582,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           // Make swing radius same as door width in world coordinates (so it's proportional)
           const swingRadius = canvasDoorWidth;
 
+          // The lock still blocks dragging everywhere; only its decoration is
+          // limited to the builder, so read-only views look untouched.
+          const isLockedDoor = !!door.locked;
+          const showDoorLock = isLockedDoor && showLockIndicators;
+          // Same as furniture: a locked door still selects, it just never moves.
           const isSelected = selectedDoorId === door.id;
 
           // Calculate hinge position and swing direction
@@ -1467,8 +1627,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     y={Math.min(-15, arcEndY - 15)}
                     width={canvasDoorWidth + 20}
                     height={Math.abs(arcEndY) + 30}
-                    fill="rgba(6, 182, 212, 0.1)"
-                    stroke="#06b6d4"
+                    fill={showDoorLock ? 'rgba(251, 191, 36, 0.1)' : 'rgba(6, 182, 212, 0.1)'}
+                    stroke={showDoorLock ? '#fbbf24' : '#06b6d4'}
                     strokeWidth={2}
                     strokeDasharray="4 4"
                     rx={4}
@@ -1483,13 +1643,24 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   width={canvasDoorWidth + 20}
                   height={Math.abs(arcEndY) + 30}
                   fill="transparent"
-                  style={{ cursor: isSelected ? 'grab' : 'pointer' }}
+                  style={{
+                    cursor: isLockedDoor ? 'not-allowed' : isSelected ? 'grab' : 'pointer',
+                    pointerEvents: 'all',
+                  }}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
                     e.stopPropagation();
                     if (e.cancelable) e.preventDefault();
-                    capturePointer(e);
                     suppressClickRef.current = true;
+
+                    // Locked: select it so the panel opens and says why, but do
+                    // not capture the pointer or begin a drag.
+                    if (isLockedDoor) {
+                      onDoorSelect?.(door.id);
+                      return;
+                    }
+
+                    capturePointer(e);
 
                     // Select the door
                     onDoorSelect?.(door.id);
@@ -1550,6 +1721,13 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   style={{ pointerEvents: 'none' }}
                 />
               </g>
+              {showDoorLock && (
+                <LockBadge
+                  x={canvasDoorPos.x}
+                  y={canvasDoorPos.y}
+                  label="Door is locked - select it to unlock"
+                />
+              )}
             </g>
           );
         })}
@@ -1584,6 +1762,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           const canvasPos = toCanvasCoord({ x: displayX, y: displayY });
           const canvasWidth = toCanvas(displayWidth, effectiveRangeMm);
           const canvasHeight = toCanvas(displayDepth, effectiveRangeMm);
+          const isLockedItem = !!item.locked;
+          const showItemLock = isLockedItem && showLockIndicators;
+          // A locked item still selects, so a left click always visibly does
+          // something and the editor panel can explain the lock. It just never
+          // starts a move.
           const isSelected = selectedFurnitureId === item.id;
           const Icon = getFurnitureIcon(item.typeId);
           const customType = getCustomFurnitureType(customFurniture, item.typeId);
@@ -1626,18 +1809,27 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   width={canvasWidth}
                   height={canvasHeight}
                   fill="transparent"
-                  stroke={isSelected ? '#0ea5e9' : 'transparent'}
-                  strokeWidth={isSelected ? 2 : 0}
-                  strokeDasharray={isSelected ? '4 2' : undefined}
+                  stroke={showItemLock ? '#fbbf24' : isSelected ? '#0ea5e9' : 'transparent'}
+                  strokeWidth={showItemLock ? (isSelected ? 2.5 : 2) : isSelected ? 2 : 0}
+                  strokeDasharray={isSelected || showItemLock ? '4 2' : undefined}
                   rx={3}
-                  style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+                  style={{
+                    cursor: isLockedItem ? 'not-allowed' : isDragging ? 'grabbing' : 'grab',
+                    pointerEvents: 'all',
+                  }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     if (e.cancelable) e.preventDefault();
+                    suppressClickRef.current = true;
+                    // Locked: select it so the panel opens and says why, but do
+                    // not capture the pointer or begin a drag.
+                    if (isLockedItem) {
+                      onFurnitureSelect?.(item.id);
+                      return;
+                    }
                     capturePointer(e);
                     const worldPos = toWorldFromEvent(e as any);
                     if (!worldPos) return;
-                    suppressClickRef.current = true;
                     setFurnitureDrag({ id: item.id, start: worldPos, basePos: { x: item.x, y: item.y } });
                     onDragStateChange?.(true);
                     onFurnitureSelect?.(item.id);
@@ -1648,8 +1840,16 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                 />
               </g>
 
-              {/* Resize handles (only when selected and not dragging/rotating) */}
-              {isSelected && !isDragging && !isResizing && !isRotating && (() => {
+              {showItemLock && (
+                <LockBadge
+                  x={canvasPos.x}
+                  y={canvasPos.y}
+                  label="Furniture is locked - select it to unlock"
+                />
+              )}
+
+              {/* Resize handles (only when selected, unlocked and not dragging/rotating) */}
+              {isSelected && !isLockedItem && !isDragging && !isResizing && !isRotating && (() => {
                 const handleSize = 14;
                 const handles: Array<{ corner: 'nw' | 'ne' | 'sw' | 'se'; x: number; y: number; cursor: string }> = [
                   { corner: 'nw', x: -canvasWidth / 2, y: -canvasHeight / 2, cursor: 'nwse-resize' },
@@ -2107,16 +2307,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       y={-iconSize / 2}
                       width={iconSize}
                       height={iconSize}
-                      style={{ cursor: 'grab', pointerEvents: 'all' }}
-                      onPointerDown={(e) => {
-                        if (e.button !== 0) return;
-                        e.stopPropagation();
-                        if (e.cancelable) e.preventDefault();
-                        capturePointer(e);
-                        suppressClickRef.current = true;
-                        setDragDevice(true);
-                        onDragStateChange?.(true);
+                      style={{
+                        cursor: devicePositionLocked ? (onDeviceClick ? 'pointer' : 'not-allowed') : 'grab',
+                        pointerEvents: 'all',
                       }}
+                      onPointerDown={handleDevicePointerDown}
+                      onPointerUp={handleDevicePointerUp}
                     />
                   </g>
                 ) : (
@@ -2128,16 +2324,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       fill="#3b82f6"
                       stroke="#1d4ed8"
                       strokeWidth={2}
-                      onPointerDown={(e) => {
-                        if (e.button !== 0) return;
-                        e.stopPropagation();
-                        if (e.cancelable) e.preventDefault();
-                        capturePointer(e);
-                        suppressClickRef.current = true;
-                        setDragDevice(true);
-                        onDragStateChange?.(true);
+                      onPointerDown={handleDevicePointerDown}
+                      onPointerUp={handleDevicePointerUp}
+                      style={{
+                        cursor: devicePositionLocked ? (onDeviceClick ? 'pointer' : 'not-allowed') : 'grab',
                       }}
-                      style={{ cursor: 'grab' }}
                     />
                     <line
                       x1={px}
@@ -2147,8 +2338,17 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       stroke="#ffffff"
                       strokeWidth={3}
                       strokeLinecap="round"
+                      // Drawn over the icon, so it must not steal its clicks.
+                      style={{ pointerEvents: 'none' }}
                     />
                   </>
+                )}
+                {devicePositionLocked && showLockIndicators && (
+                  <LockBadge
+                    x={px + iconSize / 2}
+                    y={py - iconSize / 2}
+                    label="Device position is locked - rotation is still adjustable"
+                  />
                 )}
               </g>
             );
