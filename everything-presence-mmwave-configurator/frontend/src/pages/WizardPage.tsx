@@ -827,7 +827,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         return;
       }
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (selectedRoom?.roomShell?.points?.length) {
+        // Only while drawing: on a finished outline this would delete points the
+        // user never placed in this session.
+        if (isDrawingWall && selectedRoom?.roomShell?.points?.length) {
           e.preventDefault();
           removeLastPoint();
         }
@@ -2036,9 +2038,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               <button
                 className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
                 onClick={removeLastPoint}
-                disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+                title="Remove the point you just drew"
+                disabled={!selectedRoom || !isDrawingWall || !(selectedRoom.roomShell?.points?.length)}
               >
-                ↶ Undo (Del)
+                ⤺ Remove last point (Del)
               </button>
               <button
                 className="rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 text-sm font-semibold text-rose-100 shadow-lg transition-all hover:bg-rose-600/20 disabled:opacity-40 active:scale-95"
@@ -2383,9 +2386,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                     <button
                       className="rounded-lg border border-amber-600/50 bg-amber-600/20 px-3 py-3 text-sm font-semibold text-amber-100 disabled:opacity-40"
                       onClick={removeLastPoint}
-                      disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+                      disabled={!selectedRoom || !isDrawingWall || !(selectedRoom.roomShell?.points?.length)}
                     >
-                      Undo
+                      Remove point
                     </button>
                     <button
                       className="rounded-lg border border-rose-600/50 bg-rose-600/20 px-3 py-3 text-sm font-semibold text-rose-100 disabled:opacity-40"
