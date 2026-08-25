@@ -43,6 +43,36 @@ test('snapshots only the room-builder subset and deep copies it', () => {
   assert.equal(snapshot.furniture[0].x, 0);
 });
 
+test('lock state is snapshotted and deep copied', () => {
+  const original = room();
+  original.roomShell.lockedSegments = [0, 2];
+  original.furniture[0].locked = true;
+  original.doors[0].locked = true;
+
+  const snapshot = snapshotRoom(original);
+
+  // Rewriting the live outline's locked walls must not reach into the snapshot.
+  original.roomShell.lockedSegments[0] = 9;
+  original.furniture[0].locked = false;
+  assert.deepEqual(snapshot.roomShell.lockedSegments, [0, 2]);
+  assert.equal(snapshot.furniture[0].locked, true);
+  assert.equal(snapshot.doors[0].locked, true);
+});
+
+test('locking a wall is an undoable change', () => {
+  const before = snapshotRoom(room());
+  const locked = room();
+  locked.roomShell.lockedSegments = [1];
+  const after = snapshotRoom(locked);
+
+  assert.equal(snapshotsEqual(before, after), false);
+
+  const history = pushRoomHistory(createRoomHistory(), before);
+  const undone = undoRoomHistory(history, after);
+  assert.ok(undone);
+  assert.equal(undone.snapshot.roomShell.lockedSegments, undefined);
+});
+
 test('applying a snapshot restores the outline without touching zones', () => {
   const before = snapshotRoom(room());
   const edited = { ...room(), roomShell: { points: [] }, zones: [] };

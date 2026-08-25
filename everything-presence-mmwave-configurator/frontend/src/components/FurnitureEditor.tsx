@@ -8,6 +8,8 @@ interface FurnitureEditorProps {
   onChange: (furniture: FurnitureInstance) => void;
   onDelete: () => void;
   onClose?: () => void;
+  /** Pins this item so it can no longer be selected or dragged on the canvas. */
+  onToggleLock?: () => void;
 }
 
 export const FurnitureEditor: React.FC<FurnitureEditorProps> = ({
@@ -15,9 +17,11 @@ export const FurnitureEditor: React.FC<FurnitureEditorProps> = ({
   onChange,
   onDelete,
   onClose,
+  onToggleLock,
 }) => {
   const furnitureType = getFurnitureType(furniture.typeId);
   const Icon = getFurnitureIcon(furniture.typeId);
+  const isLocked = !!furniture.locked;
 
   const handleChange = (updates: Partial<FurnitureInstance>) => {
     onChange({ ...furniture, ...updates });
@@ -35,22 +39,51 @@ export const FurnitureEditor: React.FC<FurnitureEditorProps> = ({
           )}
           <h2 className="text-lg font-semibold text-white">{furnitureType?.label || 'Furniture'}</h2>
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors"
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onToggleLock && (
+            <button
+              onClick={onToggleLock}
+              className={`transition-colors ${isLocked ? 'text-amber-400 hover:text-amber-300' : 'text-slate-400 hover:text-amber-300'}`}
+              aria-label={isLocked ? 'Unlock furniture' : 'Lock furniture'}
+              aria-pressed={isLocked}
+              title={isLocked ? 'Unlock this item' : 'Lock this item so it cannot be selected or moved'}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d={isLocked
+                    ? 'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18.75v-6a2.25 2.25 0 012.25-2.25z'
+                    : 'M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H3.75A2.25 2.25 0 011.5 18.75v-6a2.25 2.25 0 012.25-2.25z'}
+                />
+              </svg>
+            </button>
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Content */}
+      {isLocked && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs text-amber-200">
+          <span className="font-semibold">Locked.</span> This item is pinned in place, so it cannot be
+          dragged, resized or deleted. Use the padlock above to unlock it first.
+        </div>
+      )}
+
+      {/* Content - inert while locked, so the padlock above is the only way forward */}
       <div
-        className="flex-1 overflow-y-auto px-6 py-4 space-y-6"
+        className={`flex-1 overflow-y-auto px-6 py-4 space-y-6 ${isLocked ? 'pointer-events-none opacity-50' : ''}`}
+        aria-disabled={isLocked || undefined}
         onWheelCapture={(e) => e.stopPropagation()}
       >
         {/* Position */}
@@ -172,7 +205,9 @@ export const FurnitureEditor: React.FC<FurnitureEditorProps> = ({
       <div className="px-6 py-4 border-t border-slate-700 space-y-2">
         <button
           onClick={onDelete}
-          className="w-full px-4 py-2.5 rounded-lg bg-rose-600/10 border border-rose-600/50 text-rose-100 font-semibold hover:bg-rose-600/20 transition-all active:scale-95"
+          disabled={isLocked}
+          title={isLocked ? 'Unlock this item before deleting it' : undefined}
+          className="w-full px-4 py-2.5 rounded-lg bg-rose-600/10 border border-rose-600/50 text-rose-100 font-semibold hover:bg-rose-600/20 transition-all active:scale-95 disabled:opacity-40 disabled:hover:bg-rose-600/10 disabled:active:scale-100"
         >
           Delete Furniture
         </button>

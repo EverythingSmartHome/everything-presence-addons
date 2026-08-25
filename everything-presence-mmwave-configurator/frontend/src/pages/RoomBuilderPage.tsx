@@ -32,6 +32,26 @@ import {
   normalizeCeilingSliceConfig,
 } from '../utils/ceilingSlices';
 import { resolveLoadedRoomSelection } from '../utils/roomSelection';
+import {
+  applyDevicePlacementUpdate,
+  areAllItemsLocked,
+  areAllSegmentsLocked,
+  countLockedObjects,
+  getLockedSegments,
+  isDevicePositionLocked,
+  isSegmentLocked,
+  isShellLocked,
+  isVertexLocked,
+  normalizeLockedSegments,
+  remapDoorsForPointRemoval,
+  remapDoorsForSplit,
+  remapLockedSegmentsForPointRemoval,
+  remapLockedSegmentsForSplit,
+  resolveLockedUpdate,
+  setItemsLocked,
+  setShellLocked,
+  toggleSegmentLock,
+} from '../utils/lockState';
 import { stableStringify } from '../utils/stableStringify';
 import {
   ROOM_HISTORY_LIMIT,
@@ -77,6 +97,16 @@ const roomSignature = (room: RoomConfig | null | undefined): string => (room ? s
 // move, so those commits share a key and collapse onto the first snapshot until
 // the gesture ends.
 type CommitRoomOptions = { coalesceKey?: string };
+
+/**
+ * A points edit normally carries the outline's locks through untouched.
+ * `lockedSegments` and `doors` are only passed by the two edits that renumber
+ * walls (splitting one, deleting a corner), which have to remap them.
+ */
+type PointsChangeOptions = CommitRoomOptions & {
+  lockedSegments?: number[];
+  doors?: Door[];
+};
 
 export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   onBack,
@@ -303,7 +333,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const updateDevicePlacement = useCallback((updates: Partial<DevicePlacement>) => {
     if (!selectedRoom) return;
     const base: DevicePlacement = selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 };
-    const nextPlacement: DevicePlacement = { ...base, ...updates };
+    // A locked device keeps its coordinates; rotation, mounting and coverage
+    // all still apply, so aiming the sensor is unaffected.
+    const nextPlacement: DevicePlacement = applyDevicePlacementUpdate(base, updates);
     const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: nextPlacement };
     commitRoom(nextRoom, { coalesceKey: 'device:placement' });
   }, [commitRoom, selectedRoom]);
@@ -439,10 +471,96 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   }, [selectedRoom?.deviceId, rotationSuggestion, resolveInstallationAngleEntityId]);
 
-  const handlePointsChange = useCallback((nextPoints: { x: number; y: number }[], options?: CommitRoomOptions) => {
+  const handlePointsChange = useCallback((nextPoints: { x: number; y: number }[], options?: PointsChangeOptions) => {
     if (!selectedRoom) return;
-    const updated: RoomConfig = { ...selectedRoom, roomShell: { points: nextPoints } };
+    const previousShell = selectedRoom.roomShell;
+    // Locks are part of the outline, so rebuilding `roomShell` here has to carry
+    // them over or every wall edit would silently unlock the room.
+    const lockedSegments = normalizeLockedSegments(
+      options?.lockedSegments ?? previousShell?.lockedSegments,
+      nextPoints.length,
+    );
+    const updated: RoomConfig = {
+      ...selectedRoom,
+      roomShell: {
+        ...previousShell,
+        points: nextPoints,
+        locked: previousShell?.locked ? true : undefined,
+        lockedSegments: lockedSegments.length ? lockedSegments : undefined,
+      },
+      ...(options?.doors?.length ? { doors: options.doors } : {}),
+    };
     commitRoom(updated, options);
+  }, [commitRoom, selectedRoom]);
+
+  // ── Object locking ────────────────────────────────────────────────────────
+  // A locked object is pinned: the canvas drops it from hit-testing so it can no
+  // longer be selected or dragged by accident, and the mutation handlers below
+  // refuse every edit except the one that unlocks it again.
+  const activeShell = selectedRoom?.roomShell;
+  const shellPointCount = activeShell?.points?.length ?? 0;
+  const lockedWallSegments = useMemo(
+    () => getLockedSegments(activeShell, shellPointCount),
+    [activeShell, shellPointCount],
+  );
+  const wholeRoomLocked = isShellLocked(activeShell);
+  const allWallsLocked = areAllSegmentsLocked(activeShell);
+  const allFurnitureLocked = areAllItemsLocked(selectedRoom?.furniture);
+  const allDoorsLocked = areAllItemsLocked(selectedRoom?.doors);
+  const selectedSegmentLocked = isSegmentLocked(activeShell, selectedSegment);
+  const devicePositionLocked = isDevicePositionLocked(selectedRoom?.devicePlacement);
+  const lockedObjectCount = countLockedObjects(selectedRoom) + (devicePositionLocked ? 1 : 0);
+
+  /**
+   * Locking never closes the object's editor panel: the panel is where the lock
+   * was turned on, so it has to stay put as the way to turn it off again. Its
+   * controls go inert instead, and the canvas stops hit-testing the object.
+   */
+  const handleSegmentLockToggle = useCallback((index: number) => {
+    const shell = selectedRoom?.roomShell;
+    if (!selectedRoom || !shell?.points?.length) return;
+    commitRoom({ ...selectedRoom, roomShell: toggleSegmentLock(shell, index) });
+    setHoveredSegment(null);
+  }, [commitRoom, selectedRoom]);
+
+  const handleShellLockChange = useCallback((locked: boolean) => {
+    const shell = selectedRoom?.roomShell;
+    if (!selectedRoom || !shell?.points?.length) return;
+    commitRoom({ ...selectedRoom, roomShell: setShellLocked(shell, locked) });
+    setHoveredSegment(null);
+  }, [commitRoom, selectedRoom]);
+
+  const handleFurnitureLockToggle = useCallback((id: string) => {
+    if (!selectedRoom) return;
+    const existing = (selectedRoom.furniture ?? []).find((f) => f.id === id);
+    if (!existing) return;
+    const locked = !existing.locked;
+    commitRoom({
+      ...selectedRoom,
+      furniture: (selectedRoom.furniture ?? []).map((f) =>
+        (f.id === id ? { ...f, locked: locked ? true : undefined } : f)),
+    });
+  }, [commitRoom, selectedRoom]);
+
+  const handleDoorLockToggle = useCallback((id: string) => {
+    if (!selectedRoom) return;
+    const existing = (selectedRoom.doors ?? []).find((d) => d.id === id);
+    if (!existing) return;
+    const locked = !existing.locked;
+    commitRoom({
+      ...selectedRoom,
+      doors: (selectedRoom.doors ?? []).map((d) => (d.id === id ? { ...d, locked: locked ? true : undefined } : d)),
+    });
+  }, [commitRoom, selectedRoom]);
+
+  const handleLockAllFurniture = useCallback((locked: boolean) => {
+    if (!selectedRoom?.furniture?.length) return;
+    commitRoom({ ...selectedRoom, furniture: setItemsLocked(selectedRoom.furniture, locked) });
+  }, [commitRoom, selectedRoom]);
+
+  const handleLockAllDoors = useCallback((locked: boolean) => {
+    if (!selectedRoom?.doors?.length) return;
+    commitRoom({ ...selectedRoom, doors: setItemsLocked(selectedRoom.doors, locked) });
   }, [commitRoom, selectedRoom]);
 
   const handleAddFurniture = useCallback((furnitureType: FurnitureType) => {
@@ -483,9 +601,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleFurnitureChange = useCallback((updatedFurniture: FurnitureInstance) => {
     if (!selectedRoom) return;
+    // Canvas gating alone is not enough: the editor panel writes here too, as
+    // does any drag still in flight. A locked item accepts nothing but unlocking.
+    const existing = (selectedRoom.furniture ?? []).find((f) => f.id === updatedFurniture.id);
+    const nextFurniture = resolveLockedUpdate(existing, updatedFurniture);
+    if (!nextFurniture) return;
     const updated: RoomConfig = {
       ...selectedRoom,
-      furniture: (selectedRoom.furniture ?? []).map((f) => (f.id === updatedFurniture.id ? updatedFurniture : f)),
+      furniture: (selectedRoom.furniture ?? []).map((f) => (f.id === updatedFurniture.id ? nextFurniture : f)),
     };
     // Dragging, resizing, rotating and the sliders all land here per input
     // event - one key per item keeps a whole gesture at one undo step.
@@ -494,6 +617,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleFurnitureDelete = useCallback(() => {
     if (!selectedRoom || !selectedFurnitureId) return;
+    // Pinned means pinned: unlock it first.
+    if ((selectedRoom.furniture ?? []).some((f) => f.id === selectedFurnitureId && f.locked)) return;
     const updated: RoomConfig = {
       ...selectedRoom,
       furniture: (selectedRoom.furniture ?? []).filter((f) => f.id !== selectedFurnitureId),
@@ -520,9 +645,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleDoorChange = useCallback((updatedDoor: Door) => {
     if (!selectedRoom) return;
+    // Door drags are routed through the host, so the canvas gate alone would
+    // still leave a locked door movable. A locked door accepts only unlocking.
+    const existing = (selectedRoom.doors ?? []).find((d) => d.id === updatedDoor.id);
+    const nextDoor = resolveLockedUpdate(existing, updatedDoor);
+    if (!nextDoor) return;
     const updated: RoomConfig = {
       ...selectedRoom,
-      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? updatedDoor : d)),
+      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? nextDoor : d)),
     };
     // Sliding a door along a wall fires per pointer move; coalesce per door.
     commitRoom(updated, { coalesceKey: `door:${updatedDoor.id}` });
@@ -530,6 +660,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleDoorDelete = useCallback(() => {
     if (!selectedRoom || !selectedDoorId) return;
+    // Pinned means pinned: unlock it first.
+    if ((selectedRoom.doors ?? []).some((d) => d.id === selectedDoorId && d.locked)) return;
     const updated: RoomConfig = {
       ...selectedRoom,
       doors: (selectedRoom.doors ?? []).filter((d) => d.id !== selectedDoorId),
@@ -553,6 +685,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleWallSegmentClick = useCallback((segmentIndex: number, positionOnSegment: number) => {
     if (!selectedRoom || !isDoorPlacementMode) return;
+    if (isSegmentLocked(selectedRoom.roomShell, segmentIndex)) return;
 
     const newDoor: Door = {
       id: generateId(),
@@ -573,7 +706,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleDoorDragStart = useCallback((doorId: string, x: number, y: number) => {
     const door = selectedRoom?.doors?.find((d) => d.id === doorId);
-    if (!door) return;
+    if (!door || door.locked) return;
     setDoorDrag({
       doorId,
       startX: x,
@@ -586,7 +719,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     if (!doorDrag || !selectedRoom) return;
 
     const door = selectedRoom.doors?.find((d) => d.id === doorDrag.doorId);
-    if (!door || !selectedRoom.roomShell?.points) return;
+    if (!door || door.locked || !selectedRoom.roomShell?.points) return;
 
     const pts = selectedRoom.roomShell.points;
     if (door.segmentIndex < 0 || door.segmentIndex >= pts.length) return;
@@ -820,6 +953,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleApplyBasicShape = (points: RoomShapePoint[], selection: BasicRoomShapeSelection) => {
     if (!selectedRoom) return;
+    // Replacing the outline would take locked walls with it.
+    if (lockedWallSegments.length) {
+      window.alert('Some walls are locked. Unlock them before replacing the room shape.');
+      return;
+    }
     if (selectedRoom.roomShell?.points?.length && !window.confirm(
       'Replace the current walls? Manual wall adjustments and doors attached to those walls will be removed.'
     )) return;
@@ -851,8 +989,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       stopDrawing();
       return;
     }
-    // Clearing removes every wall at once, so ask first even though Undo can
-    // now bring them back within this session.
+    // Clearing removes every wall at once, including any that are pinned.
+    if (lockedWallSegments.length) {
+      window.alert('Some walls are locked. Unlock them before clearing the room outline.');
+      return;
+    }
+    // Ask first even though Undo can now bring them back within this session.
     setShowClearConfirm(true);
   };
 
@@ -913,13 +1055,26 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const deleteSelectedWallPoint = useCallback(() => {
     const ptsDelete = selectedRoom?.roomShell?.points ?? [];
     if (selectedSegment === null || ptsDelete.length <= 2) return;
+    if (isSegmentLocked(selectedRoom?.roomShell, selectedSegment)) return;
 
     const removeIdx = (selectedSegment + 1) % ptsDelete.length;
+    // Removing a corner merges the two walls that meet at it, so the other one
+    // has to be unlocked too before this is allowed.
+    if (isSegmentLocked(selectedRoom?.roomShell, removeIdx)) return;
     const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
-    handlePointsChange(nextDelete);
+    // Every later wall is renumbered; locks and doors are anchored by index and
+    // have to follow, or they end up attached to the wrong wall.
+    handlePointsChange(nextDelete, {
+      lockedSegments: remapLockedSegmentsForPointRemoval(
+        selectedRoom?.roomShell?.lockedSegments,
+        removeIdx,
+        ptsDelete.length,
+      ),
+      doors: remapDoorsForPointRemoval(selectedRoom?.doors, removeIdx, ptsDelete.length),
+    });
     setSelectedSegment(null);
     setHoveredSegment(null);
-  }, [handlePointsChange, selectedRoom?.roomShell?.points, selectedSegment]);
+  }, [handlePointsChange, selectedRoom?.doors, selectedRoom?.roomShell, selectedSegment]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1022,6 +1177,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const adjustSegmentLength = (meters: number) => {
     if (selectedSegment === null || !selectedRoom?.roomShell?.points) return;
+    if (isSegmentLocked(selectedRoom.roomShell, selectedSegment)) return;
     const pts = selectedRoom.roomShell.points;
     if (pts.length < 2) return;
     const start = pts[selectedSegment];
@@ -1052,6 +1208,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const offsetSegmentNormal = (meters: number) => {
     if (selectedSegment === null || !selectedRoom?.roomShell?.points) return;
+    if (isSegmentLocked(selectedRoom.roomShell, selectedSegment)) return;
     const pts = selectedRoom.roomShell.points;
     if (pts.length < 2) return;
     const aIdx = selectedSegment;
@@ -1237,6 +1394,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const insertPointOnSegment = useCallback((segmentIndex: number, point?: { x: number; y: number }) => {
     if (!selectedRoom?.roomShell?.points) return;
     if (isDrawingWall || isDoorPlacementMode) return;
+    if (isSegmentLocked(selectedRoom.roomShell, segmentIndex)) return;
     const pts = selectedRoom.roomShell.points;
     if (pts.length < 2) return;
     const a = pts[segmentIndex];
@@ -1252,7 +1410,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const insertIndex = segmentIndex === pts.length - 1 ? pts.length : segmentIndex + 1;
     const next = [...pts];
     next.splice(insertIndex, 0, snapped);
-    handlePointsChange(next);
+    // Splitting shifts every later wall index up by one, so the index-anchored
+    // locks and doors have to be carried across with it.
+    const segmentLength = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const splitRatio = Math.hypot(snapped.x - a.x, snapped.y - a.y) / segmentLength;
+    handlePointsChange(next, {
+      lockedSegments: remapLockedSegmentsForSplit(selectedRoom.roomShell.lockedSegments, segmentIndex),
+      doors: remapDoorsForSplit(selectedRoom.doors, segmentIndex, splitRatio),
+    });
     setSelectedSegment(segmentIndex);
   }, [selectedRoom, isDrawingWall, isDoorPlacementMode, snapPointToGrid, handlePointsChange]);
 
@@ -1853,6 +2018,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   }}
                   onDragStateChange={setIsCanvasDragging}
                   lockShell={!!activeBasicShape}
+                  lockedSegments={lockedWallSegments}
+                  // Padlocks are an editing affordance, so only the builder shows them.
+                  showLockIndicators
                   showAllWallLengthLabels={!!activeBasicShape}
                   onWallLengthChange={activeBasicShape ? (segmentIndex, lengthMm) => {
                     try {
@@ -1884,6 +2052,18 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     }
                   }
                   onDeviceChange={(placement) => updateDevicePlacement(placement)}
+                  // Clicking the device without moving it is a selection: open its
+                  // settings, the same way clicking furniture opens the furniture panel.
+                  onDeviceClick={() => {
+                    setSelectedFurnitureId(null);
+                    setSelectedDoorId(null);
+                    setSelectedSegment(null);
+                    setHoveredSegment(null);
+                    setShowFurnitureLibrary(false);
+                    setActiveMobileSheet(null);
+                    setSettingsTab('device');
+                    setShowSettings(true);
+                  }}
                   fieldOfViewDeg={coverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees}
                   maxRangeMeters={effectiveCoverageMaxRangeMeters}
                   deviceIconUrl={deviceIconUrl}
@@ -1907,6 +2087,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   onSegmentDragStart={(idx, start) => {
                     const pts = selectedRoom?.roomShell?.points ?? [];
                     if (!pts.length) return;
+                    // Dragging a wall moves both of its corners, and with them
+                    // the neighbouring walls - refuse if any of that is locked.
+                    if (
+                      isSegmentLocked(selectedRoom?.roomShell, idx) ||
+                      isVertexLocked(selectedRoom?.roomShell, idx, pts.length) ||
+                      isVertexLocked(selectedRoom?.roomShell, (idx + 1) % pts.length, pts.length)
+                    ) return;
                     setSegmentDragIndex(idx);
                     setSegmentDragStart(start);
                     setSegmentDragBase(pts);
@@ -1915,6 +2102,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   onEndpointDragStart={(segment, endpoint, start) => {
                     const pts = selectedRoom?.roomShell?.points ?? [];
                     if (!pts.length) return;
+                    const cornerIdx = endpoint === 'start' ? segment : (segment + 1) % pts.length;
+                    // The corner is shared with the neighbouring wall.
+                    if (isVertexLocked(selectedRoom?.roomShell, cornerIdx, pts.length)) return;
                     setEndpointDrag({ segment, endpoint, start, base: pts });
                     setSegmentDragIndex(null);
                     setSegmentDragStart(null);
@@ -2315,13 +2505,37 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
                       {settingsTab === 'device' && (
                       <div className="space-y-1">
-                        <div className="font-semibold text-slate-200">Device placement</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-semibold text-slate-200">Device placement</div>
+                          <button
+                            type="button"
+                            aria-pressed={devicePositionLocked}
+                            title={devicePositionLocked
+                              ? 'Unlock the device position'
+                              : 'Lock the device position. Rotation stays adjustable.'}
+                            onClick={() => updateDevicePlacement({ locked: !devicePositionLocked })}
+                            className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+                              devicePositionLocked
+                                ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                : 'border-slate-700 text-slate-200 hover:border-amber-400'
+                            }`}
+                          >
+                            {devicePositionLocked ? '🔒 Position locked' : '🔓 Lock position'}
+                          </button>
+                        </div>
+                        {devicePositionLocked && (
+                          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+                            Position is locked — the device cannot be dragged on the canvas. Rotation,
+                            mounting and coverage are still adjustable.
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 gap-2">
                           <label className="flex items-center gap-2">
                             <span className="w-6">X</span>
                             <input
                               type="number"
-                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              disabled={devicePositionLocked}
+                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-40"
                               value={selectedRoom?.devicePlacement?.x ?? 0}
                               onChange={(e) => {
                                 updateDevicePlacement({ x: Number(e.target.value) || 0 });
@@ -2332,7 +2546,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             <span className="w-6">Y</span>
                             <input
                               type="number"
-                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              disabled={devicePositionLocked}
+                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-40"
                               value={selectedRoom?.devicePlacement?.y ?? 0}
                               onChange={(e) => {
                                 updateDevicePlacement({ y: Number(e.target.value) || 0 });
@@ -2367,7 +2582,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             onClick={() => {
                               updateDevicePlacement({ x: 0, y: 0 });
                             }}
-                            disabled={!selectedRoom}
+                            disabled={!selectedRoom || devicePositionLocked}
+                            title={devicePositionLocked ? 'Unlock the device position first' : undefined}
                           >
                             Center
                           </button>
@@ -2613,6 +2829,75 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           zoneLabelScale,
                           setZoneLabelScale,
                         }}
+                        extraSections={
+                          <div className="space-y-2 border-t border-slate-700/70 pt-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Locking</div>
+                              {lockedObjectCount > 0 && (
+                                <span className="rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                                  {lockedObjectCount} locked
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] leading-snug text-slate-500">
+                              A locked object can still be clicked to open its panel, but nothing moves it.
+                              Unlock it with the padlock in that panel.
+                            </p>
+                            <button
+                              type="button"
+                              disabled={shellPointCount === 0}
+                              aria-pressed={allWallsLocked}
+                              onClick={() => handleShellLockChange(!allWallsLocked)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                allWallsLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {allWallsLocked ? '🔓 Unlock all walls' : '🔒 Lock all walls'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!selectedRoom?.furniture?.length}
+                              aria-pressed={allFurnitureLocked}
+                              onClick={() => handleLockAllFurniture(!allFurnitureLocked)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                allFurnitureLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {allFurnitureLocked ? '🔓 Unlock all furniture' : '🔒 Lock all furniture'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!selectedRoom?.doors?.length}
+                              aria-pressed={allDoorsLocked}
+                              onClick={() => handleLockAllDoors(!allDoorsLocked)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                allDoorsLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {allDoorsLocked ? '🔓 Unlock all doors' : '🔒 Lock all doors'}
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={devicePositionLocked}
+                              title="Locks where the device sits. Rotation stays adjustable."
+                              onClick={() => updateDevicePlacement({ locked: !devicePositionLocked })}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                devicePositionLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {devicePositionLocked ? '🔓 Unlock device position' : '🔒 Lock device position'}
+                              <span className="ml-1 text-[11px] text-slate-500">(rotation stays free)</span>
+                            </button>
+                          </div>
+                        }
                       />
                       )}
                     </div>
@@ -2741,6 +3026,24 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
+                              className={`rounded-md p-1 transition-colors ${selectedSegmentLocked ? 'text-amber-400 hover:text-amber-300' : 'text-slate-500 hover:text-amber-300'}`}
+                              aria-label={selectedSegmentLocked ? 'Unlock this wall' : 'Lock this wall'}
+                              aria-pressed={selectedSegmentLocked}
+                              title={selectedSegmentLocked ? 'Unlock this wall' : 'Lock this wall so it cannot be selected or moved'}
+                              onClick={() => handleSegmentLockToggle(selectedSegment)}
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d={selectedSegmentLocked
+                                    ? 'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18.75v-6a2.25 2.25 0 012.25-2.25z'
+                                    : 'M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H3.75A2.25 2.25 0 011.5 18.75v-6a2.25 2.25 0 012.25-2.25z'}
+                                />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
                               className={`rounded-md p-1 text-slate-500 transition-colors hover:text-slate-200 ${wallEditorDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
                               aria-label="Move wall editor"
                               title="Move"
@@ -2772,7 +3075,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             </button>
                           </div>
                         </div>
-                        <div className="space-y-3 px-3 py-3" onWheelCapture={(e) => e.stopPropagation()}>
+                        {selectedSegmentLocked && (
+                          <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                            <span className="font-semibold">Locked.</span> This wall is pinned, so it cannot be
+                            moved, split or deleted. Use the padlock above to unlock it first.
+                          </div>
+                        )}
+                        <div
+                          className={`space-y-3 px-3 py-3 ${selectedSegmentLocked ? 'pointer-events-none opacity-50' : ''}`}
+                          aria-disabled={selectedSegmentLocked || undefined}
+                          onWheelCapture={(e) => e.stopPropagation()}
+                        >
                           <div>
                             <div className="mb-1 flex items-center justify-between gap-2">
                               <label className="block text-[11px] font-semibold text-slate-300">Length ({lengthUnit})</label>
@@ -2877,6 +3190,20 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             </button>
                           </div>
                         </div>
+                        {/* Outside the body above, so it stays usable while this wall is locked. */}
+                        <div className="border-t border-slate-800 px-3 py-2">
+                          <button
+                            className={`w-full rounded-lg border px-2.5 py-2 text-[11px] font-semibold transition ${
+                              wholeRoomLocked
+                                ? 'border-amber-400 bg-amber-500/10 text-amber-100'
+                                : 'border-slate-700 text-slate-100 hover:border-amber-400'
+                            }`}
+                            aria-pressed={wholeRoomLocked}
+                            onClick={() => handleShellLockChange(!wholeRoomLocked)}
+                          >
+                            {wholeRoomLocked ? '🔓 Unlock whole room' : '🔒 Lock whole room'}
+                          </button>
+                        </div>
                       </div>
                       </div>
 
@@ -2884,7 +3211,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="font-semibold text-slate-100">Wall</div>
-                            <div className="text-xs text-slate-400">Edit the selected wall segment.</div>
+                            <div className="text-xs text-slate-400">
+                              {selectedSegmentLocked
+                                ? 'Locked — unlock it below before editing.'
+                                : 'Edit the selected wall segment.'}
+                            </div>
                           </div>
                           <button
                             className="rounded-md border border-slate-700 px-2 py-1 hover:border-aqua-500"
@@ -2896,7 +3227,30 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             Close
                           </button>
                         </div>
-                        <div className="mt-4 space-y-4">
+                        <div className="mt-4 space-y-2">
+                          <button
+                            className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold ${
+                              selectedSegmentLocked ? 'border-amber-400 bg-amber-500/10 text-amber-100' : 'border-slate-700 text-slate-100'
+                            }`}
+                            aria-pressed={selectedSegmentLocked}
+                            onClick={() => handleSegmentLockToggle(selectedSegment)}
+                          >
+                            {selectedSegmentLocked ? '🔓 Unlock this wall' : '🔒 Lock this wall'}
+                          </button>
+                          <button
+                            className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold ${
+                              wholeRoomLocked ? 'border-amber-400 bg-amber-500/10 text-amber-100' : 'border-slate-700 text-slate-100'
+                            }`}
+                            aria-pressed={wholeRoomLocked}
+                            onClick={() => handleShellLockChange(!wholeRoomLocked)}
+                          >
+                            {wholeRoomLocked ? '🔓 Unlock whole room' : '🔒 Lock whole room'}
+                          </button>
+                        </div>
+                        <div
+                          className={`mt-4 space-y-4 ${selectedSegmentLocked ? 'pointer-events-none opacity-50' : ''}`}
+                          aria-disabled={selectedSegmentLocked || undefined}
+                        >
                           <div>
                             <div className="mb-2 flex items-center justify-between gap-2">
                               <label className="block text-sm font-semibold text-slate-300">Length ({lengthUnit})</label>
@@ -3007,6 +3361,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 onChange={handleFurnitureChange}
                 onDelete={handleFurnitureDelete}
                 onClose={() => setSelectedFurnitureId(null)}
+                onToggleLock={() => handleFurnitureLockToggle(selectedFurniture.id)}
               />
             </div>
           )}
@@ -3018,6 +3373,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               onChange={handleDoorChange}
               onDelete={handleDoorDelete}
               onClose={() => setSelectedDoorId(null)}
+              onToggleLock={() => handleDoorLockToggle(selectedDoor.id)}
               maxSegmentIndex={(selectedRoom?.roomShell?.points?.length ?? 1) - 1}
               validation={doorValidation}
             />
@@ -3201,14 +3557,37 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 <div className="font-semibold text-white">Selected furniture</div>
                 <div className="text-xs text-slate-400">{selectedFurniture.typeId}</div>
               </div>
-              <button
-                type="button"
-                className="rounded-md border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100"
-                onClick={() => setSelectedFurnitureId(null)}
-              >
-                Deselect
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={!!selectedFurniture.locked}
+                  className={`rounded-md border px-3 py-2 text-xs font-semibold ${
+                    selectedFurniture.locked
+                      ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                      : 'border-slate-700 text-slate-100'
+                  }`}
+                  onClick={() => handleFurnitureLockToggle(selectedFurniture.id)}
+                >
+                  {selectedFurniture.locked ? '🔓 Unlock' : '🔒 Lock'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100"
+                  onClick={() => setSelectedFurnitureId(null)}
+                >
+                  Deselect
+                </button>
+              </div>
             </div>
+            {selectedFurniture.locked && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                <span className="font-semibold">Locked.</span> Unlock it above before moving or resizing it.
+              </div>
+            )}
+            <div
+              className={`space-y-3 ${selectedFurniture.locked ? 'pointer-events-none opacity-50' : ''}`}
+              aria-disabled={selectedFurniture.locked || undefined}
+            >
             <label className="block">
               <span className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
                 <span>Rotation</span>
@@ -3264,6 +3643,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             >
               Delete Furniture
             </button>
+            </div>
           </div>
         )}
       </CanvasMobileSheet>

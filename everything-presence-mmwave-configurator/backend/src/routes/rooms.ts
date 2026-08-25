@@ -28,7 +28,23 @@ export const createRoomsRouter = (): Router => {
         y: Number(p?.y ?? 0),
       }))
       .filter((p: any) => Number.isFinite(p.x) && Number.isFinite(p.y));
-    return points.length ? { points } : undefined;
+    if (!points.length) return undefined;
+    // Locked wall segments are stored by index, so anything out of range for the
+    // stored outline is dropped rather than resurrected later against a different wall.
+    const lockedSegments = Array.isArray(shell.lockedSegments)
+      ? (Array.from(
+        new Set(
+          shell.lockedSegments
+            .map((value: any) => Number(value))
+            .filter((value: number) => Number.isInteger(value) && value >= 0 && value < points.length),
+        ),
+      ) as number[]).sort((a, b) => a - b)
+      : undefined;
+    return {
+      points,
+      locked: shell.locked !== undefined ? Boolean(shell.locked) : undefined,
+      lockedSegments: lockedSegments?.length ? lockedSegments : undefined,
+    };
   };
 
   const parseDevicePlacement = (placement: any): DevicePlacement | undefined => {
@@ -55,6 +71,7 @@ export const createRoomsRouter = (): Router => {
       coveragePresetId,
       horizontalFovDeg: Number.isFinite(horizontalFovDeg) ? horizontalFovDeg : undefined,
       verticalFovDeg: Number.isFinite(verticalFovDeg) ? verticalFovDeg : undefined,
+      locked: placement?.locked !== undefined ? Boolean(placement.locked) : undefined,
     };
   };
 
@@ -84,6 +101,7 @@ export const createRoomsRouter = (): Router => {
       height,
       rotationDeg,
       aspectRatioLocked,
+      locked: furniture?.locked !== undefined ? Boolean(furniture.locked) : undefined,
     };
   };
 
@@ -108,6 +126,7 @@ export const createRoomsRouter = (): Router => {
       widthMm,
       swingDirection,
       swingSide,
+      locked: door?.locked !== undefined ? Boolean(door.locked) : undefined,
     };
   };
 
