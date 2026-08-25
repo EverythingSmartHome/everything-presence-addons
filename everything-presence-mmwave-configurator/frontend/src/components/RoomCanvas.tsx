@@ -1728,35 +1728,37 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   style={{ pointerEvents: 'none' }}
                 />}
 
-                {/* A single centred opening symbol with one slide-direction arrow. */}
+                {/* Sliding leaf drawn slid open beside the opening, with a dashed path
+                    across the gap showing its travel and grey stops at the track ends -
+                    the same language as the hinged leaf, its swing arc and hinge dot. */}
                 {doorStyle === 'sliding' && geometry.slidingPanel && (() => {
                   const panel = geometry.slidingPanel;
-                  const colour = isSelected ? '#06b6d4' : '#475569';
-                  const centreX = (panel.startX + panel.endX) / 2;
-                  const arrowLength = Math.min(18, Math.abs(panel.endX - panel.startX) * 0.3);
-                  const arrowTipX = centreX + panel.direction * arrowLength / 2;
-                  const arrowTailX = centreX - panel.direction * arrowLength / 2;
+                  const leadingEdgeX = panel.direction > 0 ? panel.startX : panel.endX;
+                  const farJambX = panel.direction > 0 ? -canvasDoorWidth / 2 : canvasDoorWidth / 2;
+                  const stowedEndX = panel.direction > 0 ? panel.endX : panel.startX;
+                  const stopFill = isSelected ? '#06b6d4' : '#71717a';
+                  const stopStroke = isSelected ? '#0891b2' : '#52525b';
                   return <g style={{ pointerEvents: 'none' }}>
-                    <line x1={panel.startX} y1={panel.y} x2={panel.endX} y2={panel.y} stroke={colour} strokeWidth={3} strokeLinecap="square" vectorEffect="non-scaling-stroke" />
-                    <line x1={panel.startX} y1={panel.y - 8} x2={panel.startX} y2={panel.y + 8} stroke={colour} strokeWidth={3} vectorEffect="non-scaling-stroke" />
-                    <line x1={panel.endX} y1={panel.y - 8} x2={panel.endX} y2={panel.y + 8} stroke={colour} strokeWidth={3} vectorEffect="non-scaling-stroke" />
-                    <path
-                      d={`M ${arrowTailX} ${panel.y} L ${arrowTipX} ${panel.y} M ${arrowTipX - panel.direction * 4} ${panel.y - 3} L ${arrowTipX} ${panel.y} L ${arrowTipX - panel.direction * 4} ${panel.y + 3}`}
-                      stroke={colour}
-                      strokeWidth={1.5}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      fill="none"
-                      vectorEffect="non-scaling-stroke"
-                    />
+                    <line x1={leadingEdgeX} y1={panel.y} x2={farJambX} y2={panel.y} stroke={isSelected ? '#06b6d4' : '#000000'} strokeWidth={2} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+                    <line x1={panel.startX} y1={panel.y} x2={panel.endX} y2={panel.y} stroke={isSelected ? '#06b6d4' : '#8b5a3c'} strokeWidth={4} vectorEffect="non-scaling-stroke" />
+                    <circle cx={farJambX} cy={panel.y} r={3} fill={stopFill} stroke={stopStroke} strokeWidth={1} />
+                    <circle cx={stowedEndX} cy={panel.y} r={3} fill={stopFill} stroke={stopStroke} strokeWidth={1} />
                   </g>;
                 })()}
 
-                {/* Opening-only style has jambs but no leaf or clearance arc. */}
-                {doorStyle === 'opening' && <>
-                  <line x1={-canvasDoorWidth / 2} y1={-8} x2={-canvasDoorWidth / 2} y2={8} stroke={isSelected ? '#06b6d4' : '#71717a'} strokeWidth={4} vectorEffect="non-scaling-stroke" />
-                  <line x1={canvasDoorWidth / 2} y1={-8} x2={canvasDoorWidth / 2} y2={8} stroke={isSelected ? '#06b6d4' : '#71717a'} strokeWidth={4} vectorEffect="non-scaling-stroke" />
-                </>}
+                {/* Cased opening: solid jamb blocks either side and the dashed header
+                    line floor plans use for an opening with no leaf. */}
+                {doorStyle === 'opening' && (() => {
+                  const jambWidth = 5;
+                  const jambHeight = 16;
+                  const jambFill = isSelected ? '#06b6d4' : '#94a3b8';
+                  const jambStroke = isSelected ? '#0891b2' : '#475569';
+                  return <g style={{ pointerEvents: 'none' }}>
+                    <line x1={-canvasDoorWidth / 2} y1={0} x2={canvasDoorWidth / 2} y2={0} stroke={isSelected ? '#0891b2' : '#64748b'} strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+                    <rect x={-canvasDoorWidth / 2 - jambWidth / 2} y={-jambHeight / 2} width={jambWidth} height={jambHeight} rx={1} fill={jambFill} stroke={jambStroke} strokeWidth={1} />
+                    <rect x={canvasDoorWidth / 2 - jambWidth / 2} y={-jambHeight / 2} width={jambWidth} height={jambHeight} rx={1} fill={jambFill} stroke={jambStroke} strokeWidth={1} />
+                  </g>;
+                })()}
 
                 {/* Opposing half-width leaves with mirrored clearance arcs. */}
                 {doorStyle === 'double' && geometry.leaves?.map((leaf) => {

@@ -38,14 +38,21 @@ test('sliding and opening styles have shallow hit bounds and no swing geometry',
   }
 });
 
-test('sliding geometry creates one panel centred on the wall', () => {
-  const geometry = getDoorGeometry(door('sliding'), 1);
-  assert.deepEqual(geometry.slidingPanel, {
-    startX: -400,
-    endX: 400,
-    y: 0,
-    direction: 1,
-  });
+test('sliding geometry keeps a half-width leaf within the opening on the chosen side', () => {
+  const left = getDoorGeometry(door('sliding'), 1);
+  assert.deepEqual(left.slidingPanel, { startX: -400, endX: 0, y: 16, direction: -1 });
+  const right = getDoorGeometry(door('sliding', { swingSide: 'right' }), 1);
+  assert.deepEqual(right.slidingPanel, { startX: 0, endX: 400, y: 16, direction: 1 });
+  // The whole symbol occupies exactly the door width, nothing over the wall.
+  assert.deepEqual(right.hitBounds, getDoorGeometry(door('opening'), 1).hitBounds);
+});
+
+test('sliding and opening styles always sit on the room side', () => {
+  for (const style of ['sliding', 'opening']) {
+    const geometry = getDoorGeometry(door(style, { swingDirection: 'out' }), -1);
+    assert.equal(geometry.normalSign, -1);
+    assert.equal(geometry.hitBounds.y + geometry.hitBounds.height, 10);
+  }
 });
 
 test('canvas-sized shallow styles use compact selectable bounds', () => {
@@ -53,6 +60,8 @@ test('canvas-sized shallow styles use compact selectable bounds', () => {
     const geometry = getDoorGeometry(door(style, { widthMm: 120 }), 1, { padding: 8, shallowDepth: 14 });
     assert.deepEqual(geometry.hitBounds, { x: -68, y: -8, width: 136, height: 30 });
   }
+  const sliding = getDoorGeometry(door('sliding', { widthMm: 120 }), 1, { padding: 8, shallowDepth: 14 });
+  assert.equal(sliding.slidingPanel.y, 3.5);
 });
 
 test('door position bounds keep the complete opening on the wall', () => {
