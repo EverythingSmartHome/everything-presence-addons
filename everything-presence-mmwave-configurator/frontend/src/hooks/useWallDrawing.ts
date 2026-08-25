@@ -135,12 +135,21 @@ export function useWallDrawing({ snapGridMm, onPointsChange, currentPoints }: Us
     setPreviewPoint(null);
   }, []);
 
+  /**
+   * Drop the point that was just drawn. This is a drawing-mode tool, not a
+   * general undo: on a finished outline it would silently eat vertices the user
+   * never placed in this session, so it only runs while drawing is active.
+   */
   const removeLastPoint = useCallback(() => {
+    if (!isDrawingWall) return;
     if (currentPoints.length > 0) {
       const newPoints = currentPoints.slice(0, -1);
       onPointsChange(newPoints);
+      // Keep the rubber-band preview anchored to a point that still exists.
+      setPendingStart(newPoints.length ? newPoints[newPoints.length - 1] : null);
+      setPreviewPoint(null);
     }
-  }, [currentPoints, onPointsChange]);
+  }, [currentPoints, isDrawingWall, onPointsChange]);
 
   return {
     isDrawingWall,
@@ -152,5 +161,7 @@ export function useWallDrawing({ snapGridMm, onPointsChange, currentPoints }: Us
     stopDrawing,
     removeLastPoint,
     setIsDrawingWall,
+    setPendingStart,
+    setPreviewPoint,
   };
 }

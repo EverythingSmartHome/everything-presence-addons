@@ -31,6 +31,20 @@ import {
   getCeilingSlicePosition,
   normalizeCeilingSliceConfig,
 } from '../utils/ceilingSlices';
+import { stableStringify } from '../utils/stableStringify';
+import {
+  ROOM_HISTORY_LIMIT,
+  applyRoomSnapshot,
+  canRedoRoomHistory,
+  canUndoRoomHistory,
+  createRoomHistory,
+  pushRoomHistory,
+  redoRoomHistory,
+  roomSnapshotSignature,
+  snapshotRoom,
+  undoRoomHistory,
+  type RoomHistory,
+} from '../utils/roomHistory';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -54,23 +68,13 @@ type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor';
 type RoomBuilderView = 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard';
 type PendingLeave = { type: 'navigate'; view: RoomBuilderView } | { type: 'back' };
 
-// Stable, key-order independent stringify so a room reserialised by the backend
-// compares equal to the identical room held in local state.
-const stableStringify = (value: unknown): string => {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value ?? null) ?? 'null';
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(',')}]`;
-  }
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, v]) => v !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
-  return `{${entries.join(',')}}`;
-};
-
 const roomSignature = (room: RoomConfig | null | undefined): string => (room ? stableStringify(room) : '');
+
+// One user gesture should be one undo step. Continuous input (dragging
+// furniture, sweeping a slider, dragging a wall) fires a change per pointer
+// move, so those commits share a key and collapse onto the first snapshot until
+// the gesture ends.
+type CommitRoomOptions = { coalesceKey?: string };
 
 export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   onBack,
@@ -154,6 +158,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [wallEditorDragOffset, setWallEditorDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [wallEditorDragging, setWallEditorDragging] = useState(false);
   const [canvasViewportSize, setCanvasViewportSize] = useState({ width: 0, height: 0 });
+  // Session-only undo/redo, one stack per room. Held in a ref so a drag does not
+  // re-render per snapshot; `historyAvailability` mirrors just what the buttons
+  // need. Nothing here is persisted, so it dies with the page.
+  const historyRef = useRef<Map<string, RoomHistory>>(new Map());
+  const activeCoalesceKeyRef = useRef<string | null>(null);
+  const [historyAvailability, setHistoryAvailability] = useState({ canUndo: false, canRedo: false });
   const lastRotationSuggestionRef = useRef<number | null>(null);
   const wallEditorDragPointerRef = useRef<number | null>(null);
   const wallEditorDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
@@ -168,6 +178,65 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const selectedRoom = useMemo(
     () => (selectedRoomId ? rooms.find((r) => r.id === selectedRoomId) ?? null : null),
     [rooms, selectedRoomId],
+  );
+
+  const syncHistoryAvailability = useCallback((roomId: string | null) => {
+    const history = roomId ? historyRef.current.get(roomId) : null;
+    const next = { canUndo: canUndoRoomHistory(history), canRedo: canRedoRoomHistory(history) };
+    setHistoryAvailability((prev) =>
+      prev.canUndo === next.canUndo && prev.canRedo === next.canRedo ? prev : next,
+    );
+  }, []);
+
+  // A gesture ends on pointer-up or when focus leaves the control being used;
+  // the next edit then starts a fresh undo step.
+  const endHistoryGesture = useCallback(() => {
+    activeCoalesceKeyRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const handler = () => endHistoryGesture();
+    window.addEventListener('pointerup', handler);
+    window.addEventListener('pointercancel', handler);
+    window.addEventListener('focusout', handler);
+    return () => {
+      window.removeEventListener('pointerup', handler);
+      window.removeEventListener('pointercancel', handler);
+      window.removeEventListener('focusout', handler);
+    };
+  }, [endHistoryGesture]);
+
+  /**
+   * The single write path for room edits made in the builder. Every edit
+   * records the pre-edit state so Undo can put it back, then applies the new
+   * room. Loading and saving deliberately bypass this: neither is a user edit.
+   */
+  const commitRoom = useCallback(
+    (nextRoom: RoomConfig, options?: CommitRoomOptions) => {
+      const previous = selectedRoom;
+      if (!previous || previous.id !== nextRoom.id) return;
+
+      const previousSnapshot = snapshotRoom(previous);
+      const coalesceKey = options?.coalesceKey ?? null;
+      // Events that change nothing (a slider re-emitting its current value)
+      // must not consume an undo step.
+      if (roomSnapshotSignature(previousSnapshot) !== roomSnapshotSignature(snapshotRoom(nextRoom))) {
+        const history = historyRef.current.get(previous.id) ?? createRoomHistory();
+        historyRef.current.set(
+          previous.id,
+          pushRoomHistory(history, previousSnapshot, {
+            coalesceKey,
+            activeCoalesceKey: activeCoalesceKeyRef.current,
+            limit: ROOM_HISTORY_LIMIT,
+          }),
+        );
+        activeCoalesceKeyRef.current = coalesceKey;
+        syncHistoryAvailability(previous.id);
+      }
+
+      setRooms((prev) => prev.map((r) => (r.id === previous.id ? nextRoom : r)));
+    },
+    [selectedRoom, syncHistoryAvailability],
   );
 
   const selectedProfile = useMemo(
@@ -224,8 +293,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const base: DevicePlacement = selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 };
     const nextPlacement: DevicePlacement = { ...base, ...updates };
     const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: nextPlacement };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
-  }, [selectedRoom]);
+    commitRoom(nextRoom, { coalesceKey: 'device:placement' });
+  }, [commitRoom, selectedRoom]);
 
   const coveragePresets = selectedProfile?.coverage?.presets ?? null;
   const coveragePresetId = useMemo(() => {
@@ -358,11 +427,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   }, [selectedRoom?.deviceId, rotationSuggestion, resolveInstallationAngleEntityId]);
 
-  const handlePointsChange = useCallback((nextPoints: { x: number; y: number }[]) => {
+  const handlePointsChange = useCallback((nextPoints: { x: number; y: number }[], options?: CommitRoomOptions) => {
     if (!selectedRoom) return;
     const updated: RoomConfig = { ...selectedRoom, roomShell: { points: nextPoints } };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-  }, [selectedRoom]);
+    commitRoom(updated, options);
+  }, [commitRoom, selectedRoom]);
 
   const handleAddFurniture = useCallback((furnitureType: FurnitureType) => {
     if (!selectedRoom) return;
@@ -394,11 +463,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       furniture: [...(selectedRoom.furniture ?? []), newFurniture],
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
+    commitRoom(updated);
     setSelectedFurnitureId(newFurniture.id);
     setShowFurnitureLibrary(false);
     setActiveMobileSheet(null);
-  }, [selectedRoom]);
+  }, [commitRoom, selectedRoom]);
 
   const handleFurnitureChange = useCallback((updatedFurniture: FurnitureInstance) => {
     if (!selectedRoom) return;
@@ -406,8 +475,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       furniture: (selectedRoom.furniture ?? []).map((f) => (f.id === updatedFurniture.id ? updatedFurniture : f)),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-  }, [selectedRoom]);
+    // Dragging, resizing, rotating and the sliders all land here per input
+    // event - one key per item keeps a whole gesture at one undo step.
+    commitRoom(updated, { coalesceKey: `furniture:${updatedFurniture.id}` });
+  }, [commitRoom, selectedRoom]);
 
   const handleFurnitureDelete = useCallback(() => {
     if (!selectedRoom || !selectedFurnitureId) return;
@@ -415,9 +486,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       furniture: (selectedRoom.furniture ?? []).filter((f) => f.id !== selectedFurnitureId),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
+    commitRoom(updated);
     setSelectedFurnitureId(null);
-  }, [selectedRoom, selectedFurnitureId]);
+  }, [commitRoom, selectedRoom, selectedFurnitureId]);
 
   const handleAddDoor = useCallback(() => {
     if (!selectedRoom) return;
@@ -441,8 +512,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? updatedDoor : d)),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-  }, [selectedRoom]);
+    // Sliding a door along a wall fires per pointer move; coalesce per door.
+    commitRoom(updated, { coalesceKey: `door:${updatedDoor.id}` });
+  }, [commitRoom, selectedRoom]);
 
   const handleDoorDelete = useCallback(() => {
     if (!selectedRoom || !selectedDoorId) return;
@@ -450,9 +522,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       doors: (selectedRoom.doors ?? []).filter((d) => d.id !== selectedDoorId),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
+    commitRoom(updated);
     setSelectedDoorId(null);
-  }, [selectedRoom, selectedDoorId]);
+  }, [commitRoom, selectedRoom, selectedDoorId]);
 
   // Helper to generate UUID
   const generateId = () => {
@@ -482,10 +554,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       doors: [...(selectedRoom.doors ?? []), newDoor],
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
+    commitRoom(updated);
     setSelectedDoorId(newDoor.id);
     setIsDoorPlacementMode(false); // Exit placement mode after placing
-  }, [selectedRoom, isDoorPlacementMode]);
+  }, [commitRoom, selectedRoom, isDoorPlacementMode]);
 
   const handleDoorDragStart = useCallback((doorId: string, x: number, y: number) => {
     const door = selectedRoom?.doors?.find((d) => d.id === doorId);
@@ -612,11 +684,59 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     stopDrawing,
     removeLastPoint,
     setIsDrawingWall,
+    setPendingStart,
   } = useWallDrawing({
     snapGridMm,
     onPointsChange: handlePointsChange,
     currentPoints: selectedRoom?.roomShell?.points ?? [],
   });
+
+  /**
+   * Undo/redo restores the whole builder state of the room, so it reverses any
+   * edit - a deleted door or furniture item comes back, not just wall points.
+   */
+  const stepHistory = useCallback(
+    (direction: 'undo' | 'redo') => {
+      const room = selectedRoom;
+      if (!room) return;
+      const history = historyRef.current.get(room.id);
+      if (!history) return;
+
+      const current = snapshotRoom(room);
+      const step = direction === 'undo' ? undoRoomHistory(history, current) : redoRoomHistory(history, current);
+      if (!step) return;
+
+      historyRef.current.set(room.id, step.history);
+      endHistoryGesture();
+      const restored = applyRoomSnapshot(room, step.snapshot);
+      setRooms((prev) => prev.map((r) => (r.id === room.id ? restored : r)));
+      syncHistoryAvailability(room.id);
+
+      // Drop any transient interaction that may now point at something that no
+      // longer exists (or exists again at a different index).
+      const points = restored.roomShell?.points ?? [];
+      setSelectedSegment((prev) => (prev !== null && prev >= points.length ? null : prev));
+      setHoveredSegment(null);
+      setSegmentDragIndex(null);
+      setSegmentDragStart(null);
+      setSegmentDragBase(null);
+      setEndpointDrag(null);
+      setDoorDrag(null);
+      setIsDoorPlacementMode(false);
+      setActiveBasicShape(null);
+      setSelectedFurnitureId((prev) => (prev && !(restored.furniture ?? []).some((f) => f.id === prev) ? null : prev));
+      setSelectedDoorId((prev) => (prev && !(restored.doors ?? []).some((d) => d.id === prev) ? null : prev));
+      if (isDrawingWall) {
+        setPendingStart(points.length ? points[points.length - 1] : null);
+      }
+    },
+    [endHistoryGesture, isDrawingWall, selectedRoom, setPendingStart, syncHistoryAvailability],
+  );
+
+  const handleUndo = useCallback(() => stepHistory('undo'), [stepHistory]);
+  const handleRedo = useCallback(() => stepHistory('redo'), [stepHistory]);
+  const canUndo = historyAvailability.canUndo && !!selectedRoom;
+  const canRedo = historyAvailability.canRedo && !!selectedRoom;
 
   useEffect(() => {
     const load = async () => {
@@ -649,7 +769,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setClearedPoints(null);
     setShowClearConfirm(false);
     setActiveBasicShape(null);
-  }, [selectedRoomId]);
+    // Each room keeps its own stack for the session, so switching back to a room
+    // keeps its undo history.
+    endHistoryGesture();
+    syncHistoryAvailability(selectedRoomId);
+  }, [endHistoryGesture, selectedRoomId, syncHistoryAvailability]);
 
   const handleAddPoint = (p: { x: number; y: number }) => {
     if (!selectedRoom) return;
@@ -663,7 +787,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       'Replace the current walls? Manual wall adjustments and doors attached to those walls will be removed.'
     )) return;
     const nextRoom: RoomConfig = { ...selectedRoom, roomShell: { points }, doors: [] };
-    setRooms((prev) => prev.map((room) => room.id === selectedRoom.id ? nextRoom : room));
+    commitRoom(nextRoom);
     stopDrawing();
     setIsDoorPlacementMode(false);
     setSelectedSegment(null);
@@ -690,8 +814,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       stopDrawing();
       return;
     }
-    // Clearing removes every wall at once and cannot be undone with Undo (Del),
-    // so ask first.
+    // Clearing removes every wall at once, so ask first even though Undo can
+    // now bring them back within this session.
     setShowClearConfirm(true);
   };
 
@@ -764,12 +888,30 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
-      const isEditable =
+      const isTextEntry =
         target?.isContentEditable ||
         tag === 'input' ||
         tag === 'textarea' ||
-        tag === 'select' ||
-        tag === 'button';
+        tag === 'select';
+      const isEditable = isTextEntry || tag === 'button';
+
+      // Undo/redo stay available right after clicking a toolbar button, so they
+      // are handled before the "focus is on a control" bail-out. Text fields
+      // keep the browser's own undo.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z' || key === 'y') {
+          if (isTextEntry) return;
+          e.preventDefault();
+          if (key === 'y' || e.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+          return;
+        }
+      }
+
       if (isEditable) return;
 
       if (e.key === 'Escape') {
@@ -795,12 +937,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       }
       if (e.key === 'Backspace' || e.key === 'Delete') {
         if (!selectedRoom?.roomShell?.points?.length) return;
-        e.preventDefault();
+        // Del is a point-level delete, never a general undo: it removes the
+        // selected wall point, or the point just drawn while drawing is active.
         if (selectedSegment !== null) {
+          e.preventDefault();
           deleteSelectedWallPoint();
           return;
         }
-        removeLastPoint();
+        if (isDrawingWall) {
+          e.preventDefault();
+          removeLastPoint();
+        }
       }
     };
     window.addEventListener('keydown', handler);
@@ -808,6 +955,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   }, [
     deleteSelectedWallPoint,
     handleCloseLoop,
+    handleRedo,
+    handleUndo,
     isDrawingWall,
     activeBasicShape,
     removeLastPoint,
@@ -1104,7 +1253,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       const adjDx = snappedTarget.x - endpointDrag.base[targetIdx].x;
       const adjDy = snappedTarget.y - endpointDrag.base[targetIdx].y;
       next[targetIdx] = { x: endpointDrag.base[targetIdx].x + adjDx, y: endpointDrag.base[targetIdx].y + adjDy };
-      handlePointsChange(next);
+      handlePointsChange(next, { coalesceKey: `points:endpoint-drag:${endpointDrag.segment}:${endpointDrag.endpoint}` });
       return;
     }
 
@@ -1122,7 +1271,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       const snappedB = snapPointToGrid({ x: segmentDragBase[bIdx].x + dx, y: segmentDragBase[bIdx].y + dy });
       next[aIdx] = snappedA;
       next[bIdx] = snappedB;
-      handlePointsChange(next);
+      handlePointsChange(next, { coalesceKey: `points:segment-drag:${segmentDragIndex}` });
       return;
     }
 
@@ -1211,11 +1360,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       if (saved) {
         setRooms((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
       }
+      // Discarded edits must not be reachable through Undo afterwards.
+      historyRef.current.delete(selectedRoom.id);
+      endHistoryGesture();
+      syncHistoryAvailability(selectedRoom.id);
     }
     setClearedPoints(null);
     setPendingLeave(null);
     leave(target);
-  }, [leave, pendingLeave, savedRooms, selectedRoom]);
+  }, [endHistoryGesture, leave, pendingLeave, savedRooms, selectedRoom, syncHistoryAvailability]);
 
   // Reloading or closing the tab also discards unsaved room edits - warn first.
   useEffect(() => {
@@ -1432,8 +1585,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               </div>
               <h3 className="text-xl font-bold text-white text-center mb-2">Delete all walls?</h3>
               <p className="text-sm text-slate-300 text-center mb-5">
-                This removes the entire outline of {selectedRoom?.name ?? 'this room'}. Undo (Del) cannot bring it back
-                once cleared - only the saved version on disk can.
+                This removes the entire outline of {selectedRoom?.name ?? 'this room'}. Undo (Ctrl/Cmd+Z) can bring it
+                back while you stay on this page - after a reload, only the saved version on disk can.
               </p>
               <div className="flex gap-3">
                 <button
@@ -1642,7 +1795,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         >
                 <RoomCanvas
                   points={selectedRoom.roomShell?.points ?? []}
-                  onChange={handlePointsChange}
+                  // The canvas emits this while a corner point is being dragged.
+                  onChange={(nextPoints) => handlePointsChange(nextPoints, { coalesceKey: 'points:vertex-drag' })}
                   onAddPoint={undefined}
                   onCanvasClick={handleCanvasClick}
                   onCanvasMove={handleCanvasMove}
@@ -1655,6 +1809,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     setCursorDelta(null);
                     handleDoorDragEnd();
                     setIsCanvasDragging(false);
+                    endHistoryGesture();
                   }}
                   onDragStateChange={setIsCanvasDragging}
                   lockShell={!!activeBasicShape}
@@ -1938,13 +2093,24 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               >
                 ✓ Finish (Enter)
               </button>
-              <button
-                className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-4 py-2.5 font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
-                onClick={removeLastPoint}
-                disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
-              >
-                ↶ Undo (Del)
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-3 py-2.5 font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  title="Undo the last change (Ctrl/Cmd+Z)"
+                >
+                  ↶ Undo
+                </button>
+                <button
+                  className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-3 py-2.5 font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  title="Redo (Ctrl/Cmd+Shift+Z)"
+                >
+                  ↷ Redo
+                </button>
+              </div>
               <button
                 className="rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 font-semibold text-rose-100 shadow-lg transition-all hover:bg-rose-600/20 disabled:opacity-40 active:scale-95"
                 onClick={handleClear}
@@ -2355,7 +2521,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             onChange={(e) => {
                               if (!selectedRoom) return;
                               const nextRoom: RoomConfig = { ...selectedRoom, roomShellFillMode: e.target.value as 'overlay' | 'material' };
-                              setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                              commitRoom(nextRoom);
                             }}
                           >
                             <option value="overlay">Blue Overlay</option>
@@ -2371,7 +2537,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               onChange={(e) => {
                                 if (!selectedRoom) return;
                                 const nextRoom: RoomConfig = { ...selectedRoom, floorMaterial: e.target.value as any };
-                                setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                                commitRoom(nextRoom);
                               }}
                             >
                               {Object.entries(FLOOR_MATERIALS).map(([key, material]) => (
@@ -2496,7 +2662,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 </button>
               </div>
               <div className="text-[10px] text-slate-500">
-                Tips: Click a wall to edit it, Shift+Click a wall to split it, A to draw, Enter to finish, Esc to cancel, Del to undo or delete the selected wall point
+                Tips: Click a wall to edit it, Shift+Click a wall to split it, A to draw, Enter to finish, Esc to cancel, Ctrl/Cmd+Z to undo (Shift to redo), Del to remove the point just drawn or the selected wall point
               </div>
             </div>
           </div>
@@ -2942,10 +3108,18 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
           <button
             type="button"
             className="rounded-lg border border-amber-600/60 bg-amber-600/20 px-3 py-3 font-semibold text-amber-100 disabled:opacity-40"
-            onClick={removeLastPoint}
-            disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+            onClick={handleUndo}
+            disabled={!canUndo}
           >
             Undo
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-amber-600/60 bg-amber-600/20 px-3 py-3 font-semibold text-amber-100 disabled:opacity-40"
+            onClick={handleRedo}
+            disabled={!canRedo}
+          >
+            Redo
           </button>
           <button
             type="button"
