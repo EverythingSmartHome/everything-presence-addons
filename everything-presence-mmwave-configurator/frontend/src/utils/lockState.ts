@@ -13,6 +13,13 @@ import type { DevicePlacement, Door, FurnitureInstance, RoomShell } from '../api
  * `points[i] -> points[(i + 1) % points.length]`, exactly like `Door.segmentIndex`.
  * Splitting a wall or deleting a corner therefore renumbers every later segment,
  * which is what the remap helpers below exist for.
+ *
+ * One edit is deliberately exempt: rotating the whole floor plan
+ * (`utils/roomRotation`) moves pinned walls, furniture, doors and even a
+ * position-locked device. Locks pin an object *relative to the room*, and a plan
+ * that turned only part way would no longer be the same room, so the Room
+ * Builder warns about the pinned objects rather than skipping them - and the
+ * locks themselves survive the rotation untouched.
  */
 
 /** Anything that carries a lock flag. */

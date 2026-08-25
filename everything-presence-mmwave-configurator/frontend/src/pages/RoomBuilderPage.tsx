@@ -66,6 +66,15 @@ import {
   undoRoomHistory,
   type RoomHistory,
 } from '../utils/roomHistory';
+import {
+  ROTATION_STEP_DEG,
+  canRotateRoomSnapshot,
+  describeRotationScope,
+  normalizeSignedAngle,
+  rotatePointsKeepingBoundsCenter,
+  rotateRoomSnapshot,
+  type RotationScope,
+} from '../utils/roomRotation';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -86,11 +95,14 @@ interface RoomBuilderPageProps {
 }
 
 type MobileRoomBuilderSheet = 'navigation' | 'tools' | 'zoom' | null;
-type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor';
+type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor' | 'layout';
 type RoomBuilderView = 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard';
 type PendingLeave = { type: 'navigate'; view: RoomBuilderView } | { type: 'back' };
 
 const roomSignature = (room: RoomConfig | null | undefined): string => (room ? stableStringify(room) : '');
+
+/** Keep in step with the `room-rotate-spin` keyframes in index.css. */
+const ROOM_ROTATION_SPIN_MS = 420;
 
 // One user gesture should be one undo step. Continuous input (dragging
 // furniture, sweeping a slider, dragging a wall) fires a change per pointer
@@ -126,6 +138,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [rangeMm, setRangeMm] = useState(15000);
   const [showBasicShapes, setShowBasicShapes] = useState(false);
   const [activeBasicShape, setActiveBasicShape] = useState<BasicRoomShapeSelection | null>(null);
+  /**
+   * How far the basic shape has been turned since it was placed.
+   *
+   * The shape itself is parametric and always regenerates axis-aligned, so this
+   * is what a wall-length edit re-applies to keep a rotated room rotated instead
+   * of snapping it back to square.
+   */
+  const [basicShapeRotationDeg, setBasicShapeRotationDeg] = useState(0);
+  // Leaving shape mode - by any route, including an undo - retires the angle
+  // with it, so a shape placed later never inherits the last one's orientation.
+  useEffect(() => {
+    if (!activeBasicShape) setBasicShapeRotationDeg(0);
+  }, [activeBasicShape]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Last state each room was known to have on the server; the baseline for
@@ -158,6 +183,20 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [settingsTab, setSettingsTab] = useState<RoomBuilderSettingsTab>('display');
   const [showNavMenu, setShowNavMenu] = useState(false);
   const [activeMobileSheet, setActiveMobileSheet] = useState<MobileRoomBuilderSheet>(null);
+  /**
+   * Which way a floor-plan rotation is meant to be read. 'layout' turns the plan
+   * and the sensor together (a pure reorientation); 'roomOnly' turns the drawing
+   * around a fixed sensor, which is the repair for "the sensor detects things 90
+   * degrees off what I drew".
+   */
+  const [rotationScope, setRotationScope] = useState<RotationScope>('layout');
+  /** Free-text angle for the Layout panel's "Custom" rotation. */
+  const [customRotationInput, setCustomRotationInput] = useState('45');
+  /** Drives the one-shot spin the canvas plays after a rotation is committed. */
+  const [rotationSpin, setRotationSpin] = useState<{ fromDeg: number; id: number } | null>(null);
+  const rotationSpinIdRef = useRef(0);
+  const rotationSpinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rotationSpinFrameRef = useRef<number | null>(null);
   // Display settings (persisted to localStorage)
   const {
     showWalls, setShowWalls,
@@ -883,6 +922,110 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const canUndo = historyAvailability.canUndo && !!selectedRoom;
   const canRedo = historyAvailability.canRedo && !!selectedRoom;
 
+  const canRotateLayout = !!selectedRoom && (selectedRoom.roomShell?.points?.length ?? 0) > 0;
+
+  /**
+   * Play the one-shot spin: the geometry is already committed, so the canvas
+   * starts back at the orientation the plan *had* and turns into its new one.
+   * The animation is restarted by clearing it for a frame first, otherwise a
+   * second press inside the same ROOM_ROTATION_SPIN_MS would leave the class in
+   * place and silently skip the animation.
+   */
+  const playRotationSpin = useCallback((appliedAngleDeg: number) => {
+    if (rotationSpinTimerRef.current) clearTimeout(rotationSpinTimerRef.current);
+    if (rotationSpinFrameRef.current !== null) cancelAnimationFrame(rotationSpinFrameRef.current);
+    rotationSpinFrameRef.current = null;
+    setRotationSpin(null);
+
+    // With reduced motion the CSS animation is `none`, so animationend never
+    // fires and the plan would only sit there un-interactive. Skip the spin
+    // entirely instead: the geometry is already committed either way.
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
+    const id = (rotationSpinIdRef.current += 1);
+    const start = () => {
+      rotationSpinFrameRef.current = null;
+      setRotationSpin({ fromDeg: -appliedAngleDeg, id });
+      // Belt and braces alongside onAnimationEnd, which can be missed if the
+      // canvas is re-mounted or the tab is backgrounded mid-animation.
+      rotationSpinTimerRef.current = setTimeout(() => {
+        setRotationSpin((current) => (current?.id === id ? null : current));
+      }, ROOM_ROTATION_SPIN_MS + 120);
+    };
+    // One frame with the class removed, so pressing rotate twice in quick
+    // succession restarts the animation instead of silently skipping it.
+    if (typeof requestAnimationFrame === 'function') {
+      rotationSpinFrameRef.current = requestAnimationFrame(start);
+    } else {
+      start();
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (rotationSpinTimerRef.current) clearTimeout(rotationSpinTimerRef.current);
+    if (rotationSpinFrameRef.current !== null) cancelAnimationFrame(rotationSpinFrameRef.current);
+  }, []);
+
+  /**
+   * Turn the whole floor plan. Wall outline, doors, furniture and (in 'layout'
+   * scope) the sensor all move together through `commitRoom`, so a rotation is a
+   * single undoable step that persists with the normal room save.
+   *
+   * Locks are deliberately overridden: rotating some objects but not others
+   * would tear the plan apart, so pinned walls, furniture, doors and even a
+   * position-locked sensor all come along. The Layout panel says so, and Undo is
+   * one keystroke away.
+   */
+  const rotateLayout = useCallback(
+    (angleDeg: number, scope: RotationScope) => {
+      const room = selectedRoom;
+      if (!room) return;
+      const snapshot = snapshotRoom(room);
+      if (!canRotateRoomSnapshot(snapshot)) return;
+
+      const angle = normalizeSignedAngle(angleDeg);
+      const rotated = rotateRoomSnapshot(snapshot, angle, scope);
+      if (rotated === snapshot) return;
+
+      // A rotation is never part of a drag gesture, so it always opens a fresh
+      // undo step rather than collapsing into the previous one.
+      endHistoryGesture();
+      commitRoom(applyRoomSnapshot(room, rotated));
+
+      // Wall indices and door anchors survive a rotation, but every transient
+      // interaction is now pointing at coordinates that have just moved.
+      stopDrawing();
+      setSelectedSegment(null);
+      setHoveredSegment(null);
+      setSegmentDragIndex(null);
+      setSegmentDragStart(null);
+      setSegmentDragBase(null);
+      setEndpointDrag(null);
+      setDoorDrag(null);
+      setIsDoorPlacementMode(false);
+      // Basic-shape mode survives a rotation: dropping it here would take the
+      // wall dimension labels with it and there is no way to get them back short
+      // of replacing the outline. Remember the angle instead, so a later
+      // wall-length edit regenerates the shape at its current orientation.
+      setBasicShapeRotationDeg((prev) => normalizeSignedAngle(prev + angle));
+      setCursorPos(null);
+      setCursorDelta(null);
+      // The suggested installation angle was computed against the old walls.
+      setShowRotationSuggestion(false);
+      lastRotationSuggestionRef.current = null;
+
+      playRotationSpin(angle);
+    },
+    [commitRoom, endHistoryGesture, playRotationSpin, selectedRoom, stopDrawing],
+  );
+
+  const rotateLayoutBy = useCallback(
+    (angleDeg: number) => rotateLayout(angleDeg, rotationScope),
+    [rotateLayout, rotationScope],
+  );
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -973,6 +1116,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setDoorDrag(null);
     setSelectedDoorId(null);
     setActiveBasicShape(selection);
+    // Swapping one shape straight for another never passes through "no shape",
+    // so the effect above cannot clear this - a freshly placed shape is
+    // axis-aligned again.
+    setBasicShapeRotationDeg(0);
     setShowBasicShapes(false);
     setActiveMobileSheet(null);
     const maxDimension = Math.max(
@@ -1104,6 +1251,18 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         }
       }
 
+      // Rotate follows undo/redo above rather than the bail-out below: the
+      // toolbar buttons advertise "(R)", and pressing it right after clicking
+      // one has to work even though focus is still on that button. Text fields
+      // keep their own letter.
+      if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntry) return;
+        if (!canRotateLayout) return;
+        e.preventDefault();
+        rotateLayoutBy(e.shiftKey ? -ROTATION_STEP_DEG : ROTATION_STEP_DEG);
+        return;
+      }
+
       if (isEditable) return;
 
       if (e.key === 'Escape') {
@@ -1145,6 +1304,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [
+    canRotateLayout,
     deleteSelectedWallPoint,
     handleCloseLoop,
     handleRedo,
@@ -1152,6 +1312,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     isDrawingWall,
     activeBasicShape,
     removeLastPoint,
+    rotateLayoutBy,
     selectedRoom?.roomShell?.points,
     selectedSegment,
     setIsDrawingWall,
@@ -1998,6 +2159,27 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             setZoom((z) => Math.min(5, Math.max(0.1, z + delta)));
           }}
         >
+                {/*
+                  Rotation spin: the geometry is already rotated by the time this
+                  renders, so the wrapper starts the canvas back at the old
+                  orientation and turns it into place. `getScreenCTM` keeps
+                  pointer maths honest through the transform, but interacting
+                  with a moving plan is never what anyone means, so the wrapper
+                  swallows pointer events for the duration.
+                */}
+                <div
+                  className={`h-full w-full ${rotationSpin ? 'room-rotate-spin pointer-events-none' : ''}`}
+                  style={
+                    rotationSpin
+                      ? ({ '--room-rotate-from': `${rotationSpin.fromDeg}deg` } as React.CSSProperties)
+                      : undefined
+                  }
+                  onAnimationEnd={(e) => {
+                    // Animation events bubble, so ignore anything the canvas itself animates.
+                    if (e.target !== e.currentTarget) return;
+                    setRotationSpin((current) => (current?.id === rotationSpin?.id ? null : current));
+                  }}
+                >
                 <RoomCanvas
                   points={selectedRoom.roomShell?.points ?? []}
                   // The canvas emits this while a corner point is being dragged.
@@ -2025,12 +2207,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   onWallLengthChange={activeBasicShape ? (segmentIndex, lengthMm) => {
                     try {
                       const resized = resizeBasicRoomShapeWall(activeBasicShape, segmentIndex, lengthMm);
+                      // The shape regenerates axis-aligned, so put back however
+                      // far the plan has been rotated since it was placed.
+                      const points = rotatePointsKeepingBoundsCenter(resized.points, basicShapeRotationDeg);
                       setActiveBasicShape(resized.selection);
-                      handlePointsChange(resized.points);
+                      handlePointsChange(points);
                       setPanOffsetMm({ x: 0, y: 0 });
                       const maxDimension = Math.max(
-                        Math.max(...resized.points.map((point) => point.x)) - Math.min(...resized.points.map((point) => point.x)),
-                        Math.max(...resized.points.map((point) => point.y)) - Math.min(...resized.points.map((point) => point.y)),
+                        Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+                        Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
                       );
                       setZoom(Math.min(5, Math.max(0.1, (0.8 * rangeMm) / Math.max(100, maxDimension + 1000))));
                     } catch { /* Invalid dimensions leave the last valid centered outline unchanged. */ }
@@ -2274,6 +2459,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     );
                   }}
                 />
+                </div>
           {/* Floating Room Selector (top center) */}
           <div className="absolute top-6 left-1/2 z-40 hidden -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl md:flex">
             <span className="text-slate-400 font-medium">Room:</span>
@@ -2341,6 +2527,39 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   ↷ Redo
                 </button>
               </div>
+              {/*
+                Rotate sits directly under Undo/Redo: it is the same kind of
+                whole-plan action, and having Undo right above it is the point.
+              */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayoutBy(-ROTATION_STEP_DEG)}
+                  disabled={!canRotateLayout}
+                  title={`Rotate the floor plan 90° anti-clockwise (Shift+R) — ${describeRotationScope(rotationScope)}`}
+                >
+                  ↺ 90°
+                </button>
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayoutBy(ROTATION_STEP_DEG)}
+                  disabled={!canRotateLayout}
+                  title={`Rotate the floor plan 90° clockwise (R) — ${describeRotationScope(rotationScope)}`}
+                >
+                  ↻ 90°
+                </button>
+              </div>
+              <button
+                type="button"
+                className="-mt-1 rounded-lg px-1 text-left text-[11px] font-medium text-slate-400 transition hover:text-sky-200"
+                onClick={() => {
+                  setSettingsTab('layout');
+                  setShowSettings(true);
+                }}
+                title="Choose what a rotation moves"
+              >
+                Rotating: {describeRotationScope(rotationScope)} · change
+              </button>
               <button
                 className="rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 font-semibold text-rose-100 shadow-lg transition-all hover:bg-rose-600/20 disabled:opacity-40 active:scale-95"
                 onClick={handleClear}
@@ -2432,10 +2651,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-4 gap-1 rounded-lg border border-slate-700/60 bg-slate-950/50 p-1">
+                      <div className="grid grid-cols-5 gap-1 rounded-lg border border-slate-700/60 bg-slate-950/50 p-1">
                         {[
                           ['display', 'Display'],
                           ['device', 'Device'],
+                          ['layout', 'Layout'],
                           ['canvas', 'Canvas'],
                           ['floor', 'Floor'],
                         ].map(([tab, label]) => (
@@ -2453,6 +2673,124 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </button>
                         ))}
                       </div>
+
+                      {settingsTab === 'layout' && (
+                      <div className="space-y-1">
+                        <div className="font-semibold text-slate-200">Rotate floor plan</div>
+                        <p className="text-[11px] leading-relaxed text-slate-400">
+                          Turns the whole plan — walls, doors and furniture — in one undoable step.
+                          Use this instead of redrawing a room that came out the wrong way round.
+                        </p>
+
+                        <div className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          What moves
+                        </div>
+                        <div className="space-y-1">
+                          {([
+                            {
+                              scope: 'layout' as RotationScope,
+                              detail: 'Turns the plan and the sensor together. Zones, targets and the heatmap stay exactly where they are on the walls — pick this to simply view the room the other way up.',
+                            },
+                            {
+                              scope: 'roomOnly' as RotationScope,
+                              detail: 'Leaves the sensor exactly where it is and swings the drawing around it. Pick this when the sensor reports targets at the wrong angle for the room you drew.',
+                            },
+                          ]).map(({ scope, detail }) => (
+                            <button
+                              key={scope}
+                              type="button"
+                              aria-pressed={rotationScope === scope}
+                              onClick={() => setRotationScope(scope)}
+                              className={`w-full rounded-md border px-2 py-1.5 text-left transition ${
+                                rotationScope === scope
+                                  ? 'border-aqua-500 bg-aqua-600/10 text-aqua-100'
+                                  : 'border-slate-700 text-slate-200 hover:border-slate-600'
+                              }`}
+                            >
+                              <div className="text-xs font-semibold">{describeRotationScope(scope)}</div>
+                              <div className="text-[11px] leading-relaxed text-slate-400">{detail}</div>
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Turn
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => rotateLayoutBy(-ROTATION_STEP_DEG)}
+                            disabled={!canRotateLayout}
+                            title="Shift+R"
+                          >
+                            ↺ 90°
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => rotateLayoutBy(ROTATION_STEP_DEG)}
+                            disabled={!canRotateLayout}
+                            title="R"
+                          >
+                            ↻ 90°
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => rotateLayoutBy(180)}
+                            disabled={!canRotateLayout}
+                            title="Turn the plan end to end"
+                          >
+                            ↻ 180°
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-2">
+                          <label className="flex items-center gap-2">
+                            <span className="w-14 text-xs">Custom</span>
+                            <input
+                              type="number"
+                              className="w-20 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              value={customRotationInput}
+                              onChange={(e) => setCustomRotationInput(e.target.value)}
+                              step={1}
+                              min={-180}
+                              max={180}
+                            />
+                            <span className="text-slate-400">deg</span>
+                          </label>
+                          <button
+                            type="button"
+                            className="ml-auto rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => {
+                              const angle = Number(customRotationInput);
+                              if (!Number.isFinite(angle) || normalizeSignedAngle(angle) === 0) return;
+                              rotateLayoutBy(angle);
+                            }}
+                            disabled={
+                              !canRotateLayout ||
+                              // `Number('')` is 0, so a blank field would look applicable.
+                              customRotationInput.trim() === '' ||
+                              !Number.isFinite(Number(customRotationInput)) ||
+                              normalizeSignedAngle(Number(customRotationInput)) === 0
+                            }
+                          >
+                            Apply
+                          </button>
+                        </div>
+
+                        {lockedObjectCount > 0 && (
+                          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] leading-relaxed text-amber-200">
+                            {lockedObjectCount} pinned {lockedObjectCount === 1 ? 'object' : 'objects'} will be
+                            rotated. Press Undo (Ctrl/Cmd+Z) to revert changes.
+                          </div>
+                        )}
+                        {!canRotateLayout && (
+                          <div className="text-[11px] text-slate-400">Draw a wall outline first.</div>
+                        )}
+                      </div>
+                      )}
 
                       {settingsTab === 'canvas' && (
                       <div className="space-y-1">
@@ -3516,6 +3854,33 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             disabled={!canRedo}
           >
             Redo
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-sky-600/60 bg-sky-600/20 px-3 py-3 font-semibold text-sky-100 disabled:opacity-40"
+            onClick={() => rotateLayoutBy(-ROTATION_STEP_DEG)}
+            disabled={!canRotateLayout}
+          >
+            ↺ Rotate 90°
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-sky-600/60 bg-sky-600/20 px-3 py-3 font-semibold text-sky-100 disabled:opacity-40"
+            onClick={() => rotateLayoutBy(ROTATION_STEP_DEG)}
+            disabled={!canRotateLayout}
+          >
+            ↻ Rotate 90°
+          </button>
+          <button
+            type="button"
+            className="col-span-2 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-left text-xs font-medium text-slate-300"
+            onClick={() => {
+              setActiveMobileSheet(null);
+              setSettingsTab('layout');
+              setShowSettings(true);
+            }}
+          >
+            Rotating: <span className="font-semibold text-sky-200">{describeRotationScope(rotationScope)}</span> · change
           </button>
           <button
             type="button"

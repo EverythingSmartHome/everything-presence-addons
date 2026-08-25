@@ -23,6 +23,15 @@ import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPol
 import { fetchMetaConfig, fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
+import {
+  ROTATION_STEP_DEG,
+  canRotateRoomSnapshot,
+  normalizeSignedAngle,
+  normalizeUnsignedAngle,
+  rotatePointsKeepingBoundsCenter,
+  rotateRoomSnapshot,
+  type RotationScope,
+} from '../utils/roomRotation';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
@@ -134,6 +143,19 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const [canvasPan, setCanvasPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [showOutlineShapeChoice, setShowOutlineShapeChoice] = useState(false);
   const [activeBasicShape, setActiveBasicShape] = useState<BasicRoomShapeSelection | null>(null);
+  /**
+   * How far the basic shape has been turned since it was placed.
+   *
+   * The shape itself is parametric and always regenerates axis-aligned, so this
+   * is what a wall-length edit re-applies to keep a rotated room rotated instead
+   * of snapping it back to square.
+   */
+  const [basicShapeRotationDeg, setBasicShapeRotationDeg] = useState(0);
+  // Leaving shape mode - by any route - retires the angle with it, so a shape
+  // placed later never inherits the last one's orientation.
+  useEffect(() => {
+    if (!activeBasicShape) setBasicShapeRotationDeg(0);
+  }, [activeBasicShape]);
 
   // Zone selection for embedded zone drawing
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
@@ -531,6 +553,75 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
   }, [selectedRoom, onRoomUpdate]);
 
+  const canRotateLayout = (selectedRoom?.roomShell?.points?.length ?? 0) > 0;
+
+  /**
+   * Turn the whole floor plan during setup, so a room drawn the wrong way round
+   * can be corrected here instead of being redrawn (or left to the Room Builder).
+   *
+   * Same pure transform the Room Builder uses. The wizard has no undo stack, so
+   * this persists straight away through the usual optimistic-update-then-save
+   * path; pressing the opposite arrow is the way back.
+   */
+  const rotateLayout = useCallback(async (angleDeg: number, scope: RotationScope) => {
+    if (!selectedRoom) return;
+    const snapshot = {
+      roomShell: selectedRoom.roomShell,
+      roomShellFillMode: selectedRoom.roomShellFillMode,
+      floorMaterial: selectedRoom.floorMaterial,
+      devicePlacement: selectedRoom.devicePlacement,
+      furniture: selectedRoom.furniture,
+      doors: selectedRoom.doors,
+    };
+    if (!canRotateRoomSnapshot(snapshot)) return;
+
+    const rotated = rotateRoomSnapshot(snapshot, angleDeg, scope);
+    if (rotated === snapshot) return;
+
+    // Drawing a wall while the plan turns under you would drop the next point in
+    // the wrong place, and every other transient interaction now points at
+    // coordinates that have just moved.
+    stopDrawing();
+    // Basic-shape mode survives a rotation: dropping it here would take the wall
+    // dimension labels with it and there is no way to get them back short of
+    // replacing the outline. Remember the angle instead, so a later wall-length
+    // edit regenerates the shape at its current orientation.
+    setBasicShapeRotationDeg((prev) => normalizeSignedAngle(prev + angleDeg));
+    setIsDoorPlacementMode(false);
+    setDoorDrag(null);
+    setSelectedDoorId(null);
+    setSelectedFurnitureId(null);
+    setCursorPos(null);
+    // The suggested installation angle was worked out against the old walls.
+    setShowRotationSuggestion(false);
+    lastRotationSuggestionRef.current = null;
+
+    const updatedRoom: RoomConfig = {
+      ...selectedRoom,
+      ...rotated,
+      // This screen's rotation slider spans 0..359, so a signed heading would
+      // leave its thumb pinned at zero. Fold it back into the range it edits.
+      ...(rotated.devicePlacement
+        ? {
+          devicePlacement: {
+            ...rotated.devicePlacement,
+            rotationDeg: normalizeUnsignedAngle(rotated.devicePlacement.rotationDeg ?? 0),
+          },
+        }
+        : {}),
+    };
+    // Optimistic update
+    onRoomUpdate?.(updatedRoom);
+    try {
+      await updateRoom(selectedRoom.id, updatedRoom);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rotate the floor plan');
+      // Revert on error
+      onRoomUpdate?.(selectedRoom);
+    }
+  }, [selectedRoom, onRoomUpdate, stopDrawing]);
+
   // Generate UUID helper
   const generateId = useCallback(() => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -778,6 +869,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       setError(null);
       setShowOutlineShapeChoice(false);
       setActiveBasicShape(selection);
+      // A freshly placed shape is axis-aligned again.
+      setBasicShapeRotationDeg(0);
       setIsDrawingWall(false);
       setCanvasPan({ x: 0, y: 0 });
       const maxDimension = Math.max(
@@ -798,11 +891,23 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const tag = target.tagName.toLowerCase();
-      const isEditable =
+      const isTextEntry =
+        target.isContentEditable ||
         tag === 'input' ||
         tag === 'textarea' ||
-        tag === 'select' ||
-        tag === 'button';
+        tag === 'select';
+      const isEditable = isTextEntry || tag === 'button';
+
+      // Rotate is handled before the "focus is on a control" bail-out, so
+      // pressing R straight after clicking a rotate button still works.
+      if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntry) return;
+        if (!canRotateLayout) return;
+        e.preventDefault();
+        rotateLayout(e.shiftKey ? -ROTATION_STEP_DEG : ROTATION_STEP_DEG, 'layout');
+        return;
+      }
+
       if (isEditable) return;
 
       if (e.key === 'Escape') {
@@ -837,7 +942,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [currentStep, isDrawingWall, activeBasicShape, selectedRoom?.roomShell?.points, stopDrawing, setIsDrawingWall, removeLastPoint, handleCloseLoop]);
+  }, [currentStep, isDrawingWall, activeBasicShape, canRotateLayout, rotateLayout, selectedRoom?.roomShell?.points, stopDrawing, setIsDrawingWall, removeLastPoint, handleCloseLoop]);
 
   // Auto-initialize device placement to room center when entering placement step
   useEffect(() => {
@@ -1651,12 +1756,15 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onWallLengthChange={activeBasicShape ? (segmentIndex, lengthMm) => {
                 try {
                   const resized = resizeBasicRoomShapeWall(activeBasicShape, segmentIndex, lengthMm);
+                  // The shape regenerates axis-aligned, so put back however far
+                  // the plan has been rotated since it was placed.
+                  const points = rotatePointsKeepingBoundsCenter(resized.points, basicShapeRotationDeg);
                   setActiveBasicShape(resized.selection);
-                  void handleRoomOutlineChange(resized.points);
+                  void handleRoomOutlineChange(points);
                   setCanvasPan({ x: 0, y: 0 });
                   const maxDimension = Math.max(
-                    Math.max(...resized.points.map((point) => point.x)) - Math.min(...resized.points.map((point) => point.x)),
-                    Math.max(...resized.points.map((point) => point.y)) - Math.min(...resized.points.map((point) => point.y)),
+                    Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+                    Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
                   );
                   setCanvasZoom(Math.min(5, Math.max(0.1, (0.8 * 15000) / Math.max(100, maxDimension + 1000))));
                 } catch { /* Invalid dimensions leave the last valid centered outline unchanged. */ }
@@ -2043,6 +2151,29 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               >
                 ⤺ Remove last point (Del)
               </button>
+              {/*
+                Drawn the room the wrong way round? Turn the whole plan rather
+                than starting again. 'layout' scope keeps the sensor rigid with
+                the walls, so nothing about the setup so far is disturbed.
+              */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 text-sm font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'layout')}
+                  disabled={!canRotateLayout}
+                  title="Rotate the whole floor plan 90° anti-clockwise"
+                >
+                  ↺ 90°
+                </button>
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 text-sm font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayout(ROTATION_STEP_DEG, 'layout')}
+                  disabled={!canRotateLayout}
+                  title="Rotate the whole floor plan 90° clockwise"
+                >
+                  ↻ 90°
+                </button>
+              </div>
               <button
                 className="rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 text-sm font-semibold text-rose-100 shadow-lg transition-all hover:bg-rose-600/20 disabled:opacity-40 active:scale-95"
                 onClick={handleClear}
@@ -2269,6 +2400,36 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   <span className="w-12 text-right font-mono font-semibold">{selectedRoom.devicePlacement.rotationDeg ?? 0}°</span>
                 </label>
               </div>
+              {/*
+                The other half of the alignment problem: the sensor is aimed
+                correctly but the room was drawn at the wrong orientation. This
+                swings the drawing around the sensor and leaves its aim alone,
+                which the rotation slider above cannot do.
+              */}
+              <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-4 shadow-lg space-y-2">
+                <div className="text-xs font-semibold text-slate-300">Room drawn the wrong way round?</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="rounded-lg border border-sky-600/50 bg-sky-600/10 px-3 py-2 text-xs font-semibold text-sky-100 transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                    onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'roomOnly')}
+                    disabled={!canRotateLayout}
+                    title="Turn the room 90° anti-clockwise around the sensor, leaving the sensor's aim unchanged"
+                  >
+                    ↺ 90°
+                  </button>
+                  <button
+                    className="rounded-lg border border-sky-600/50 bg-sky-600/10 px-3 py-2 text-xs font-semibold text-sky-100 transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                    onClick={() => rotateLayout(ROTATION_STEP_DEG, 'roomOnly')}
+                    disabled={!canRotateLayout}
+                    title="Turn the room 90° clockwise around the sensor, leaving the sensor's aim unchanged"
+                  >
+                    ↻ 90°
+                  </button>
+                </div>
+                <div className="text-[11px] leading-relaxed text-slate-400">
+                  Turns the walls around the sensor without changing where it is aimed.
+                </div>
+              </div>
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-3 shadow-lg">
                 <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
                   <input
@@ -2396,6 +2557,22 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       disabled={!selectedRoom}
                     >
                       Clear
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                      onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'layout')}
+                      disabled={!canRotateLayout}
+                    >
+                      ↺ Rotate 90°
+                    </button>
+                    <button
+                      className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                      onClick={() => rotateLayout(ROTATION_STEP_DEG, 'layout')}
+                      disabled={!canRotateLayout}
+                    >
+                      ↻ Rotate 90°
                     </button>
                   </div>
                   <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-xs text-slate-300">
@@ -2542,6 +2719,28 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       className="w-full"
                     />
                   </label>
+                  <div className="space-y-2 rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                    <div className="text-sm font-semibold text-slate-200">Room drawn the wrong way round?</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                        onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'roomOnly')}
+                        disabled={!canRotateLayout}
+                      >
+                        ↺ 90°
+                      </button>
+                      <button
+                        className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                        onClick={() => rotateLayout(ROTATION_STEP_DEG, 'roomOnly')}
+                        disabled={!canRotateLayout}
+                      >
+                        ↻ 90°
+                      </button>
+                    </div>
+                    <div className="text-xs leading-relaxed text-slate-400">
+                      Turns the walls around the sensor without changing where it is aimed.
+                    </div>
+                  </div>
                   <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
                     <input
                       type="checkbox"
