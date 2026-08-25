@@ -32,6 +32,13 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
   };
 
   const hasWarnings = validation && (validation.overlaps || validation.nearCorner || validation.tooWide);
+  const style = door.style ?? 'single';
+  const styleOptions: Array<{ value: Door['style']; label: string; icon: string }> = [
+    { value: 'single', label: 'Single', icon: '↷' },
+    { value: 'sliding', label: 'Sliding', icon: '⇆' },
+    { value: 'opening', label: 'Opening', icon: '▯' },
+    { value: 'double', label: 'Double', icon: '↶↷' },
+  ];
   const swingDirectionOptions: Array<{
     value: Door['swingDirection'];
     label: string;
@@ -167,6 +174,26 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
           </div>
         )}
 
+        <fieldset>
+          <legend className="block text-sm font-semibold text-slate-300 mb-3">Door Style</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {styleOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleChange({ style: option.value })}
+                aria-pressed={style === option.value}
+                className={`rounded-lg border p-3 text-center transition-all ${style === option.value
+                  ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'}`}
+              >
+                <span className="block text-xl" aria-hidden="true">{option.icon}</span>
+                <span className="text-sm font-medium">{option.label}</span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
         {/* Wall Segment */}
         <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Wall Segment</label>
@@ -217,15 +244,17 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
               onChange={(e) => handleChange({ widthMm: parseFloat(e.target.value) })}
               step="10"
               min="600"
-              max="1200"
+              max={style === 'sliding' || style === 'double' ? 3000 : 1200}
               className="w-full px-3 py-2 bg-slate-800/70 border border-slate-700 rounded-lg text-white focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
             />
           </div>
-          <p className="text-xs text-slate-400 mt-1">Standard door: 800-900mm</p>
+          <p className="text-xs text-slate-400 mt-1">
+            {style === 'sliding' || style === 'double' ? 'Wide openings may be up to 3000mm' : 'Standard door: 800-900mm'}
+          </p>
         </div>
 
         {/* Swing Direction */}
-        <div>
+        {(style === 'single' || style === 'double') && <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Swing Direction</label>
           <div className="grid grid-cols-2 gap-3">
             {swingDirectionOptions.map((option) => {
@@ -267,10 +296,10 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
             })}
           </div>
           <p className="text-xs text-slate-400 mt-1">Shaded side is the room. Door swing matches the canvas.</p>
-        </div>
+        </div>}
 
         {/* Hinge Side */}
-        <div>
+        {style === 'single' && <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Hinge Side</label>
           <div className="grid grid-cols-2 gap-3">
             {hingeSideOptions.map((option) => {
@@ -313,7 +342,7 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
             })}
           </div>
           <p className="text-xs text-slate-400 mt-1">Dot marks the hinge; the panel and arc swing from that side.</p>
-        </div>
+        </div>}
       </div>
 
       {/* Footer */}

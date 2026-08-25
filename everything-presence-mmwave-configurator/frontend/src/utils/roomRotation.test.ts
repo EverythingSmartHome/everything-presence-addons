@@ -28,7 +28,7 @@ const makeSnapshot = (overrides = {}) => ({
   furniture: [
     { id: 'f1', typeId: 'bed-double', x: 1000, y: 500, width: 1400, depth: 2000, height: 500, rotationDeg: 30, aspectRatioLocked: false },
   ],
-  doors: [{ id: 'd1', segmentIndex: 2, positionOnSegment: 0.4, widthMm: 800, swingDirection: 'in', swingSide: 'left' }],
+  doors: [{ id: 'd1', style: 'double', segmentIndex: 2, positionOnSegment: 0.4, widthMm: 1600, swingDirection: 'out', swingSide: 'right' }],
   ...overrides,
 });
 

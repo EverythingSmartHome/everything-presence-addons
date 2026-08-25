@@ -18,6 +18,7 @@ import {
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
 import { BasicRoomShapesPicker, resizeBasicRoomShapeWall, type BasicRoomShapeSelection } from '../components/BasicRoomShapesPicker';
 import type { RoomShapePoint } from '../utils/roomShapes';
+import { clampDoorPosition } from '../utils/doorGeometry';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
@@ -687,8 +688,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     // Door drags are routed through the host, so the canvas gate alone would
     // still leave a locked door movable. A locked door accepts only unlocking.
     const existing = (selectedRoom.doors ?? []).find((d) => d.id === updatedDoor.id);
-    const nextDoor = resolveLockedUpdate(existing, updatedDoor);
-    if (!nextDoor) return;
+    const unlockedDoor = resolveLockedUpdate(existing, updatedDoor);
+    if (!unlockedDoor) return;
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[unlockedDoor.segmentIndex];
+    const end = points[(unlockedDoor.segmentIndex + 1) % points.length];
+    const nextDoor = start && end ? {
+      ...unlockedDoor,
+      positionOnSegment: clampDoorPosition(
+        unlockedDoor.positionOnSegment,
+        unlockedDoor.widthMm,
+        Math.hypot(end.x - start.x, end.y - start.y),
+      ),
+    } : unlockedDoor;
     const updated: RoomConfig = {
       ...selectedRoom,
       doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? nextDoor : d)),
@@ -726,10 +738,18 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     if (!selectedRoom || !isDoorPlacementMode) return;
     if (isSegmentLocked(selectedRoom.roomShell, segmentIndex)) return;
 
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[segmentIndex];
+    const end = points[(segmentIndex + 1) % points.length];
+    const boundedPosition = start && end
+      ? clampDoorPosition(positionOnSegment, 800, Math.hypot(end.x - start.x, end.y - start.y))
+      : positionOnSegment;
+
     const newDoor: Door = {
       id: generateId(),
+      style: 'single',
       segmentIndex,
-      positionOnSegment,
+      positionOnSegment: boundedPosition,
       widthMm: 800, // Standard door width
       swingDirection: 'in',
       swingSide: 'left',

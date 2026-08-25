@@ -196,11 +196,12 @@ export interface FurnitureInstance {
 
 export interface Door {
   id: string; // Unique door ID
+  style: 'single' | 'sliding' | 'opening' | 'double'; // Legacy persisted doors default to single
   segmentIndex: number; // Which wall segment (0 to N-1)
   positionOnSegment: number; // 0.0 to 1.0 - position along the segment
   widthMm: number; // Door width in millimeters (typically 800-900mm)
-  swingDirection: 'in' | 'out'; // Door swing direction relative to room
-  swingSide: 'left' | 'right'; // Which side the hinge is on
+  swingDirection: 'in' | 'out'; // Used by single/double doors; retained across style changes
+  swingSide: 'left' | 'right'; // Used by single doors; retained across style changes
   locked?: boolean; // Pinned in place: not selectable or draggable on the canvas
 }
 

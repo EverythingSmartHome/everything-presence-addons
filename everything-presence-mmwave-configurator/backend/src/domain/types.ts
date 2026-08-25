@@ -73,6 +73,8 @@ export interface FurnitureInstance {
 
 export interface Door {
   id: string;
+  /** Visual/operational style. Missing persisted values are legacy single doors. */
+  style: 'single' | 'sliding' | 'opening' | 'double';
   segmentIndex: number;
   positionOnSegment: number;
   widthMm: number;

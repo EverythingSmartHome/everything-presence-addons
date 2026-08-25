@@ -43,7 +43,7 @@ Version 2.0 is a complete rewrite with a modern interface and powerful new featu
 
 - [**Polygon zones**][polygon-zones] - Create complex zone shapes beyond rectangles
 - [**Entry/Exit detection**][in-out-detection] - Know when someone enters or leaves a zone
-- [**Room Builder**][room-builder] - Visual room layout with furniture and doors
+- [**Room Builder**][room-builder] - Visual room layout with furniture and single, sliding, opening-only, and double doors
 - [**Heatmap analytics**][heatmap-analytics] - See where presence is detected most often
 - [**Trail recording**][trail-recording] - Visualize movement paths for debugging and analysis
 - **Multi-device support** - Manage all your sensors from one place

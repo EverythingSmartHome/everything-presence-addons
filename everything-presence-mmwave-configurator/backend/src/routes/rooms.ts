@@ -109,18 +109,24 @@ export const createRoomsRouter = (): Router => {
     if (!door || typeof door.id !== 'string') {
       return null;
     }
-    const segmentIndex = Number(door?.segmentIndex ?? 0);
-    const positionOnSegment = Number(door?.positionOnSegment ?? 0.5);
-    const widthMm = Number(door?.widthMm ?? 800);
+    const rawSegmentIndex = Number(door?.segmentIndex ?? 0);
+    const rawPositionOnSegment = Number(door?.positionOnSegment ?? 0.5);
+    const rawWidthMm = Number(door?.widthMm ?? 800);
+    const supportedStyles = ['single', 'sliding', 'opening', 'double'] as const;
+    const style = supportedStyles.includes(door?.style) ? door.style as Door['style'] : 'single';
     const swingDirection = door?.swingDirection === 'out' ? 'out' : 'in';
     const swingSide = door?.swingSide === 'right' ? 'right' : 'left';
 
-    if (!Number.isFinite(segmentIndex) || !Number.isFinite(positionOnSegment) || !Number.isFinite(widthMm)) {
+    if (!Number.isFinite(rawSegmentIndex) || !Number.isFinite(rawPositionOnSegment) || !Number.isFinite(rawWidthMm)) {
       return null;
     }
+    const segmentIndex = Math.max(0, Math.trunc(rawSegmentIndex));
+    const positionOnSegment = Math.min(1, Math.max(0, rawPositionOnSegment));
+    const widthMm = rawWidthMm > 0 ? rawWidthMm : 800;
 
     return {
       id: door.id,
+      style,
       segmentIndex,
       positionOnSegment,
       widthMm,
