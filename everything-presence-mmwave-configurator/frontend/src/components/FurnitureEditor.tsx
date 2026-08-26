@@ -206,10 +206,10 @@ export const FurnitureEditor: React.FC<FurnitureEditorProps> = ({
         <button
           onClick={onDelete}
           disabled={isLocked}
-          title={isLocked ? 'Unlock this item before deleting it' : undefined}
+          title={isLocked ? 'Unlock this item before deleting it' : 'Delete this item (Del)'}
           className="w-full px-4 py-2.5 rounded-lg bg-rose-600/10 border border-rose-600/50 text-rose-100 font-semibold hover:bg-rose-600/20 transition-all active:scale-95 disabled:opacity-40 disabled:hover:bg-rose-600/10 disabled:active:scale-100"
         >
-          Delete Furniture
+          Delete Furniture <span className="font-normal text-rose-200/70">(Del)</span>
         </button>
       </div>
     </div>

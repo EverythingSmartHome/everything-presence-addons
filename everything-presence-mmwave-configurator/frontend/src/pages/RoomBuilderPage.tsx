@@ -34,6 +34,11 @@ import {
 } from '../utils/ceilingSlices';
 import { resolveLoadedRoomSelection } from '../utils/roomSelection';
 import {
+  resolveDeleteKeyTarget,
+  resolveSelectionState,
+  type BuilderSelection,
+} from '../utils/roomBuilderSelection';
+import {
   applyDevicePlacementUpdate,
   areAllItemsLocked,
   areAllSegmentsLocked,
@@ -250,6 +255,36 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   // Last `initialRoomId` we acted on, so the sync effect below can tell an actual
   // prop change from a re-render.
   const lastInitialRoomIdRef = useRef<string | null>(initialRoomId ?? null);
+
+  /**
+   * The single owner of "what is selected". Furniture, doors and wall segments
+   * are mutually exclusive, and routing every selection change through here is
+   * what keeps them that way - a leftover wall selection used to send Del to the
+   * wall branch while the furniture panel was open.
+   */
+  const selectEntity = useCallback((selection: BuilderSelection) => {
+    const next = resolveSelectionState(selection);
+    setSelectedFurnitureId(next.selectedFurnitureId);
+    setSelectedDoorId(next.selectedDoorId);
+    setSelectedSegment(next.selectedSegment);
+    if (next.selectedSegment === null) setHoveredSegment(null);
+  }, []);
+
+  /** Short-lived nudge for keyboard actions that have no visible button to grey out. */
+  const [transientHint, setTransientHint] = useState<string | null>(null);
+  const transientHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTransientHint = useCallback((message: string) => {
+    setTransientHint(message);
+    if (transientHintTimerRef.current) clearTimeout(transientHintTimerRef.current);
+    transientHintTimerRef.current = setTimeout(() => {
+      setTransientHint(null);
+      transientHintTimerRef.current = null;
+    }, 3000);
+  }, []);
+  useEffect(() => () => {
+    if (transientHintTimerRef.current) clearTimeout(transientHintTimerRef.current);
+  }, []);
+
   const CANVAS_SIZE = 700;
   const HALF = CANVAS_SIZE / 2;
   const WALL_EDITOR_WIDTH = 280;
@@ -634,10 +669,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       furniture: [...(selectedRoom.furniture ?? []), newFurniture],
     };
     commitRoom(updated);
-    setSelectedFurnitureId(newFurniture.id);
+    // Selecting through the helper drops any wall segment or door still selected
+    // behind the library, so Del now means "delete this new piece of furniture".
+    selectEntity({ kind: 'furniture', id: newFurniture.id });
     setShowFurnitureLibrary(false);
     setActiveMobileSheet(null);
-  }, [commitRoom, selectedRoom]);
+  }, [commitRoom, selectEntity, selectedRoom]);
 
   const handleFurnitureChange = useCallback((updatedFurniture: FurnitureInstance) => {
     if (!selectedRoom) return;
@@ -657,15 +694,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleFurnitureDelete = useCallback(() => {
     if (!selectedRoom || !selectedFurnitureId) return;
-    // Pinned means pinned: unlock it first.
-    if ((selectedRoom.furniture ?? []).some((f) => f.id === selectedFurnitureId && f.locked)) return;
+    // Pinned means pinned: unlock it first. The panel button greys itself out to
+    // say so; pressing Del has no such affordance, hence the hint.
+    if ((selectedRoom.furniture ?? []).some((f) => f.id === selectedFurnitureId && f.locked)) {
+      showTransientHint('This furniture is locked. Unlock it before deleting it.');
+      return;
+    }
     const updated: RoomConfig = {
       ...selectedRoom,
       furniture: (selectedRoom.furniture ?? []).filter((f) => f.id !== selectedFurnitureId),
     };
     commitRoom(updated);
     setSelectedFurnitureId(null);
-  }, [commitRoom, selectedRoom, selectedFurnitureId]);
+  }, [commitRoom, selectedRoom, selectedFurnitureId, showTransientHint]);
 
   const handleAddDoor = useCallback(() => {
     if (!selectedRoom) return;
@@ -677,11 +718,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setIsDoorPlacementMode((prev) => !prev);
     if (!isDoorPlacementMode) {
       // Entering placement mode - deselect everything
-      setSelectedDoorId(null);
-      setSelectedFurnitureId(null);
-      setSelectedSegment(null);
+      selectEntity({ kind: 'none' });
     }
-  }, [selectedRoom, isDoorPlacementMode]);
+  }, [selectEntity, selectedRoom, isDoorPlacementMode]);
 
   const handleDoorChange = useCallback((updatedDoor: Door) => {
     if (!selectedRoom) return;
@@ -711,15 +750,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleDoorDelete = useCallback(() => {
     if (!selectedRoom || !selectedDoorId) return;
-    // Pinned means pinned: unlock it first.
-    if ((selectedRoom.doors ?? []).some((d) => d.id === selectedDoorId && d.locked)) return;
+    // Pinned means pinned: unlock it first. Del has no disabled state to show
+    // that, so say it out loud.
+    if ((selectedRoom.doors ?? []).some((d) => d.id === selectedDoorId && d.locked)) {
+      showTransientHint('This door is locked. Unlock it before deleting it.');
+      return;
+    }
     const updated: RoomConfig = {
       ...selectedRoom,
       doors: (selectedRoom.doors ?? []).filter((d) => d.id !== selectedDoorId),
     };
     commitRoom(updated);
     setSelectedDoorId(null);
-  }, [commitRoom, selectedRoom, selectedDoorId]);
+  }, [commitRoom, selectedRoom, selectedDoorId, showTransientHint]);
 
   // Helper to generate UUID
   const generateId = () => {
@@ -759,9 +802,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       doors: [...(selectedRoom.doors ?? []), newDoor],
     };
     commitRoom(updated);
-    setSelectedDoorId(newDoor.id);
+    selectEntity({ kind: 'door', id: newDoor.id });
     setIsDoorPlacementMode(false); // Exit placement mode after placing
-  }, [commitRoom, selectedRoom, isDoorPlacementMode]);
+  }, [commitRoom, selectEntity, selectedRoom, isDoorPlacementMode]);
 
   const handleDoorDragStart = useCallback((doorId: string, x: number, y: number) => {
     const door = selectedRoom?.doors?.find((d) => d.id === doorId);
@@ -1283,6 +1326,44 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         return;
       }
 
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (isTextEntry) return;
+        // Del acts on whatever is selected, and only falls back to the
+        // wall-level meanings when nothing is: it is never a general undo.
+        const target = resolveDeleteKeyTarget({
+          selectedFurnitureId,
+          selectedDoorId,
+          selectedSegment,
+          isDrawingWall,
+          hasRoomOutline: !!selectedRoom?.roomShell?.points?.length,
+        });
+        // Furniture and doors get picked from panel buttons too (the library,
+        // the mobile sheet), so their delete runs before the "focus is on a
+        // control" bail-out - the exemption undo/redo and R already have. The
+        // wall meanings stay behind it, exactly as before.
+        if (target === 'furniture') {
+          e.preventDefault();
+          handleFurnitureDelete();
+          return;
+        }
+        if (target === 'door') {
+          e.preventDefault();
+          handleDoorDelete();
+          return;
+        }
+        if (isEditable) return;
+        if (target === 'wallPoint') {
+          e.preventDefault();
+          deleteSelectedWallPoint();
+          return;
+        }
+        if (target === 'lastDrawnPoint') {
+          e.preventDefault();
+          removeLastPoint();
+        }
+        return;
+      }
+
       if (isEditable) return;
 
       if (e.key === 'Escape') {
@@ -1306,20 +1387,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         }
         return;
       }
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (!selectedRoom?.roomShell?.points?.length) return;
-        // Del is a point-level delete, never a general undo: it removes the
-        // selected wall point, or the point just drawn while drawing is active.
-        if (selectedSegment !== null) {
-          e.preventDefault();
-          deleteSelectedWallPoint();
-          return;
-        }
-        if (isDrawingWall) {
-          e.preventDefault();
-          removeLastPoint();
-        }
-      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -1327,12 +1394,16 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     canRotateLayout,
     deleteSelectedWallPoint,
     handleCloseLoop,
+    handleDoorDelete,
+    handleFurnitureDelete,
     handleRedo,
     handleUndo,
     isDrawingWall,
     activeBasicShape,
     removeLastPoint,
     rotateLayoutBy,
+    selectedDoorId,
+    selectedFurnitureId,
     selectedRoom?.roomShell?.points,
     selectedSegment,
     setIsDrawingWall,
@@ -1599,8 +1670,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       lockedSegments: remapLockedSegmentsForSplit(selectedRoom.roomShell.lockedSegments, segmentIndex),
       doors: remapDoorsForSplit(selectedRoom.doors, segmentIndex, splitRatio),
     });
-    setSelectedSegment(segmentIndex);
-  }, [selectedRoom, isDrawingWall, isDoorPlacementMode, snapPointToGrid, handlePointsChange]);
+    selectEntity({ kind: 'segment', index: segmentIndex });
+  }, [selectedRoom, isDrawingWall, isDoorPlacementMode, selectEntity, snapPointToGrid, handlePointsChange]);
 
   const handleCanvasMove = (pt: { x: number; y: number }) => {
     setCursorPos(pt);
@@ -1840,6 +1911,16 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       {error && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
           {error}
+        </div>
+      )}
+
+      {/* Keyboard hint: says out loud what a disabled button would have shown. */}
+      {transientHint && (
+        <div
+          role="status"
+          className="absolute top-20 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-amber-500/50 bg-amber-500/10 backdrop-blur px-6 py-3 text-amber-100 shadow-xl animate-in slide-in-from-top-4 fade-in"
+        >
+          {transientHint}
         </div>
       )}
 
@@ -2260,10 +2341,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   // Clicking the device without moving it is a selection: open its
                   // settings, the same way clicking furniture opens the furniture panel.
                   onDeviceClick={() => {
-                    setSelectedFurnitureId(null);
-                    setSelectedDoorId(null);
-                    setSelectedSegment(null);
-                    setHoveredSegment(null);
+                    selectEntity({ kind: 'none' });
                     setShowFurnitureLibrary(false);
                     setActiveMobileSheet(null);
                     setSettingsTab('device');
@@ -2281,9 +2359,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   selectedSegment={selectedSegment}
                   onSegmentHover={(idx) => setHoveredSegment(idx)}
                   onSegmentSelect={(idx) => {
-                    setSelectedSegment(idx);
-                    setSelectedDoorId(null);
-                    setSelectedFurnitureId(null);
+                    selectEntity(idx === null ? { kind: 'none' } : { kind: 'segment', index: idx });
                     setSegmentDragIndex(null);
                     setSegmentDragStart(null);
                     setSegmentDragBase(null);
@@ -2326,18 +2402,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   furniture={selectedRoom.furniture ?? []}
                   selectedFurnitureId={selectedFurnitureId}
                   onFurnitureSelect={(id) => {
-                    setSelectedFurnitureId(id);
-                    setSelectedDoorId(null);
-                    setSelectedSegment(null);
+                    selectEntity(id === null ? { kind: 'none' } : { kind: 'furniture', id });
                     setShowFurnitureLibrary(false);
                   }}
                   onFurnitureChange={handleFurnitureChange}
                   doors={selectedRoom.doors ?? []}
                   selectedDoorId={selectedDoorId}
                   onDoorSelect={(id) => {
-                    setSelectedDoorId(id);
-                    setSelectedFurnitureId(null);
-                    setSelectedSegment(null);
+                    selectEntity(id === null ? { kind: 'none' } : { kind: 'door', id });
                   }}
                   onDoorChange={handleDoorChange}
                   isDoorPlacementMode={isDoorPlacementMode}
@@ -2598,7 +2670,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 }`}
                 onClick={() => {
                   setShowFurnitureLibrary((v) => !v);
-                  setSelectedFurnitureId(null); // Close furniture settings when opening library
+                  // Close every open editor, not just the furniture one: a wall
+                  // segment left selected behind the library would go on
+                  // answering Del.
+                  selectEntity({ kind: 'none' });
                 }}
                 disabled={!selectedRoom}
               >
@@ -3761,7 +3836,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   setActiveMobileSheet(null);
                   setShowSettings(false);
                   setShowFurnitureLibrary((current) => !current);
-                  setSelectedFurnitureId(null);
+                  selectEntity({ kind: 'none' });
                 }}
               />
             </CanvasBottomToolbar>
@@ -3928,7 +4003,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             onClick={() => {
               setActiveMobileSheet(null);
               setShowFurnitureLibrary(true);
-              setSelectedFurnitureId(null);
+              selectEntity({ kind: 'none' });
             }}
             disabled={!selectedRoom}
           >
