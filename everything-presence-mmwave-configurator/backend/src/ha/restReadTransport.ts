@@ -156,6 +156,10 @@ export class RestReadTransport implements IHaReadTransport {
     }
   }
 
+  async updateEntityRegistryName(_entityId: string, _name: string | null): Promise<void> {
+    throw new Error('Entity registry renaming requires the Home Assistant WebSocket transport');
+  }
+
   /**
    * Fallback: Query device registry via HA template API.
    * This works when the device_registry endpoint isn't directly accessible.

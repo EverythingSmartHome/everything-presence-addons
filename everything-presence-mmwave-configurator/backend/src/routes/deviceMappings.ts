@@ -7,6 +7,8 @@ import type { IHaReadTransport, DeviceRegistryEntry } from '../ha/readTransport'
 import type { EntityRegistryEntry } from '../ha/types';
 import { normalizeMappingKeys } from '../domain/mappingUtils';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
+import { synchronizeZoneEntityNames } from '../domain/zoneEntityNaming';
+import type { ZoneRenameWarning } from '../domain/zoneEntityNaming';
 
 export interface DeviceMappingsRouterDependencies {
   readTransport?: IHaReadTransport;
@@ -538,7 +540,30 @@ export const createDeviceMappingsRouter = (deps?: DeviceMappingsRouterDependenci
 
       logger.info({ deviceId, labelCount: Object.keys(cleanedLabels).length }, 'Zone labels updated');
 
-      return res.json({ zoneLabels: cleanedLabels });
+      const changedLabels: Record<string, string> = {};
+      const previousLabels = existing.zoneLabels ?? {};
+      for (const zoneId of new Set([...Object.keys(previousLabels), ...Object.keys(cleanedLabels)])) {
+        if ((previousLabels[zoneId] ?? '') !== (cleanedLabels[zoneId] ?? '')) {
+          changedLabels[zoneId] = cleanedLabels[zoneId] ?? '';
+        }
+      }
+
+      let renamed = 0;
+      const warnings: ZoneRenameWarning[] = [];
+      if (Object.keys(changedLabels).length > 0) {
+        const profile = profileLoader?.getProfileById(existing.profileId);
+        if (!readTransport) {
+          warnings.push({ zoneId: '*', message: 'Home Assistant transport is unavailable; labels were saved but entities were not renamed' });
+        } else if (!profile) {
+          warnings.push({ zoneId: '*', message: `Device profile ${existing.profileId} was not found; labels were saved but entities were not renamed` });
+        } else {
+          const result = await synchronizeZoneEntityNames(readTransport, updated, profile, changedLabels);
+          renamed = result.renamed;
+          warnings.push(...result.warnings);
+        }
+      }
+
+      return res.json({ zoneLabels: cleanedLabels, synchronization: { renamed, warnings } });
     } catch (error) {
       logger.error({ error, deviceId }, 'Failed to update zone labels');
       return res.status(500).json({ message: 'Failed to update zone labels' });

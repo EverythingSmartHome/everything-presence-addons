@@ -1373,9 +1373,16 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         }
         const savedLabels = await saveZoneLabels(selectedRoom.deviceId, labelsToSave);
         if (savedLabels) {
-          setDeviceZoneLabels(savedLabels);
+          setDeviceZoneLabels(savedLabels.zoneLabels);
           // Invalidate the device mapping cache so other pages get fresh labels
           clearCache(selectedRoom.deviceId);
+          if (savedLabels.synchronization.warnings.length > 0) {
+            const sample = savedLabels.synchronization.warnings.slice(0, 3)
+              .map(item => item.entityId ? `${item.entityId}: ${item.message}` : item.message)
+              .join('; ');
+            const renameWarning = `Zone labels were saved, but ${savedLabels.synchronization.warnings.length} Home Assistant entity name update(s) failed. ${sample}`;
+            setWarning(current => current ? `${current} ${renameWarning}` : renameWarning);
+          }
         }
       }
 

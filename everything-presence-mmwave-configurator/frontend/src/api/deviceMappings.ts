@@ -349,7 +349,7 @@ export const getZoneLabels = async (deviceId: string): Promise<Record<string, st
 export const saveZoneLabels = async (
   deviceId: string,
   zoneLabels: Record<string, string>
-): Promise<Record<string, string> | null> => {
+): Promise<ZoneLabelsSaveResult | null> => {
   try {
     const res = await fetch(ingressAware(`api/device-mappings/${deviceId}/zone-labels`), {
       method: 'PUT',
@@ -360,10 +360,20 @@ export const saveZoneLabels = async (
       console.warn('Device mapping not found - cannot save zone labels');
       return null;
     }
-    const data = await handle<{ zoneLabels: Record<string, string> }>(res);
-    return data.zoneLabels;
+    return await handle<ZoneLabelsSaveResult>(res);
   } catch (error) {
     console.error('Failed to save zone labels:', error);
     return null;
   }
 };
+
+export interface ZoneLabelRenameWarning {
+  zoneId: string;
+  entityId?: string;
+  message: string;
+}
+
+export interface ZoneLabelsSaveResult {
+  zoneLabels: Record<string, string>;
+  synchronization: { renamed: number; warnings: ZoneLabelRenameWarning[] };
+}
