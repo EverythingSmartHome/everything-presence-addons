@@ -33,3 +33,8 @@ export interface EntityRegistryEntry {
   original_name?: string | null;
   unique_id?: string | null;
 }
+
+export interface EntityRegistryUpdateResult {
+  entity_id: string;
+  name: string | null;
+}
