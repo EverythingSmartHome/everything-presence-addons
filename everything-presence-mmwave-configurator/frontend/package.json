@@ -6,7 +6,7 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "vite build",
-		"test": "node --experimental-strip-types --test src/utils/roomShapes.test.ts src/utils/polygonVertices.test.ts src/utils/roomHistory.test.ts src/utils/roomSelection.test.ts src/utils/lockState.test.ts src/utils/roomRotation.test.ts src/utils/doorGeometry.test.ts",
+		"test": "node --experimental-strip-types --test src/utils/roomShapes.test.ts src/utils/polygonVertices.test.ts src/utils/roomHistory.test.ts src/utils/roomSelection.test.ts src/utils/roomBuilderSelection.test.ts src/utils/lockState.test.ts src/utils/roomRotation.test.ts src/utils/doorGeometry.test.ts",
 		"preview": "vite preview",
 		"format": "npx @biomejs/biome format",
 		"format:fix": "npx @biomejs/biome format --write",

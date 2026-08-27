@@ -420,10 +420,10 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
         <button
           onClick={onDelete}
           disabled={isLocked}
-          title={isLocked ? 'Unlock this door before deleting it' : undefined}
+          title={isLocked ? 'Unlock this door before deleting it' : 'Delete this door (Del)'}
           className="w-full px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-600/50 rounded-lg text-red-200 font-semibold transition-colors disabled:opacity-40 disabled:hover:bg-red-600/20"
         >
-          Delete Door
+          Delete Door <span className="font-normal text-red-200/70">(Del)</span>
         </button>
       </div>
     </div>
