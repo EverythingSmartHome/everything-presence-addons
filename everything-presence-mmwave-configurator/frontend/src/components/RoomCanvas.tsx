@@ -7,6 +7,7 @@ import { useThemeContext } from '../contexts/ThemeContext';
 import { useCustomAssets } from '../hooks/useCustomAssets';
 import { formatLengthLabel } from '../utils/lengthLabels';
 import { getDoorGeometry } from '../utils/doorGeometry';
+import { canvasLayerProps } from '../utils/canvasLayers';
 
 export interface Point {
   x: number;
@@ -1171,6 +1172,54 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     }
   };
 
+  // Furniture display geometry is derived once, because an item's body and its
+  // resize/rotate handles are drawn in different layers: bodies with the rest
+  // of the furniture, handles in the topmost layer so one item can never bury
+  // the controls of the item beside it.
+  const furnitureRenderList = (showFurniture ? furniture : []).map((item) => {
+    // Use dragging/resizing/rotating state if this furniture is being edited
+    const isDragging = furnitureDrag?.id === item.id;
+    const isResizing = furnitureResize?.id === item.id;
+    const isRotating = furnitureRotate?.id === item.id;
+
+    // Determine display position, size, and rotation
+    let displayPos = { x: item.x, y: item.y };
+    let displayWidth = item.width;
+    let displayDepth = item.depth;
+    let displayRotation = item.rotationDeg;
+
+    if (isDragging && furnitureDrag) {
+      displayPos = furnitureDrag.currentPos || furnitureDrag.basePos;
+    } else if (isResizing && furnitureResize) {
+      displayPos = furnitureResize.currentPos || furnitureResize.basePos;
+      const size = furnitureResize.currentSize || furnitureResize.baseSize;
+      displayWidth = size.width;
+      displayDepth = size.depth;
+    } else if (isRotating && furnitureRotate) {
+      displayRotation = furnitureRotate.currentRotation !== undefined ? furnitureRotate.currentRotation : furnitureRotate.baseRotation;
+    }
+
+    const isLockedItem = !!item.locked;
+    const isSelected = selectedFurnitureId === item.id;
+
+    return {
+      item,
+      isDragging,
+      displayRotation,
+      canvasPos: toCanvasCoord({ x: displayPos.x, y: displayPos.y }),
+      canvasWidth: toCanvas(displayWidth, effectiveRangeMm),
+      canvasHeight: toCanvas(displayDepth, effectiveRangeMm),
+      isLockedItem,
+      // A locked item still selects, so a left click always visibly does
+      // something and the editor panel can explain the lock. It just never
+      // starts a move.
+      isSelected,
+      showItemLock: isLockedItem && showLockIndicators,
+      // Handles only make sense on an unlocked selection that has settled.
+      showHandles: isSelected && !isLockedItem && !isDragging && !isResizing && !isRotating,
+    };
+  });
+
   return (
     <div className="w-full h-full">
       <svg
@@ -1261,10 +1310,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
               />,
             );
           }
-          return lines;
+          return <g {...canvasLayerProps('floor')}>{lines}</g>;
         })()}
         {safePoints.length > 0 && (
-          <>
+          <g {...canvasLayerProps('shell')}>
             {showWalls && (() => {
               const path = safePoints
                 .map(
@@ -1276,26 +1325,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
               const { fill, opacity } = getFloorFill(roomShellFillMode, floorMaterial);
               return <path d={closedPath} fill={fill} fillOpacity={opacity} stroke="#22d3ee" strokeWidth={2} vectorEffect="non-scaling-stroke" />;
             })()}
-            {!lockShell &&
-              safePoints.map((p, idx) => {
-                // A corner shared with a locked wall would drag that wall too.
-                if (isVertexPinned(idx)) return null;
-                const { x: cx, y: cy } = toCanvasCoord(p);
-                return (
-                  <g key={`pt-${idx}`}>
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={vertexHandleRadius}
-                      fill="#0ea5e9"
-                      stroke="#e0f2fe"
-                      strokeWidth={handleStrokeWidth}
-                      vectorEffect="non-scaling-stroke"
-                      onPointerDown={handleDragStart(idx)}
-                    />
-                  </g>
-                );
-              })}
+            {/* Corner handles are not drawn here - they belong to the handles
+                layer at the end of the canvas, above furniture and doors. */}
             {/* Locked walls: drawn amber so the pin is visible while editing. */}
             {showWalls && showLockIndicators &&
               safePoints.map((p, idx) => {
@@ -1465,66 +1496,9 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   />
                 );
               })}
-            {!lockShell &&
-              selectedSegment !== null &&
-              selectedSegment !== undefined &&
-              !isSegmentPinned(selectedSegment) &&
-              (() => {
-                const p = safePoints[selectedSegment];
-                const next = safePoints[(selectedSegment + 1) % safePoints.length];
-                if (!p || !next) return null;
-                const { x: x1, y: y1 } = toCanvasCoord(p);
-                const { x: x2, y: y2 } = toCanvasCoord(next);
-                return (
-                  <>
-                    <rect
-                      x={x1 - endpointHandleSize / 2}
-                      y={y1 - endpointHandleSize / 2}
-                      width={endpointHandleSize}
-                      height={endpointHandleSize}
-                      fill="#0ea5e9"
-                      stroke="#e0f2fe"
-                      strokeWidth={handleStrokeWidth}
-                      rx={endpointHandleRadius}
-                      vectorEffect="non-scaling-stroke"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        if (e.cancelable) e.preventDefault();
-                        capturePointer(e);
-                        if (onEndpointDragStart) {
-                          const world = toWorldFromEvent(e as any) ?? { x: p.x, y: p.y };
-                          onEndpointDragStart(selectedSegment, 'start', world);
-                          suppressClickRef.current = true;
-                          onDragStateChange?.(true);
-                        }
-                      }}
-                    />
-                    <rect
-                      x={x2 - endpointHandleSize / 2}
-                      y={y2 - endpointHandleSize / 2}
-                      width={endpointHandleSize}
-                      height={endpointHandleSize}
-                      fill="#0ea5e9"
-                      stroke="#e0f2fe"
-                      strokeWidth={handleStrokeWidth}
-                      rx={endpointHandleRadius}
-                      vectorEffect="non-scaling-stroke"
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        if (e.cancelable) e.preventDefault();
-                        capturePointer(e);
-                        if (onEndpointDragStart) {
-                          const world = toWorldFromEvent(e as any) ?? { x: next.x, y: next.y };
-                          onEndpointDragStart(selectedSegment, 'end', world);
-                          suppressClickRef.current = true;
-                          onDragStateChange?.(true);
-                        }
-                      }}
-                    />
-                  </>
-                );
-              })()}
-          </>
+            {/* Endpoint handles for the selected wall are drawn in the handles
+                layer at the end of the canvas, for the same reason. */}
+          </g>
         )}
         {previewFrom && (
           (() => {
@@ -1625,7 +1599,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           const hit = geometry.hitBounds;
 
           return (
-            <g key={door.id}>
+            <g key={door.id} {...canvasLayerProps('doors')}>
               {/* Door group with transform */}
               <g transform={`translate(${canvasDoorPos.x}, ${canvasDoorPos.y}) rotate(${segmentAngle})`}>
                 {/* Selection highlight (when selected) */}
@@ -1781,47 +1755,24 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           );
         })}
 
-        {/* Render furniture */}
-        {showFurniture && furniture.map((item) => {
-          // Use dragging position if this furniture is being dragged
-          const isDragging = furnitureDrag?.id === item.id;
-          const isResizing = furnitureResize?.id === item.id;
-          const isRotating = furnitureRotate?.id === item.id;
-
-          // Determine display position, size, and rotation
-          let displayPos = { x: item.x, y: item.y };
-          let displayWidth = item.width;
-          let displayDepth = item.depth;
-          let displayRotation = item.rotationDeg;
-
-          if (isDragging && furnitureDrag) {
-            displayPos = furnitureDrag.currentPos || furnitureDrag.basePos;
-          } else if (isResizing && furnitureResize) {
-            displayPos = furnitureResize.currentPos || furnitureResize.basePos;
-            const size = furnitureResize.currentSize || furnitureResize.baseSize;
-            displayWidth = size.width;
-            displayDepth = size.depth;
-          } else if (isRotating && furnitureRotate) {
-            displayRotation = furnitureRotate.currentRotation !== undefined ? furnitureRotate.currentRotation : furnitureRotate.baseRotation;
-          }
-
-          const displayX = displayPos.x;
-          const displayY = displayPos.y;
-
-          const canvasPos = toCanvasCoord({ x: displayX, y: displayY });
-          const canvasWidth = toCanvas(displayWidth, effectiveRangeMm);
-          const canvasHeight = toCanvas(displayDepth, effectiveRangeMm);
-          const isLockedItem = !!item.locked;
-          const showItemLock = isLockedItem && showLockIndicators;
-          // A locked item still selects, so a left click always visibly does
-          // something and the editor panel can explain the lock. It just never
-          // starts a move.
-          const isSelected = selectedFurnitureId === item.id;
+        {/* Render furniture bodies. Their resize/rotate handles live in the
+            handles layer at the end of the canvas. */}
+        {furnitureRenderList.map(({
+          item,
+          isDragging,
+          displayRotation,
+          canvasPos,
+          canvasWidth,
+          canvasHeight,
+          isLockedItem,
+          isSelected,
+          showItemLock,
+        }) => {
           const Icon = getFurnitureIcon(item.typeId);
           const customType = getCustomFurnitureType(customFurniture, item.typeId);
 
           return (
-            <g key={item.id}>
+            <g key={item.id} {...canvasLayerProps('furniture')}>
               {/* Main furniture group with transform */}
               <g transform={`translate(${canvasPos.x}, ${canvasPos.y}) rotate(${displayRotation})`}>
                 {/* Furniture icon - render directly as SVG to fill bounds */}
@@ -1896,122 +1847,6 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   label="Furniture is locked - select it to unlock"
                 />
               )}
-
-              {/* Resize handles (only when selected, unlocked and not dragging/rotating) */}
-              {isSelected && !isLockedItem && !isDragging && !isResizing && !isRotating && (() => {
-                const handleSize = 14;
-                const handles: Array<{ corner: 'nw' | 'ne' | 'sw' | 'se'; x: number; y: number; cursor: string }> = [
-                  { corner: 'nw', x: -canvasWidth / 2, y: -canvasHeight / 2, cursor: 'nwse-resize' },
-                  { corner: 'ne', x: canvasWidth / 2, y: -canvasHeight / 2, cursor: 'nesw-resize' },
-                  { corner: 'sw', x: -canvasWidth / 2, y: canvasHeight / 2, cursor: 'nesw-resize' },
-                  { corner: 'se', x: canvasWidth / 2, y: canvasHeight / 2, cursor: 'nwse-resize' },
-                ];
-
-                return (
-                  <>
-                    {handles.map((handle) => (
-                      <rect
-                        key={handle.corner}
-                        x={handle.x - handleSize / 2}
-                        y={handle.y - handleSize / 2}
-                        width={handleSize}
-                        height={handleSize}
-                        fill="#0ea5e9"
-                        stroke="#ffffff"
-                        strokeWidth={1.5}
-                        rx={1}
-                        transform={`translate(${canvasPos.x}, ${canvasPos.y}) rotate(${displayRotation})`}
-                        style={{ transformOrigin: '0 0', cursor: handle.cursor }}
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          if (e.cancelable) e.preventDefault();
-                          capturePointer(e);
-                          const worldPos = toWorldFromEvent(e as any);
-                          if (!worldPos) return;
-                          suppressClickRef.current = true;
-                          setFurnitureResize({
-                            id: item.id,
-                            corner: handle.corner,
-                            start: worldPos,
-                            baseSize: { width: item.width, depth: item.depth },
-                            basePos: { x: item.x, y: item.y },
-                          });
-                          onDragStateChange?.(true);
-                        }}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onPointerCancel={handlePointerUp}
-                      />
-                    ))}
-                    {/* Rotation handle (at top center) */}
-                    <g transform={`translate(${canvasPos.x}, ${canvasPos.y}) rotate(${displayRotation})`}>
-                      {/* Line connecting to rotation handle */}
-                      <line
-                        x1={0}
-                        y1={-canvasHeight / 2}
-                        x2={0}
-                        y2={-canvasHeight / 2 - 20}
-                        stroke="#a855f7"
-                        strokeWidth={2}
-                        strokeDasharray="3 3"
-                      />
-                      <circle
-                        cx={0}
-                        cy={-canvasHeight / 2 - 20}
-                        r={24}
-                        fill="transparent"
-                        style={{ cursor: 'grab', pointerEvents: 'all' }}
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          if (e.cancelable) e.preventDefault();
-                          capturePointer(e);
-                          const worldPos = toWorldFromEvent(e as any);
-                          if (!worldPos) return;
-                          suppressClickRef.current = true;
-                          setFurnitureRotate({
-                            id: item.id,
-                            start: worldPos,
-                            centerPos: { x: item.x, y: item.y },
-                            baseRotation: item.rotationDeg,
-                          });
-                          onDragStateChange?.(true);
-                        }}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onPointerCancel={handlePointerUp}
-                      />
-                      {/* Rotation handle circle */}
-                      <circle
-                        cx={0}
-                        cy={-canvasHeight / 2 - 20}
-                        r={10}
-                        fill="#a855f7"
-                        stroke="#ffffff"
-                        strokeWidth={1.5}
-                        style={{ cursor: 'grab', pointerEvents: 'all' }}
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          if (e.cancelable) e.preventDefault();
-                          capturePointer(e);
-                          const worldPos = toWorldFromEvent(e as any);
-                          if (!worldPos) return;
-                          suppressClickRef.current = true;
-                          setFurnitureRotate({
-                            id: item.id,
-                            start: worldPos,
-                            centerPos: { x: item.x, y: item.y },
-                            baseRotation: item.rotationDeg,
-                          });
-                          onDragStateChange?.(true);
-                        }}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                        onPointerCancel={handlePointerUp}
-                      />
-                    </g>
-                  </>
-                );
-              })()}
             </g>
           );
         })}
@@ -2149,7 +1984,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const iconRotationDeg = safePlacement.mountType === 'ceiling' ? (safePlacement.rotationDeg ?? 0) : 0;
 
             return (
-              <g style={{ pointerEvents: 'none' }}>
+              <g style={{ pointerEvents: 'none' }} {...canvasLayerProps('device')}>
                 {heightCoveragePath && (
                   <path
                     d={heightCoveragePath}
@@ -2326,7 +2161,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const iconRotationDeg = safePlacement.mountType === 'ceiling' ? (safePlacement.rotationDeg ?? 0) : 0;
 
             return (
-              <g>
+              <g {...canvasLayerProps('device')}>
                 {heightCoveragePath && (
                   <path
                     d={heightCoveragePath}
@@ -2403,6 +2238,222 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             );
           })()
         )}
+
+        {/* Editing handles - always the last layer of the canvas.
+            SVG has no z-index, so a later sibling both paints over an earlier
+            one and wins its clicks. Drawn any earlier, a corner node sitting
+            behind a sofa would be invisible *and* dead: the furniture's
+            transparent hit rect would swallow the press that should have
+            grabbed the corner. Keeping every handle here also means one
+            furniture item can never bury the grips of the item beside it. */}
+        <g
+          {...canvasLayerProps('handles')}
+          // In door placement mode a click belongs to the wall under the
+          // pointer, so the handles stay visible but let it through.
+          style={isDoorPlacementMode ? { pointerEvents: 'none' } : undefined}
+        >
+          {/* Wall corner handles */}
+          {!lockShell &&
+            safePoints.map((p, idx) => {
+              // A corner shared with a locked wall would drag that wall too.
+              if (isVertexPinned(idx)) return null;
+              const { x: cx, y: cy } = toCanvasCoord(p);
+              return (
+                <g key={`pt-${idx}`}>
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={vertexHandleRadius}
+                    fill="#0ea5e9"
+                    stroke="#e0f2fe"
+                    strokeWidth={handleStrokeWidth}
+                    vectorEffect="non-scaling-stroke"
+                    onPointerDown={handleDragStart(idx)}
+                  />
+                </g>
+              );
+            })}
+
+          {/* Endpoint handles for the selected wall */}
+          {!lockShell &&
+            safePoints.length > 0 &&
+            selectedSegment !== null &&
+            selectedSegment !== undefined &&
+            !isSegmentPinned(selectedSegment) &&
+            (() => {
+              const p = safePoints[selectedSegment];
+              const next = safePoints[(selectedSegment + 1) % safePoints.length];
+              if (!p || !next) return null;
+              const { x: x1, y: y1 } = toCanvasCoord(p);
+              const { x: x2, y: y2 } = toCanvasCoord(next);
+              return (
+                <>
+                  <rect
+                    x={x1 - endpointHandleSize / 2}
+                    y={y1 - endpointHandleSize / 2}
+                    width={endpointHandleSize}
+                    height={endpointHandleSize}
+                    fill="#0ea5e9"
+                    stroke="#e0f2fe"
+                    strokeWidth={handleStrokeWidth}
+                    rx={endpointHandleRadius}
+                    vectorEffect="non-scaling-stroke"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      capturePointer(e);
+                      if (onEndpointDragStart) {
+                        const world = toWorldFromEvent(e as any) ?? { x: p.x, y: p.y };
+                        onEndpointDragStart(selectedSegment, 'start', world);
+                        suppressClickRef.current = true;
+                        onDragStateChange?.(true);
+                      }
+                    }}
+                  />
+                  <rect
+                    x={x2 - endpointHandleSize / 2}
+                    y={y2 - endpointHandleSize / 2}
+                    width={endpointHandleSize}
+                    height={endpointHandleSize}
+                    fill="#0ea5e9"
+                    stroke="#e0f2fe"
+                    strokeWidth={handleStrokeWidth}
+                    rx={endpointHandleRadius}
+                    vectorEffect="non-scaling-stroke"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      capturePointer(e);
+                      if (onEndpointDragStart) {
+                        const world = toWorldFromEvent(e as any) ?? { x: next.x, y: next.y };
+                        onEndpointDragStart(selectedSegment, 'end', world);
+                        suppressClickRef.current = true;
+                        onDragStateChange?.(true);
+                      }
+                    }}
+                  />
+                </>
+              );
+            })()}
+
+          {/* Furniture resize and rotation handles (only for a selected,
+              unlocked item that is not mid-drag) */}
+          {furnitureRenderList.map(({ item, canvasPos, canvasWidth, canvasHeight, displayRotation, showHandles }) => {
+            if (!showHandles) return null;
+            const handleSize = 14;
+            const handles: Array<{ corner: 'nw' | 'ne' | 'sw' | 'se'; x: number; y: number; cursor: string }> = [
+              { corner: 'nw', x: -canvasWidth / 2, y: -canvasHeight / 2, cursor: 'nwse-resize' },
+              { corner: 'ne', x: canvasWidth / 2, y: -canvasHeight / 2, cursor: 'nesw-resize' },
+              { corner: 'sw', x: -canvasWidth / 2, y: canvasHeight / 2, cursor: 'nesw-resize' },
+              { corner: 'se', x: canvasWidth / 2, y: canvasHeight / 2, cursor: 'nwse-resize' },
+            ];
+
+            return (
+              <g key={`furniture-handles-${item.id}`}>
+                {handles.map((handle) => (
+                  <rect
+                    key={handle.corner}
+                    x={handle.x - handleSize / 2}
+                    y={handle.y - handleSize / 2}
+                    width={handleSize}
+                    height={handleSize}
+                    fill="#0ea5e9"
+                    stroke="#ffffff"
+                    strokeWidth={1.5}
+                    rx={1}
+                    transform={`translate(${canvasPos.x}, ${canvasPos.y}) rotate(${displayRotation})`}
+                    style={{ transformOrigin: '0 0', cursor: handle.cursor }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      capturePointer(e);
+                      const worldPos = toWorldFromEvent(e as any);
+                      if (!worldPos) return;
+                      suppressClickRef.current = true;
+                      setFurnitureResize({
+                        id: item.id,
+                        corner: handle.corner,
+                        start: worldPos,
+                        baseSize: { width: item.width, depth: item.depth },
+                        basePos: { x: item.x, y: item.y },
+                      });
+                      onDragStateChange?.(true);
+                    }}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                  />
+                ))}
+                {/* Rotation handle (at top center) */}
+                <g transform={`translate(${canvasPos.x}, ${canvasPos.y}) rotate(${displayRotation})`}>
+                  {/* Line connecting to rotation handle */}
+                  <line
+                    x1={0}
+                    y1={-canvasHeight / 2}
+                    x2={0}
+                    y2={-canvasHeight / 2 - 20}
+                    stroke="#a855f7"
+                    strokeWidth={2}
+                    strokeDasharray="3 3"
+                  />
+                  <circle
+                    cx={0}
+                    cy={-canvasHeight / 2 - 20}
+                    r={24}
+                    fill="transparent"
+                    style={{ cursor: 'grab', pointerEvents: 'all' }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      capturePointer(e);
+                      const worldPos = toWorldFromEvent(e as any);
+                      if (!worldPos) return;
+                      suppressClickRef.current = true;
+                      setFurnitureRotate({
+                        id: item.id,
+                        start: worldPos,
+                        centerPos: { x: item.x, y: item.y },
+                        baseRotation: item.rotationDeg,
+                      });
+                      onDragStateChange?.(true);
+                    }}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                  />
+                  {/* Rotation handle circle */}
+                  <circle
+                    cx={0}
+                    cy={-canvasHeight / 2 - 20}
+                    r={10}
+                    fill="#a855f7"
+                    stroke="#ffffff"
+                    strokeWidth={1.5}
+                    style={{ cursor: 'grab', pointerEvents: 'all' }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      capturePointer(e);
+                      const worldPos = toWorldFromEvent(e as any);
+                      if (!worldPos) return;
+                      suppressClickRef.current = true;
+                      setFurnitureRotate({
+                        id: item.id,
+                        start: worldPos,
+                        centerPos: { x: item.x, y: item.y },
+                        baseRotation: item.rotationDeg,
+                      });
+                      onDragStateChange?.(true);
+                    }}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                  />
+                </g>
+              </g>
+            );
+          })}
+        </g>
       </svg>
     </div>
   );
