@@ -37,6 +37,7 @@ import {
   CanvasTopBar,
 } from '../components/CanvasLayout';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { HelpTooltip } from '../components/HelpTooltip';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { useDeviceMapping, useDeviceMappings } from '../contexts/DeviceMappingsContext';
@@ -1998,7 +1999,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
             {/* Polygon Mode Toggle (only show if supported by profile AND device has the entities) */}
             {polygonModeStatus.supported && polygonModeControllable && (
+              <div className="flex items-center gap-1">
               <button
+                aria-describedby="zone-mode-help"
                 className={`rounded-xl border backdrop-blur px-6 py-3 text-sm font-semibold shadow-lg transition-all hover:shadow-xl active:scale-95 ${
                   polygonModeStatus.enabled
                     ? 'border-violet-500/50 bg-violet-600/20 text-violet-100'
@@ -2023,6 +2026,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                   </>
                 )}
               </button>
+              <HelpTooltip id="zone-mode-help">Switches which saved zone set the device uses for detection. Existing zones in the other mode remain saved.</HelpTooltip>
+              </div>
             )}
             {polygonModeStatus.supported && !polygonModeControllable && (
               <div className="rounded-xl border border-violet-500/40 bg-violet-600/10 px-6 py-3 text-sm font-semibold text-violet-100 shadow-lg">
@@ -2171,8 +2176,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <label className="text-xs">
-                          <span className="mb-1 block text-cyan-100/80">Reliable axis</span>
+                          <span className="mb-1 flex items-center gap-1 text-cyan-100/80">Reliable axis<HelpTooltip id="zone-slice-axis-help">Selects the device axis that provides the most reliable lateral position for ceiling slices.</HelpTooltip></span>
                           <select
+                            aria-describedby="zone-slice-axis-help"
                             className="w-full rounded-md border border-cyan-700 bg-slate-900 px-2 py-1 text-cyan-50"
                             value={ceilingSliceConfig.axis}
                             onChange={(e) => {
@@ -2184,8 +2190,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                           </select>
                         </label>
                         <label className="text-xs">
-                          <span className="mb-1 block text-cyan-100/80">Slices</span>
+                          <span className="mb-1 flex items-center gap-1 text-cyan-100/80">Slices<HelpTooltip id="zone-slice-count-help">Sets how many adjacent ceiling detection slices are generated.</HelpTooltip></span>
                           <select
+                            aria-describedby="zone-slice-count-help"
                             className="w-full rounded-md border border-cyan-700 bg-slate-900 px-2 py-1 text-cyan-50"
                             value={ceilingSliceConfig.sliceCount}
                             onChange={(e) => {
@@ -2202,8 +2209,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                           </select>
                         </label>
                         <label className="text-xs">
-                          <span className="mb-1 block text-cyan-100/80">Min</span>
+                          <span className="mb-1 flex items-center gap-1 text-cyan-100/80">Min<HelpTooltip id="zone-slice-min-help">Sets the lower lateral boundary in millimetres for generated slices.</HelpTooltip></span>
                           <input
+                            aria-describedby="zone-slice-min-help"
                             type="number"
                             step={100}
                             className="w-full rounded-md border border-cyan-700 bg-slate-900 px-2 py-1 text-cyan-50"
@@ -2214,8 +2222,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                           />
                         </label>
                         <label className="text-xs">
-                          <span className="mb-1 block text-cyan-100/80">Max</span>
+                          <span className="mb-1 flex items-center gap-1 text-cyan-100/80">Max<HelpTooltip id="zone-slice-max-help">Sets the upper lateral boundary in millimetres for generated slices.</HelpTooltip></span>
                           <input
+                            aria-describedby="zone-slice-max-help"
                             type="number"
                             step={100}
                             className="w-full rounded-md border border-cyan-700 bg-slate-900 px-2 py-1 text-cyan-50"
@@ -2396,7 +2405,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                           </div>
                           {/* Zone Name Input */}
                           <div className="mb-2">
+                            <div className="mb-1 flex items-center gap-1 text-[10px] text-slate-400">
+                              Friendly name
+                              <HelpTooltip id={`polygon-zone-label-help-${polygon.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`}>Sets the zone's friendly name on the canvas and in Home Assistant.</HelpTooltip>
+                            </div>
                             <input
+                              aria-describedby={`polygon-zone-label-help-${polygon.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
                               type="text"
                               placeholder="Zone name (e.g. Bed, Desk...)"
                               className={`w-full rounded-md border px-2 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none ${
@@ -2570,7 +2584,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                           </div>
                           {/* Zone Name Input */}
                           <div className="mb-2">
+                            <div className="mb-1 flex items-center gap-1 text-[10px] text-slate-400">
+                              Friendly name
+                              <HelpTooltip id={`rectangle-zone-label-help-${zone.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`}>Sets the zone's friendly name on the canvas and in Home Assistant.</HelpTooltip>
+                            </div>
                             <input
+                              aria-describedby={`rectangle-zone-label-help-${zone.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
                               type="text"
                               placeholder="Zone name (e.g. Bed, Desk...)"
                               className={`w-full rounded-md border px-2 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none ${
