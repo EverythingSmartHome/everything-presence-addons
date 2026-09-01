@@ -176,6 +176,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     showTargets, setShowTargets,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    deviceMarkerStyle, setDeviceMarkerStyle,
+    deviceMarkerScale, setDeviceMarkerScale,
+    deviceMarkerOpacity, setDeviceMarkerOpacity,
     targetMarkerScale, setTargetMarkerScale,
     showZoneLabels, setShowZoneLabels,
     zoneLabelScale, setZoneLabelScale,
@@ -1765,6 +1768,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           {currentStep === 'outline' && (
             <>
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={handleRoomOutlineChange}
               onCanvasClick={wallDrawingClick}
@@ -1806,6 +1810,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {currentStep === 'doors' && (
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -1830,7 +1835,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onDoorDragEnd={handleDoorDragEnd}
               showWalls={showWalls}
               showDoors={showDoors}
-              devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
+              devicePlacement={selectedRoom?.devicePlacement}
+              showDevice={showDeviceIcon}
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
@@ -1864,6 +1870,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {currentStep === 'furniture' && (
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -1888,7 +1895,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               }}
               onFurnitureChange={handleFurnitureChange}
               showFurniture={showFurniture}
-              devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
+              devicePlacement={selectedRoom?.devicePlacement}
+              showDevice={showDeviceIcon}
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
@@ -1922,6 +1930,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {currentStep === 'placement' && (
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -2004,6 +2013,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               }}
             >
               <ZoneCanvas
+                deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
                 zones={enabledZones}
                 onZonesChange={(updatedZones) => {
                   // When zones change on canvas, update only the enabled ones
@@ -2788,10 +2798,14 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
                   { label: 'Doors', checked: showDoors, onChange: setShowDoors },
                   { label: 'Zones', checked: showZones, onChange: setShowZones },
-                  { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                  { label: 'Device marker', checked: showDeviceIcon, onChange: setShowDeviceIcon },
                   { label: 'Targets', checked: showTargets, onChange: setShowTargets, note: !liveState?.deviceId ? 'No device' : undefined },
                 ]}
                 appearance={{
+                  showDeviceMarker: showDeviceIcon,
+                  deviceMarkerStyle, setDeviceMarkerStyle,
+                  deviceMarkerScale, setDeviceMarkerScale,
+                  deviceMarkerOpacity, setDeviceMarkerOpacity,
                   targetMarkerScale,
                   setTargetMarkerScale,
                   showZoneLabels,
@@ -3542,6 +3556,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             }}
           >
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={handleRoomOutlineChange}
               onCanvasClick={wallDrawingClick}
@@ -3638,6 +3653,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             }}
           >
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -3958,6 +3974,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             }}
           >
             <ZoneCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               zones={enabledZones}
               onZonesChange={(updatedZones) => {
                 // When zones change on canvas, update only the enabled ones

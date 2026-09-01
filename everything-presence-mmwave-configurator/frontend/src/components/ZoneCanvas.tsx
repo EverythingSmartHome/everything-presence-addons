@@ -69,6 +69,9 @@ interface ZoneCanvasProps {
   showZoneLabels?: boolean;
   zoneLabelScale?: number;
   showDevice?: boolean;
+  deviceMarkerStyle?: 'icon' | 'node';
+  deviceMarkerScale?: number;
+  deviceMarkerOpacity?: number;
   renderOverlay?: (params: {
     toCanvas: (point: { x: number; y: number }) => { x: number; y: number };
     fromCanvas: (point: { x: number; y: number }) => { x: number; y: number };
@@ -124,6 +127,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   showZoneLabels = true,
   zoneLabelScale = 1,
   showDevice = true,
+  deviceMarkerStyle = 'icon',
+  deviceMarkerScale = 0.5,
+  deviceMarkerOpacity = 1,
   renderOverlay,
 }) => {
   // Rectangle zone dragging state
@@ -530,6 +536,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       showFurniture={false}
       showDoors={showDoors}
       showDevice={showDevice}
+      deviceMarkerStyle={deviceMarkerStyle}
+      deviceMarkerScale={deviceMarkerScale}
+      deviceMarkerOpacity={deviceMarkerOpacity}
       deviceInteractive={false}
       lockShell
       renderOverlay={(params) => {

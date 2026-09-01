@@ -8,6 +8,7 @@ import { useCustomAssets } from '../hooks/useCustomAssets';
 import { formatLengthLabel } from '../utils/lengthLabels';
 import { getDoorGeometry } from '../utils/doorGeometry';
 import { canvasLayerProps } from '../utils/canvasLayers';
+import { MARKER_SCALE_MAX, MARKER_SCALE_MIN } from '../utils/deviceMarkerSettings';
 
 export interface Point {
   x: number;
@@ -121,6 +122,9 @@ interface RoomCanvasProps {
   showFurniture?: boolean;
   showDoors?: boolean;
   showDevice?: boolean;
+  deviceMarkerStyle?: 'icon' | 'node';
+  deviceMarkerScale?: number;
+  deviceMarkerOpacity?: number;
   // When false, device icon won't capture mouse events (allows interacting with zones behind it)
   deviceInteractive?: boolean;
 }
@@ -615,8 +619,13 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   showFurniture = true,
   showDoors = true,
   showDevice = true,
+  deviceMarkerStyle = 'icon',
+  deviceMarkerScale = 0.5,
+  deviceMarkerOpacity = 1,
   deviceInteractive = true,
 }) => {
+  const markerSize = 36 * Math.min(MARKER_SCALE_MAX, Math.max(MARKER_SCALE_MIN, Number.isFinite(deviceMarkerScale) ? deviceMarkerScale : 0.5));
+  const markerOpacity = Math.min(1, Math.max(0.1, Number.isFinite(deviceMarkerOpacity) ? deviceMarkerOpacity : 1));
   const safePoints = Array.isArray(points) ? points : [];
   // Locked walls are dropped from every hit-test below, so a click near one
   // falls through to whatever is behind it rather than grabbing the locked wall.
@@ -1863,7 +1872,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           fieldOfViewDeg: effectiveFov,
           onCanvasPointerMove: handlePointerMove,
           onCanvasPointerRelease: handlePointerUp,
-          deviceElement: (!deviceInteractive && showDevice && devicePlacement && safePlacement) ? (() => {
+          deviceElement: (!deviceInteractive && (showDevice || showRadar) && devicePlacement && safePlacement) ? (() => {
             const { x: px, y: py } = toCanvasCoord(safePlacement);
             // Add 90 degrees so that 0 degrees points down (Y+) instead of right (X+)
             const rotationRad = (((safePlacement.rotationDeg ?? 0) + 90) * Math.PI) / 180;
@@ -1980,7 +1989,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const radarPath = radarPoints.map(toCanvasCoord);
             const pathData = radarPath.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
 
-            const iconSize = 36;
+            const iconSize = markerSize;
             const iconRotationDeg = safePlacement.mountType === 'ceiling' ? (safePlacement.rotationDeg ?? 0) : 0;
 
             return (
@@ -2007,9 +2016,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   />
                 )}
 
-                {/* Device icon or fallback */}
-                {deviceIconUrl ? (
-                  <g transform={`translate(${px}, ${py}) rotate(${iconRotationDeg})`}>
+                {/* Device marker is independent from coverage. */}
+                {showDevice && (deviceMarkerStyle === 'node' ? (
+                  <circle cx={px} cy={py} r={Math.max(4, iconSize / 3)} fill="#38bdf880" stroke="#e0f2fe" strokeWidth={1.5} opacity={markerOpacity} />
+                ) : deviceIconUrl ? (
+                  <g transform={`translate(${px}, ${py}) rotate(${iconRotationDeg})`} opacity={markerOpacity}>
                     <image
                       href={deviceIconUrl}
                       x={-iconSize / 2}
@@ -2020,12 +2031,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     />
                   </g>
                 ) : (
-                  <>
+                  <g opacity={markerOpacity}>
                     {/* Fallback: circle with direction indicator */}
                     <circle
                       cx={px}
                       cy={py}
-                      r={12}
+                      r={iconSize / 3}
                       fill="#3b82f6"
                       stroke="#1d4ed8"
                       strokeWidth={2}
@@ -2034,22 +2045,22 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     <line
                       x1={px}
                       y1={py}
-                      x2={px + Math.cos(rotationRad) * 18}
-                      y2={py + Math.sin(rotationRad) * 18}
+                      x2={px + Math.cos(rotationRad) * iconSize / 2}
+                      y2={py + Math.sin(rotationRad) * iconSize / 2}
                       stroke="#ffffff"
                       strokeWidth={3}
                       strokeLinecap="round"
                       style={{ pointerEvents: 'none' }}
                     />
-                  </>
-                )}
+                  </g>
+                ))}
               </g>
             );
           })() : undefined,
         })}
 
         {/* Device rendering - when interactive (Room Builder), render AFTER overlay so device can be dragged */}
-        {deviceInteractive && showDevice && devicePlacement && safePlacement && (
+        {deviceInteractive && (showDevice || showRadar) && devicePlacement && safePlacement && (
           (() => {
             const { x: px, y: py } = toCanvasCoord(safePlacement);
             // Add 90 degrees so that 0 degrees points down (Y+) instead of right (X+)
@@ -2157,7 +2168,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             const radarPath = radarPoints.map(toCanvasCoord);
             const pathData = radarPath.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ') + ' Z';
 
-            const iconSize = 36;
+            const iconSize = markerSize;
             const iconRotationDeg = safePlacement.mountType === 'ceiling' ? (safePlacement.rotationDeg ?? 0) : 0;
 
             return (
@@ -2183,7 +2194,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   />
                 )}
 
-                {deviceIconUrl ? (
+                {showDevice && <g opacity={markerOpacity} style={{ pointerEvents: 'none' }}>
+                {deviceMarkerStyle === 'node' ? (
+                  <circle cx={px} cy={py} r={Math.max(4, iconSize / 3)} fill="#38bdf880" stroke="#e0f2fe" strokeWidth={1.5} />
+                ) : deviceIconUrl ? (
                   <g transform={`translate(${px}, ${py}) rotate(${iconRotationDeg})`}>
                     <image
                       href={deviceIconUrl}
@@ -2193,10 +2207,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                       height={iconSize}
                       style={{
                         cursor: devicePositionLocked ? (onDeviceClick ? 'pointer' : 'not-allowed') : 'grab',
-                        pointerEvents: 'all',
+                        pointerEvents: 'none',
                       }}
-                      onPointerDown={handleDevicePointerDown}
-                      onPointerUp={handleDevicePointerUp}
                     />
                   </g>
                 ) : (
@@ -2204,12 +2216,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     <circle
                       cx={px}
                       cy={py}
-                      r={12}
+                      r={iconSize / 3}
                       fill="#3b82f6"
                       stroke="#1d4ed8"
                       strokeWidth={2}
-                      onPointerDown={handleDevicePointerDown}
-                      onPointerUp={handleDevicePointerUp}
                       style={{
                         cursor: devicePositionLocked ? (onDeviceClick ? 'pointer' : 'not-allowed') : 'grab',
                       }}
@@ -2217,8 +2227,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     <line
                       x1={px}
                       y1={py}
-                      x2={px + Math.cos(rotationRad) * 18}
-                      y2={py + Math.sin(rotationRad) * 18}
+                      x2={px + Math.cos(rotationRad) * iconSize / 2}
+                      y2={py + Math.sin(rotationRad) * iconSize / 2}
                       stroke="#ffffff"
                       strokeWidth={3}
                       strokeLinecap="round"
@@ -2227,7 +2237,11 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     />
                   </>
                 )}
-                {devicePositionLocked && showLockIndicators && (
+                </g>}
+                {showDevice && (
+                  <circle cx={px} cy={py} r={Math.max(22, iconSize / 2)} fill="transparent" onPointerDown={handleDevicePointerDown} onPointerUp={handleDevicePointerUp} style={{ cursor: devicePositionLocked ? (onDeviceClick ? 'pointer' : 'not-allowed') : 'grab' }} aria-label="Device marker" />
+                )}
+                {showDevice && devicePositionLocked && showLockIndicators && (
                   <LockBadge
                     x={px + iconSize / 2}
                     y={py - iconSize / 2}
