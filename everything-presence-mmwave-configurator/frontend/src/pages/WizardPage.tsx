@@ -40,6 +40,7 @@ import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverag
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { resolveZoneLimits, supportsZoneEditing } from '../utils/zoneCapabilities';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -50,8 +51,8 @@ interface WizardPageProps {
   onBack?: () => void;
   onCreateRoom: (name: string, deviceId: string | null, profileId: string | null, entityMappings?: EntityMappings) => Promise<RoomConfig>;
   onSelectRoom: (roomId: string | null, profileId?: string | null) => void;
-  onGoRoomBuilder: (roomId: string | null, profileId?: string | null) => void;
-  onGoZoneEditor: (roomId: string | null, profileId?: string | null) => void;
+  onGoRoomBuilder?: (roomId: string | null, profileId?: string | null) => void;
+  onGoZoneEditor?: (roomId: string | null, profileId?: string | null) => void;
   onComplete: () => void;
   onRoomUpdate?: (room: RoomConfig) => void;
   initialStep?: string;
@@ -436,7 +437,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     const base: StepKey[] = ['device', 'entityDiscovery', 'roomChoice'];
 
     // Check if current profile supports zones
-    const supportsZones = currentProfile?.capabilities?.zones !== false;
+    const supportsZones = supportsZoneEditing(currentProfile);
 
     if (roomPath === 'skip') {
       // Skip room setup: device → entityDiscovery → roomChoice → (zones if supported) → finish
@@ -467,14 +468,26 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const currentStep = steps[stepIndex] ?? 'device';
   const isRoomMode = roomPath !== 'skip';
 
+  // Zone slot counts for the selected device; a profile that declares a zone
+  // type unsupported resolves to zero slots.
+  const zoneLimits = useMemo(() => resolveZoneLimits(currentProfile), [currentProfile]);
+  const zoneEditingSupported = useMemo(() => supportsZoneEditing(currentProfile), [currentProfile]);
+  const allowedZoneTypes = useMemo(() => {
+    const types: ZoneRect['type'][] = [];
+    if (zoneLimits.maxZones > 0) types.push('regular');
+    if (zoneLimits.maxExclusionZones > 0) types.push('exclusion');
+    if (zoneLimits.maxEntryZones > 0) types.push('entry');
+    return types;
+  }, [zoneLimits]);
+
   // Generate all possible zone slots based on profile limits
   const allPossibleZones = useMemo(() => {
     if (!currentProfile) return [];
-    const limits = currentProfile.limits;
+    const limits = zoneLimits;
     const zones: ZoneRect[] = [];
 
     // Regular zones
-    for (let i = 1; i <= (limits.maxZones ?? 4); i++) {
+    for (let i = 1; i <= limits.maxZones; i++) {
       zones.push({
         id: `Zone ${i}`,
         type: 'regular',
@@ -487,7 +500,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
 
     // Exclusion zones
-    for (let i = 1; i <= (limits.maxExclusionZones ?? 2); i++) {
+    for (let i = 1; i <= limits.maxExclusionZones; i++) {
       zones.push({
         id: `Exclusion ${i}`,
         type: 'exclusion',
@@ -500,7 +513,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
 
     // Entry zones
-    for (let i = 1; i <= (limits.maxEntryZones ?? 2); i++) {
+    for (let i = 1; i <= limits.maxEntryZones; i++) {
       zones.push({
         id: `Entry ${i}`,
         type: 'entry',
@@ -513,7 +526,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
 
     return zones;
-  }, [currentProfile]);
+  }, [currentProfile, zoneLimits]);
 
   // Merge device zones with all possible zones
   const displayZones = useMemo(() => {
@@ -3018,6 +3031,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                         <ZoneEditor
                           key={zone.id}
                           zone={zone}
+                          allowedTypes={allowedZoneTypes}
                           onChange={(updated) => {
                             const newDisplayZones = displayZones.map((z) =>
                               z.id === updated.id ? { ...updated, enabled: true } : z
@@ -4184,14 +4198,18 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              className="flex-1 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-6 py-3 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
-              onClick={() => {
-                onGoZoneEditor(selectedRoom?.id ?? null, selectedRoom?.profileId ?? profileId ?? null);
-              }}
-            >
-              Continue to Zone Editor
-            </button>
+            {/* A distance-only device (EP1) has no zones to edit, so it is never
+                offered the Zone Editor as a next step. */}
+            {zoneEditingSupported && onGoZoneEditor && (
+              <button
+                className="flex-1 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-6 py-3 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
+                onClick={() => {
+                  onGoZoneEditor(selectedRoom?.id ?? null, selectedRoom?.profileId ?? profileId ?? null);
+                }}
+              >
+                Continue to Zone Editor
+              </button>
+            )}
             <button
               className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/30 transition-all hover:shadow-xl hover:shadow-emerald-500/40 active:scale-95"
               onClick={() => {

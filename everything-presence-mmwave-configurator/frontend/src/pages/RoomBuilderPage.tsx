@@ -26,6 +26,7 @@ import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import { roomSupportsZoneEditing } from '../utils/zoneCapabilities';
 import { formatLengthLabel } from '../utils/lengthLabels';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import {
@@ -471,6 +472,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const caps = selectedProfile?.capabilities as { tracking?: boolean; distanceOnlyTracking?: boolean } | undefined;
     return Boolean(caps?.tracking) && !caps?.distanceOnlyTracking;
   }, [selectedProfile]);
+
+  // Room Builder supports every device, but the Zone Editor does not: a
+  // distance-only sensor (EP1) has no zones to draw, so the menu entry is
+  // greyed out here exactly as it is on the live dashboard.
+  const zoneEditingSupported = useMemo(
+    () => roomSupportsZoneEditing(selectedRoom, profiles),
+    [profiles, selectedRoom],
+  );
+  const zoneEditorDisabledReason = 'Zone editor is not available for EP1 (distance-only tracking)';
 
   // Device mappings context for entity resolution
   const { getEntityId } = useDeviceMappings();
@@ -2192,12 +2202,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   </button>
                   <button
                     onClick={() => {
+                      if (!zoneEditingSupported) return;
                       setShowNavMenu(false);
                       navigateTo('zoneEditor');
                     }}
-                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
+                    disabled={!zoneEditingSupported}
+                    className={`w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg transition-all ${
+                      zoneEditingSupported
+                        ? 'text-slate-100 hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95'
+                        : 'text-slate-500 cursor-not-allowed'
+                    }`}
+                    title={zoneEditingSupported ? '' : zoneEditorDisabledReason}
                   >
-                    📐 Zone Editor
+                    📐 Zone Editor {!zoneEditingSupported && '(Not Available)'}
                   </button>
                   <button
                     onClick={() => {
@@ -3896,12 +3913,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  if (!zoneEditingSupported) return;
                   setActiveMobileSheet(null);
                   navigateTo('zoneEditor');
                 }}
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+                disabled={!zoneEditingSupported}
+                title={zoneEditingSupported ? '' : zoneEditorDisabledReason}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Zone Editor
+                Zone Editor {!zoneEditingSupported && '(Not Available)'}
               </button>
               <button
                 type="button"

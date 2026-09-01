@@ -43,6 +43,7 @@ import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { useDeviceMapping, useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverage';
+import { resolveZoneLimits, roomSupportsZoneEditing } from '../utils/zoneCapabilities';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
 import { MIN_POLYGON_VERTICES, canDeleteVertex, deleteVertex } from '../utils/polygonVertices';
@@ -258,14 +259,25 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const installationAngle =
     typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
 
+  // Zone slot counts for the selected device. A profile that declares a zone
+  // type unsupported resolves to zero slots, so an EP1 offers none at all.
+  const zoneLimits = useMemo(() => resolveZoneLimits(selectedProfile), [selectedProfile]);
+
+  // Only rooms whose sensor can actually hold zones may be edited here; an EP1
+  // room must not be reachable through the room selector either.
+  const zoneCapableRooms = useMemo(
+    () => rooms.filter((room) => roomSupportsZoneEditing(room, profiles)),
+    [rooms, profiles],
+  );
+
   // Generate all possible zone slots based on profile limits
   const allPossibleZones = useMemo(() => {
     if (!selectedProfile) return [];
-    const limits = selectedProfile.limits;
+    const limits = zoneLimits;
     const zones: ZoneRect[] = [];
 
     // Regular zones
-    for (let i = 1; i <= (limits.maxZones ?? 4); i++) {
+    for (let i = 1; i <= limits.maxZones; i++) {
       zones.push({
         id: `Zone ${i}`,
         type: 'regular',
@@ -278,7 +290,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
 
     // Exclusion zones
-    for (let i = 1; i <= (limits.maxExclusionZones ?? 2); i++) {
+    for (let i = 1; i <= limits.maxExclusionZones; i++) {
       zones.push({
         id: `Exclusion ${i}`,
         type: 'exclusion',
@@ -291,7 +303,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
 
     // Entry zones
-    for (let i = 1; i <= (limits.maxEntryZones ?? 2); i++) {
+    for (let i = 1; i <= limits.maxEntryZones; i++) {
       zones.push({
         id: `Entry ${i}`,
         type: 'entry',
@@ -304,7 +316,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
 
     return zones;
-  }, [selectedProfile]);
+  }, [selectedProfile, zoneLimits]);
 
   // Merge device zones with all possible zones, applying labels from device mapping
   const displayZones = useMemo(() => {
@@ -432,17 +444,20 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         setProfiles(profileRes.profiles);
         setRooms(roomRes.rooms);
 
-        const initialRoom =
-          (initialRoomId && roomRes.rooms.find((r) => r.id === initialRoomId)) || roomRes.rooms[0] || null;
+        // Never open on a room whose device has no zones (EP1): the editor has
+        // nothing to show for it, and it must not be reachable by defaulting.
+        const editableRooms = roomRes.rooms.filter((room) =>
+          roomSupportsZoneEditing(room, profileRes.profiles),
+        );
+
+        const requestedRoom = initialRoomId
+          ? editableRooms.find((r) => r.id === initialRoomId) ?? null
+          : null;
+        const initialRoom = requestedRoom || editableRooms[0] || null;
         if (initialRoom) {
           setSelectedRoomId(initialRoom.id);
           setSelectedZoneId(initialRoom.zones?.[0]?.id ?? null);
           if (initialRoom.profileId) setSelectedProfileId(initialRoom.profileId);
-        }
-
-        if (!initialRoom && !selectedRoomId && roomRes.rooms.length > 0) {
-          setSelectedRoomId(roomRes.rooms[0].id);
-          setSelectedZoneId(roomRes.rooms[0].zones?.[0]?.id ?? null);
         }
 
         if (!initialRoom?.profileId && !selectedProfileId && profileRes.profiles.length > 0) {
@@ -776,7 +791,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         lateralMaxMm: Math.max(...lateralRangesMm.map((range) => range.max)),
         lateralBreakpointsMm: undefined,
         lateralRangesMm,
-        exclusionRangesMm: exclusionRangesMm.slice(0, selectedProfile?.limits.maxExclusionZones ?? 2),
+        exclusionRangesMm: exclusionRangesMm.slice(0, zoneLimits.maxExclusionZones),
       }, { persist: false });
       return;
     }
@@ -1459,12 +1474,15 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   }, [isMobileCanvas]);
 
   const handleRoomSelection = useCallback((roomId: string | null) => {
-    setSelectedRoomId(roomId);
     const room = rooms.find((candidate) => candidate.id === roomId);
+    // Switching sideways onto a zone-less device (EP1) is not an edit this page
+    // can make sense of, so the selection is refused outright.
+    if (room && !roomSupportsZoneEditing(room, profiles)) return;
+    setSelectedRoomId(roomId);
     setSelectedZoneId(room?.zones?.[0]?.id ?? null);
     if (room?.profileId) setSelectedProfileId(room.profileId);
     onRoomChange?.(roomId, room?.profileId ?? selectedProfileId);
-  }, [onRoomChange, rooms, selectedProfileId]);
+  }, [onRoomChange, profiles, rooms, selectedProfileId]);
 
   const toggleMobileZoneList = () => {
     setShowSettings(false);
@@ -1616,13 +1634,13 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
               Menu
             </button>
           ) : null}
-          title={rooms.length > 0 ? (
+          title={zoneCapableRooms.length > 0 ? (
             <select
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm font-semibold text-slate-100 focus:border-aqua-500 focus:outline-none focus:ring-1 focus:ring-aqua-500/50"
               value={selectedRoomId ?? ''}
               onChange={(event) => handleRoomSelection(event.target.value || null)}
             >
-              {rooms.map((room) => (
+              {zoneCapableRooms.map((room) => (
                 <option key={room.id} value={room.id}>
                   {room.name}
                 </option>
@@ -1980,7 +1998,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                 handleRoomSelection(e.target.value || null);
               }}
             >
-              {rooms.map((r) => (
+              {zoneCapableRooms.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
                 </option>
@@ -2242,7 +2260,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         type="button"
                         onClick={() => {
                           const existing = ceilingSliceConfig.exclusionRangesMm ?? [];
-                          const maxExclusions = selectedProfile?.limits.maxExclusionZones ?? 2;
+                          const maxExclusions = zoneLimits.maxExclusionZones;
                           if (existing.length >= maxExclusions) return;
                           const width = Math.max(300, (ceilingSliceConfig.lateralMaxMm - ceilingSliceConfig.lateralMinMm) / 8);
                           const center = 0;
@@ -2253,10 +2271,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                             ],
                           });
                         }}
-                        disabled={(ceilingSliceConfig.exclusionRangesMm?.length ?? 0) >= (selectedProfile?.limits.maxExclusionZones ?? 2)}
+                        disabled={(ceilingSliceConfig.exclusionRangesMm?.length ?? 0) >= zoneLimits.maxExclusionZones}
                         className="mt-3 w-full rounded-md border border-rose-500/50 bg-rose-600/20 px-3 py-2 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
-                        + Exclusion ({ceilingSliceConfig.exclusionRangesMm?.length ?? 0}/{selectedProfile?.limits.maxExclusionZones ?? 2})
+                        + Exclusion ({ceilingSliceConfig.exclusionRangesMm?.length ?? 0}/{zoneLimits.maxExclusionZones})
                       </button>
                     </div>
                   )}
@@ -2265,7 +2283,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     <button
                       onClick={() => {
                         const regularCount = polygonZones.filter(z => z.type === 'regular').length;
-                        if (regularCount >= (selectedProfile?.limits.maxZones ?? 4)) return;
+                        if (regularCount >= zoneLimits.maxZones) return;
                         const newZone: ZonePolygon = {
                           id: `Zone ${regularCount + 1}`,
                           type: 'regular',
@@ -2275,15 +2293,15 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         setPolygonZones([...polygonZones, newZone]);
                         setSelectedZoneId(newZone.id);
                       }}
-                      disabled={polygonZones.filter(z => z.type === 'regular').length >= (selectedProfile?.limits.maxZones ?? 4)}
+                      disabled={polygonZones.filter(z => z.type === 'regular').length >= zoneLimits.maxZones}
                       className="flex-1 rounded-lg border border-blue-500/50 bg-blue-600/20 px-3 py-2 text-xs font-semibold text-blue-100 transition-all hover:bg-blue-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      + Zone ({polygonZones.filter(z => z.type === 'regular').length}/{selectedProfile?.limits.maxZones ?? 4})
+                      + Zone ({polygonZones.filter(z => z.type === 'regular').length}/{zoneLimits.maxZones})
                     </button>
                     <button
                       onClick={() => {
                         const exclusionCount = polygonZones.filter(z => z.type === 'exclusion').length;
-                        if (exclusionCount >= (selectedProfile?.limits.maxExclusionZones ?? 2)) return;
+                        if (exclusionCount >= zoneLimits.maxExclusionZones) return;
                         const newZone: ZonePolygon = {
                           id: `Exclusion ${exclusionCount + 1}`,
                           type: 'exclusion',
@@ -2293,15 +2311,15 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         setPolygonZones([...polygonZones, newZone]);
                         setSelectedZoneId(newZone.id);
                       }}
-                      disabled={polygonZones.filter(z => z.type === 'exclusion').length >= (selectedProfile?.limits.maxExclusionZones ?? 2)}
+                      disabled={polygonZones.filter(z => z.type === 'exclusion').length >= zoneLimits.maxExclusionZones}
                       className="flex-1 rounded-lg border border-rose-500/50 bg-rose-600/20 px-3 py-2 text-xs font-semibold text-rose-100 transition-all hover:bg-rose-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      + Exclusion ({polygonZones.filter(z => z.type === 'exclusion').length}/{selectedProfile?.limits.maxExclusionZones ?? 2})
+                      + Exclusion ({polygonZones.filter(z => z.type === 'exclusion').length}/{zoneLimits.maxExclusionZones})
                     </button>
                     <button
                       onClick={() => {
                         const entryCount = polygonZones.filter(z => z.type === 'entry').length;
-                        if (entryCount >= (selectedProfile?.limits.maxEntryZones ?? 2)) return;
+                        if (entryCount >= zoneLimits.maxEntryZones) return;
                         const newZone: ZonePolygon = {
                           id: `Entry ${entryCount + 1}`,
                           type: 'entry',
@@ -2311,10 +2329,10 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         setPolygonZones([...polygonZones, newZone]);
                         setSelectedZoneId(newZone.id);
                       }}
-                      disabled={polygonZones.filter(z => z.type === 'entry').length >= (selectedProfile?.limits.maxEntryZones ?? 2)}
+                      disabled={polygonZones.filter(z => z.type === 'entry').length >= zoneLimits.maxEntryZones}
                       className="flex-1 rounded-lg border border-emerald-500/50 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-100 transition-all hover:bg-emerald-600/30 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      + Entry ({polygonZones.filter(z => z.type === 'entry').length}/{selectedProfile?.limits.maxEntryZones ?? 2})
+                      + Entry ({polygonZones.filter(z => z.type === 'entry').length}/{zoneLimits.maxEntryZones})
                     </button>
                   </div>}
 
