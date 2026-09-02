@@ -11,6 +11,75 @@ export interface DeviceProfileLimits {
   fieldOfViewDegrees?: number;
 }
 
+/** The capability flags that decide whether a zone type exists at all. */
+export interface ZoneCapabilityFlags {
+  zones?: boolean;
+  exclusionZones?: boolean;
+  entryZones?: boolean;
+  polygonZones?: boolean;
+}
+
+export interface ResolvedZoneLimits {
+  maxZones: number;
+  maxExclusionZones: number;
+  maxEntryZones: number;
+}
+
+/**
+ * Slot counts assumed when a profile says nothing at all about a zone type -
+ * the legacy Everything Presence Lite shape.
+ *
+ * These apply only in the absence of both a capability flag and a limit. A
+ * profile that declares `zones: false` resolves to zero slots of every kind,
+ * so a missing limit can never be read as "two".
+ */
+export const DEFAULT_ZONE_LIMITS: ResolvedZoneLimits = {
+  maxZones: 4,
+  maxExclusionZones: 2,
+  maxEntryZones: 2,
+};
+
+const readZoneCapabilities = (capabilities: unknown): ZoneCapabilityFlags => {
+  if (!capabilities || typeof capabilities !== 'object') return {};
+  return capabilities as ZoneCapabilityFlags;
+};
+
+const resolveLimit = (value: unknown, supported: boolean | undefined, fallback: number): number => {
+  // The capability is authoritative: an unsupported feature has no slots,
+  // whatever the limits block claims.
+  if (supported === false) return 0;
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  return fallback;
+};
+
+/**
+ * How many zones of each type a profile allows.
+ *
+ * Exclusion and entry zones inherit a `zones: false` capability, so a
+ * distance-only sensor cannot acquire them by omitting a limit.
+ */
+export const resolveZoneLimits = (
+  profile: Pick<DeviceProfile, 'capabilities' | 'limits'> | null | undefined
+): ResolvedZoneLimits => {
+  const capabilities = readZoneCapabilities(profile?.capabilities);
+  const limits = profile?.limits ?? {};
+  return {
+    maxZones: resolveLimit(limits.maxZones, capabilities.zones, DEFAULT_ZONE_LIMITS.maxZones),
+    maxExclusionZones: resolveLimit(
+      limits.maxExclusionZones,
+      capabilities.exclusionZones ?? capabilities.zones,
+      DEFAULT_ZONE_LIMITS.maxExclusionZones
+    ),
+    maxEntryZones: resolveLimit(
+      limits.maxEntryZones,
+      capabilities.entryZones ?? capabilities.zones,
+      DEFAULT_ZONE_LIMITS.maxEntryZones
+    ),
+  };
+};
+
 /**
  * Entity category for classification and dynamic loading.
  */
@@ -105,6 +174,32 @@ export interface DeviceProfile {
   };
 }
 
+/**
+ * Fill in a profile's zone limits once, at load time, so no consumer has to
+ * guess a default for a missing key. A profile whose limits contradict its
+ * capabilities is corrected here and logged, since that is a packaging mistake
+ * rather than a runtime condition.
+ */
+export const normalizeDeviceProfile = (profile: DeviceProfile): DeviceProfile => {
+  const resolved = resolveZoneLimits(profile);
+  const declared = profile.limits ?? {};
+
+  for (const key of ['maxZones', 'maxExclusionZones', 'maxEntryZones'] as const) {
+    const declaredValue = declared[key];
+    if (typeof declaredValue === 'number' && declaredValue !== resolved[key]) {
+      logger.warn(
+        { profile: profile.id, limit: key, declared: declaredValue, applied: resolved[key] },
+        'Device profile limit contradicts its capabilities; using the capability'
+      );
+    }
+  }
+
+  return {
+    ...profile,
+    limits: { ...declared, ...resolved },
+  };
+};
+
 export class DeviceProfileLoader {
   private readonly dir: string;
 
@@ -125,7 +220,7 @@ export class DeviceProfileLoader {
       try {
         const raw = fs.readFileSync(fullPath, 'utf-8');
         const parsed = JSON.parse(raw) as DeviceProfile;
-        return [parsed];
+        return [normalizeDeviceProfile(parsed)];
       } catch (error) {
         logger.warn({ file: fullPath, error }, 'Failed to parse device profile');
         return [];

@@ -6,13 +6,23 @@ interface ZoneEditorProps {
   zone: ZoneRect;
   onChange: (zone: ZoneRect) => void;
   onDelete?: (id: string) => void;
+  /**
+   * Zone types the device supports. Omit to offer all three. A type the device
+   * cannot hold is never offered, so a zone cannot be retyped into one.
+   */
+  allowedTypes?: ZoneRect['type'][];
 }
 
 const zoneTypes: ZoneRect['type'][] = ['regular', 'exclusion', 'entry'];
 
-export const ZoneEditor: React.FC<ZoneEditorProps> = ({ zone, onChange, onDelete }) => {
+export const ZoneEditor: React.FC<ZoneEditorProps> = ({ zone, onChange, onDelete, allowedTypes }) => {
   const update = (patch: Partial<ZoneRect>) => onChange({ ...zone, ...patch });
   const helpId = (field: string) => `zone-${zone.id.replace(/[^a-zA-Z0-9_-]/g, '-')}-${field}-help`;
+  // The zone's current type stays selectable even when unsupported, so existing
+  // configuration is shown honestly rather than silently retyped.
+  const selectableTypes = allowedTypes?.length
+    ? zoneTypes.filter((type) => allowedTypes.includes(type) || type === zone.type)
+    : zoneTypes;
 
   return (
     <div className="space-y-2 rounded-lg border border-slate-700/50 bg-slate-900/60 p-3">
@@ -25,7 +35,7 @@ export const ZoneEditor: React.FC<ZoneEditorProps> = ({ zone, onChange, onDelete
           value={zone.type}
           onChange={(e) => update({ type: e.target.value as ZoneRect['type'] })}
         >
-          {zoneTypes.map((t) => (
+          {selectableTypes.map((t) => (
             <option key={t} value={t}>
               {t}
             </option>

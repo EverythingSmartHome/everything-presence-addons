@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { DeviceDiscoveryService } from '../domain/deviceDiscovery';
-import { DeviceProfileLoader } from '../domain/deviceProfiles';
+import { DeviceProfileLoader, resolveZoneLimits } from '../domain/deviceProfiles';
 import type { IHaReadTransport } from '../ha/readTransport';
 import type { IHaWriteClient } from '../ha/writeClient';
 import { ZoneWriter } from '../ha/zoneWriter';
@@ -50,6 +50,46 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
   };
   const hasRuntimeMappings = (deviceId: string, entityMappings?: EntityMappings): boolean =>
     deviceMappingStorage.hasMapping(deviceId) || !!entityMappings;
+  /**
+   * Split a zone payload into what this profile can hold and what it cannot.
+   *
+   * A zone type the profile has no slots for must never reach the device,
+   * whichever client asked: a distance-only sensor (EP1) has no zone, exclusion
+   * or entry entities to write to. Such zones are dropped rather than failing
+   * the whole request, so a legacy room that still carries them can still save
+   * everything else; the caller reports the drop as a warning.
+   */
+  const partitionZonesBySupport = <T extends { id?: string; type?: string; enabled?: boolean }>(
+    profile: Parameters<typeof resolveZoneLimits>[0],
+    zones: T[] | undefined
+  ): { supported: T[]; unsupported: T[] } => {
+    const limits = resolveZoneLimits(profile);
+    const maxByType: Record<string, number> = {
+      regular: limits.maxZones,
+      exclusion: limits.maxExclusionZones,
+      entry: limits.maxEntryZones,
+    };
+    const supported: T[] = [];
+    const unsupported: T[] = [];
+    for (const zone of zones ?? []) {
+      // Only known types can be judged; anything else is left to the writer.
+      if (maxByType[zone?.type ?? 'regular'] === 0) {
+        unsupported.push(zone);
+      } else {
+        supported.push(zone);
+      }
+    }
+    return { supported, unsupported };
+  };
+
+  const unsupportedZoneWarnings = (
+    unsupported: Array<{ id?: string; type?: string }>
+  ): Array<{ description: string; error: string }> =>
+    unsupported.map((zone) => ({
+      description: `Skipped ${zone.type ?? 'regular'} zone ${zone.id ?? ''}`.trim(),
+      error: 'This device profile does not support this zone type',
+    }));
+
   const getDeviceFirmwareVersion = async (deviceId: string): Promise<string | undefined> => {
 
     try {
@@ -149,10 +189,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
           return res.status(404).json({ message: 'Profile not found' });
         }
 
-        const limits = profile.limits ?? {};
-        const maxZones = limits.maxZones ?? 4;
-        const maxExclusion = limits.maxExclusionZones ?? 2;
-        const maxEntry = limits.maxEntryZones ?? 2;
+        const { maxZones, maxExclusionZones: maxExclusion, maxEntryZones: maxEntry } = resolveZoneLimits(profile);
         const requiredZones = Math.min(requestedRegularCount ?? maxZones, maxZones);
         const requiredExclusions = Math.min(requestedExclusionCount ?? maxExclusion, maxExclusion);
         const requiredEntries = Math.min(requestedEntryCount ?? maxEntry, maxEntry);
@@ -516,9 +553,10 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         }
       };
 
-      addPolygonAvailability('polygon', 'polygonZoneEntities', 'Zone', profile.limits?.maxZones ?? 4);
-      addPolygonAvailability('polygonExclusion', 'polygonExclusionEntities', 'Exclusion', profile.limits?.maxExclusionZones ?? 2);
-      addPolygonAvailability('polygonEntry', 'polygonEntryEntities', 'Entry', profile.limits?.maxEntryZones ?? 2);
+      const availabilityZoneLimits = resolveZoneLimits(profile);
+      addPolygonAvailability('polygon', 'polygonZoneEntities', 'Zone', availabilityZoneLimits.maxZones);
+      addPolygonAvailability('polygonExclusion', 'polygonExclusionEntities', 'Exclusion', availabilityZoneLimits.maxExclusionZones);
+      addPolygonAvailability('polygonEntry', 'polygonEntryEntities', 'Entry', availabilityZoneLimits.maxEntryZones);
 
       const zoneEntityIds = Array.from(
         new Set([
@@ -703,9 +741,20 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       return res.status(400).json({ message: 'Profile does not define zones' });
     }
 
+    const { supported: writableZones, unsupported: skippedZones } = partitionZonesBySupport(profile, zones);
+    if (skippedZones.length > 0) {
+      logger.warn(
+        { deviceId, profileId, skipped: skippedZones.map((zone) => zone.id) },
+        'Dropped zones the device profile does not support'
+      );
+    }
+
     try {
-      const result = await zoneWriter.applyZones(zoneMap, zones, undefined, entityMappings, deviceId);
-      return res.json({ ok: result.ok, warnings: result.failures });
+      const result = await zoneWriter.applyZones(zoneMap, writableZones, undefined, entityMappings, deviceId);
+      return res.json({
+        ok: result.ok,
+        warnings: [...(result.failures ?? []), ...unsupportedZoneWarnings(skippedZones)],
+      });
     } catch (error) {
       logger.error({ error }, 'Failed to apply zones');
       return res.status(500).json({ message: 'Failed to apply zones' });
@@ -980,8 +1029,18 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
 
     const entityMap = profile.entityMap as any;
 
+    const { supported: writableZones, unsupported: skippedZones } = partitionZonesBySupport(profile, zones);
+    if (skippedZones.length > 0) {
+      logger.warn(
+        { deviceId, profileId, skipped: skippedZones.map((zone) => zone.id) },
+        'Dropped polygon zones the device profile does not support'
+      );
+    }
+
     try {
-      const warnings: Array<{ entityId?: string; description: string; error: string }> = [];
+      const warnings: Array<{ entityId?: string; description: string; error: string }> = [
+        ...unsupportedZoneWarnings(skippedZones),
+      ];
 
       const resolvePolygonEntity = (
         type: 'polygon' | 'polygonExclusion' | 'polygonEntry',
@@ -1006,7 +1065,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       const polygonExclusionMap = entityMap?.polygonExclusionEntities as Record<string, string> | undefined;
       const polygonEntryMap = entityMap?.polygonEntryEntities as Record<string, string> | undefined;
 
-      const resolvedEntities = (zones ?? []).map((zone) => {
+      const resolvedEntities = writableZones.map((zone) => {
         let key = '';
         let template: string | undefined;
         let type: 'polygon' | 'polygonExclusion' | 'polygonEntry' = 'polygon';
@@ -1089,7 +1148,7 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         }
       }
 
-      const result = await zoneWriter.applyPolygonZones(entityMap, zones ?? [], undefined, entityMappings, deviceId);
+      const result = await zoneWriter.applyPolygonZones(entityMap, writableZones, undefined, entityMappings, deviceId);
       const combinedWarnings = [...warnings, ...result.failures];
       return res.json({ ok: result.ok, warnings: combinedWarnings });
     } catch (error) {
