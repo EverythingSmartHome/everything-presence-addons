@@ -40,3 +40,10 @@ test('RoomCanvas emits its layers in paint order, handles last', () => {
     assert.ok(ranks[i] >= ranks[i - 1], `layer "${layers[i]}" is drawn after "${layers[i - 1]}"`);
   }
 });
+
+test('device coverage is independent from marker appearance and the marker keeps a hit target', () => {
+  const source = readFileSync(new URL('../components/RoomCanvas.tsx', import.meta.url), 'utf8');
+  assert.match(source, /\(showDevice \|\| showRadar\)/, 'coverage should render while the marker is hidden');
+  assert.match(source, /r=\{Math\.max\(22, iconSize \/ 2\)\}/, 'marker should retain a stable hit target');
+  assert.match(source, /<g opacity=\{markerOpacity\}/, 'opacity should be scoped to marker visuals');
+});

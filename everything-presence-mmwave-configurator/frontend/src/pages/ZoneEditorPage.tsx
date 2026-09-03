@@ -135,6 +135,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    deviceMarkerStyle, setDeviceMarkerStyle,
+    deviceMarkerScale, setDeviceMarkerScale,
+    deviceMarkerOpacity, setDeviceMarkerOpacity,
     showTargets, setShowTargets,
     targetMarkerScale, setTargetMarkerScale,
     showZoneLabels, setShowZoneLabels,
@@ -1797,6 +1800,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           }}
         >
           <ZoneCanvas
+            deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
             zones={enabledZones}
             onZonesChange={(updatedZones) => {
               // When zones change on canvas, update only the enabled ones
@@ -2120,10 +2124,14 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
                     { label: 'Doors', checked: showDoors, onChange: setShowDoors },
                     { label: 'Zones', checked: showZones, onChange: setShowZones },
-                    { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                    { label: 'Device marker', checked: showDeviceIcon, onChange: setShowDeviceIcon },
                     { label: 'Targets', checked: showTargets, onChange: setShowTargets },
                   ]}
                   appearance={{
+                    showDeviceMarker: showDeviceIcon,
+                    deviceMarkerStyle, setDeviceMarkerStyle,
+                    deviceMarkerScale, setDeviceMarkerScale,
+                    deviceMarkerOpacity, setDeviceMarkerOpacity,
                     targetMarkerScale,
                     setTargetMarkerScale,
                     showZoneLabels,

@@ -123,6 +123,9 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    deviceMarkerStyle, setDeviceMarkerStyle,
+    deviceMarkerScale, setDeviceMarkerScale,
+    deviceMarkerOpacity, setDeviceMarkerOpacity,
     showMaxDistanceOverlay, setShowMaxDistanceOverlay,
     showTriggerDistanceOverlay, setShowTriggerDistanceOverlay,
     showTargets, setShowTargets,
@@ -1116,6 +1119,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           }}
         >
           <ZoneCanvas
+            deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
             zones={displayedRectZones}
             onZonesChange={() => {}}
             // Polygon zones support - show polygon zones when polygon mode is enabled
@@ -2311,7 +2315,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         />
                         <span className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded-full bg-green-500"></span>
-                          Device Icon
+                          Device marker
                         </span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
@@ -2332,6 +2336,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                   <div className="mt-3 border-t border-slate-700/50 pt-3">
                     <DisplaySettingsControls
                       appearance={{
+                        showDeviceMarker: showDeviceIcon,
+                        deviceMarkerStyle, setDeviceMarkerStyle,
+                        deviceMarkerScale, setDeviceMarkerScale,
+                        deviceMarkerOpacity, setDeviceMarkerOpacity,
                         targetMarkerScale,
                         setTargetMarkerScale,
                         showZoneLabels,
@@ -2845,10 +2853,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
             { label: 'Doors', checked: showDoors, onChange: setShowDoors },
             ...(!isEP1 ? [{ label: 'Zones', checked: showZones, onChange: setShowZones }] : []),
-            { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+            { label: 'Device marker', checked: showDeviceIcon, onChange: setShowDeviceIcon },
             { label: 'Targets', checked: showTargets, onChange: setShowTargets },
           ]}
           appearance={{
+            showDeviceMarker: showDeviceIcon,
+            deviceMarkerStyle, setDeviceMarkerStyle,
+            deviceMarkerScale, setDeviceMarkerScale,
+            deviceMarkerOpacity, setDeviceMarkerOpacity,
             targetMarkerScale,
             setTargetMarkerScale,
             showZoneLabels,

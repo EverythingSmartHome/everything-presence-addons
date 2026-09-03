@@ -15,6 +15,13 @@ interface DisplaySettingsControlsProps {
   overlayOptions?: DisplayToggleOption[];
   roomOptions?: DisplayToggleOption[];
   appearance: {
+    showDeviceMarker: boolean;
+    deviceMarkerStyle: 'icon' | 'node';
+    setDeviceMarkerStyle: (value: 'icon' | 'node') => void;
+    deviceMarkerScale: number;
+    setDeviceMarkerScale: (value: number) => void;
+    deviceMarkerOpacity: number;
+    setDeviceMarkerOpacity: (value: number) => void;
     targetMarkerScale: number;
     setTargetMarkerScale: (value: number) => void;
     showZoneLabels: boolean;

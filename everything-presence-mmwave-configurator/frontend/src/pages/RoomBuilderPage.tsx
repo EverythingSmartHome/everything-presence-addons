@@ -212,6 +212,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     showDoors, setShowDoors,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    deviceMarkerStyle, setDeviceMarkerStyle,
+    deviceMarkerScale, setDeviceMarkerScale,
+    deviceMarkerOpacity, setDeviceMarkerOpacity,
     showTargets, setShowTargets,
     targetMarkerScale, setTargetMarkerScale,
     showZoneLabels, setShowZoneLabels,
@@ -2300,6 +2303,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   }}
                 >
                 <RoomCanvas
+                  deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
                   points={selectedRoom.roomShell?.points ?? []}
                   // The canvas emits this while a corner point is being dragged.
                   onChange={(nextPoints) => handlePointsChange(nextPoints, { coalesceKey: 'points:vertex-drag' })}
@@ -3289,10 +3293,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           { label: 'Walls', checked: showWalls, onChange: setShowWalls },
                           { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
                           { label: 'Doors', checked: showDoors, onChange: setShowDoors },
-                          { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                          { label: 'Device marker', checked: showDeviceIcon, onChange: setShowDeviceIcon },
                           { label: 'Targets', checked: showTargets, onChange: setShowTargets, note: !liveState?.deviceId ? 'No device' : undefined },
                         ]}
                         appearance={{
+                          showDeviceMarker: showDeviceIcon,
+                          deviceMarkerStyle, setDeviceMarkerStyle,
+                          deviceMarkerScale, setDeviceMarkerScale,
+                          deviceMarkerOpacity, setDeviceMarkerOpacity,
                           targetMarkerScale,
                           setTargetMarkerScale,
                           showZoneLabels,
