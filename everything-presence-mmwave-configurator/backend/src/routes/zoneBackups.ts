@@ -5,6 +5,7 @@ import { ZoneWriter } from '../ha/zoneWriter';
 import type { IHaReadTransport } from '../ha/readTransport';
 import type { IHaWriteClient } from '../ha/writeClient';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
+import { resolveZoneLimits } from '../domain/deviceProfiles';
 import { zoneBackupStorage } from '../config/zoneBackupStorage';
 import { deviceMappingStorage } from '../config/deviceMappingStorage';
 import { deviceEntityService } from '../domain/deviceEntityService';
@@ -245,10 +246,7 @@ export const createZoneBackupsRouter = (deps: ZoneBackupsRouterDependencies): Ro
       return res.status(409).json({ message: 'Device mapping not found. Run entity re-sync to create mappings.', code: 'MAPPING_NOT_FOUND' });
     }
 
-    const limits = profile.limits ?? {};
-    const maxZones = limits.maxZones ?? 4;
-    const maxExclusion = limits.maxExclusionZones ?? 2;
-    const maxEntry = limits.maxEntryZones ?? 2;
+    const { maxZones, maxExclusionZones: maxExclusion, maxEntryZones: maxEntry } = resolveZoneLimits(profile);
 
     const regularPolygonZones = sortPolygonZonesByIndex(
       backup.zones.filter((zone): zone is ZonePolygon => zone.type === 'regular' && isZonePolygon(zone) && isValidPolygon(zone.vertices))

@@ -3,6 +3,7 @@ import { LiveState, RoomConfig } from '../api/types';
 import { ingressAware } from '../api/client';
 import { useDeviceMapping, useDeviceSettings } from '../contexts/DeviceMappingsContext';
 import { SettingsGroup, SettingEntity } from '../api/deviceMappings';
+import { HelpTooltip } from './HelpTooltip';
 
 interface DeviceSettingsModalProps {
   isOpen: boolean;
@@ -30,7 +31,8 @@ const NumberInput: React.FC<{
   unit?: string;
   disabled?: boolean;
   onSave: (value: number) => void;
-}> = ({ value, min, max, step, unit, disabled, onSave }) => {
+  describedBy?: string;
+}> = ({ value, min, max, step, unit, disabled, onSave, describedBy }) => {
   const [localValue, setLocalValue] = useState(String(value));
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -63,6 +65,7 @@ const NumberInput: React.FC<{
           }
         }}
         disabled={disabled}
+        aria-describedby={describedBy}
         className="w-24 px-2 py-1.5 text-sm text-right bg-slate-800 border border-slate-600 rounded-lg focus:border-aqua-500 focus:outline-none focus:ring-1 focus:ring-aqua-500/50 disabled:opacity-50 transition-colors"
       />
       {unit && <span className="text-xs text-slate-500 w-8">{unit}</span>}
@@ -244,11 +247,15 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
     const status = state.status;
     const canEdit = status === 'enabled';
 
+    const descriptionId = `device-setting-help-${setting.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
     return (
       <div key={setting.key} className="py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-300">{setting.label || setting.key}</span>
+            <span className="inline-flex items-center gap-1 text-sm text-slate-300">
+              {setting.label || setting.key}
+              {setting.description && <HelpTooltip id={descriptionId}>{setting.description}</HelpTooltip>}
+            </span>
             {status === 'disabled' && (
               <span className="text-[10px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded">
                 Disabled
@@ -274,12 +281,16 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
               step={setting.step}
               unit={setting.unit}
               disabled={state.loading}
+              describedBy={setting.description ? descriptionId : undefined}
               onSave={(val) => updateSetting(setting.key, val)}
             />
           )}
 
           {(setting.controlType === 'switch' || setting.controlType === 'light') && canEdit && typeof state.value === 'boolean' && (
             <button
+              type="button"
+              aria-label={`${setting.label || setting.key}: ${state.value ? 'on' : 'off'}`}
+              aria-describedby={setting.description ? descriptionId : undefined}
               onClick={() => updateSetting(setting.key, !(state.value as boolean))}
               disabled={state.loading}
               className={`relative w-11 h-6 rounded-full transition-colors ${
@@ -296,6 +307,8 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
           {setting.controlType === 'select' && setting.options && canEdit && typeof state.value === 'string' && (
             <select
+              aria-label={setting.label || setting.key}
+              aria-describedby={setting.description ? descriptionId : undefined}
               value={(state.value ?? '') as string}
               onChange={(e) => updateSetting(setting.key, e.target.value)}
               disabled={state.loading}
@@ -311,6 +324,8 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
 
           {setting.controlType === 'button' && canEdit && (
             <button
+              type="button"
+              aria-describedby={setting.description ? descriptionId : undefined}
               onClick={() => updateSetting(setting.key, true)}
               disabled={state.loading}
               className="min-w-[72px] rounded-lg border border-aqua-500/40 bg-aqua-500/10 px-3 py-1.5 text-xs font-semibold text-aqua-100 transition hover:bg-aqua-500/20 disabled:opacity-50"
@@ -338,9 +353,6 @@ export const DeviceSettingsModal: React.FC<DeviceSettingsModalProps> = ({
           )}
           </div>
         </div>
-        {setting.description && (
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">{setting.description}</p>
-        )}
       </div>
     );
   };

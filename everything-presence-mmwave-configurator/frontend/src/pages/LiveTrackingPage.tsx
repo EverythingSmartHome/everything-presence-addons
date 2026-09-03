@@ -17,6 +17,7 @@ import { ZoneStatsPanel } from '../components/ZoneStatsPanel';
 import { HourlyActivityChart } from '../components/HourlyActivityChart';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { HelpTooltip } from '../components/HelpTooltip';
 import {
   CanvasBottomToolbar,
   CanvasMobileSheet,
@@ -2191,18 +2192,22 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         <input
                           type="checkbox"
                           checked={heatmapEnabled}
+                          aria-describedby="live-heatmap-enabled-help"
                           onChange={(e) => setHeatmapEnabled(e.target.checked)}
                           className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-red-500 focus:ring-red-500 focus:ring-offset-0"
                         />
                         <span className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-500 via-yellow-500 to-red-500"></span>
                           Show Heatmap {heatmapLoading && '(loading...)'}
+                          <HelpTooltip id="live-heatmap-enabled-help">Shows where presence has been detected most often during the selected time period.</HelpTooltip>
                         </span>
                       </label>
                       {heatmapEnabled && (
                         <div className="mt-2 ml-6 space-y-2">
                           <div className="flex gap-2">
                             <select
+                              aria-label="Heatmap time period"
+                              aria-describedby="live-heatmap-period-help"
                               value={heatmapHours}
                               onChange={(e) => setHeatmapHours(Number(e.target.value))}
                               className="flex-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1 text-xs text-slate-100 focus:border-red-500 focus:ring-1 focus:ring-red-500/50 focus:outline-none"
@@ -2213,6 +2218,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                               <option value={72}>Last 3 days</option>
                               <option value={168}>Last 7 days</option>
                             </select>
+                            <HelpTooltip id="live-heatmap-period-help">Chooses how much recent activity is included in the heatmap.</HelpTooltip>
                             <button
                               onClick={() => refreshHeatmap()}
                               disabled={heatmapLoading}
@@ -2224,10 +2230,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                           </div>
                           <div>
                             <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                              <span>Threshold</span>
+                              <span className="inline-flex items-center gap-1">Threshold<HelpTooltip id="live-heatmap-threshold-help">Filters low-activity cells. Increase it to reduce background noise or decrease it to reveal more detail.</HelpTooltip></span>
                               <span>{Math.round(heatmapThreshold * 100)}%</span>
                             </div>
                             <input
+                              aria-describedby="live-heatmap-threshold-help"
                               type="range"
                               min="0"
                               max="50"

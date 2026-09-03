@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { fetchDevices, fetchProfiles, fetchSettings, updateSettings, ingressAware } from './api/client';
 import { createRoom, fetchRooms } from './api/rooms';
-import { DiscoveredDevice, RoomConfig, LiveState, EntityMappings } from './api/types';
+import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, EntityMappings } from './api/types';
+import { roomSupportsZoneEditing } from './utils/zoneCapabilities';
 import { ZoneEditorPage } from './pages/ZoneEditorPage';
 import { RoomBuilderPage } from './pages/RoomBuilderPage';
 import { WizardPage } from './pages/WizardPage';
@@ -18,7 +19,7 @@ const Card = ({ title, children }: { title: string; children: React.ReactNode })
 
 function App() {
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
-  const [profiles, setProfiles] = useState<{ id: string; label: string }[]>([]);
+  const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
   const [rooms, setRooms] = useState<RoomConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +102,24 @@ function App() {
     () => profiles.find((p) => p.id === selectedProfileId),
     [profiles, selectedProfileId]
   );
+
+  // The Zone Editor is gated on the *room's* device, not on the profile picker:
+  // a room whose sensor cannot detect zones (the Everything Presence One) has
+  // nothing to configure there. Guarding the view itself rather than each menu
+  // item means no entry point - dashboard, Room Builder, wizard or a stale
+  // view - can slip past the restriction. It is judged on the room's own
+  // profile only, so a room not yet bound to a device profile is never blocked
+  // by whatever the profile picker happens to be showing.
+  const zoneEditingSupported = useMemo(
+    () => roomSupportsZoneEditing(selectedRoom, profiles),
+    [profiles, selectedRoom]
+  );
+
+  useEffect(() => {
+    if (view === 'zoneEditor' && !zoneEditingSupported) {
+      setView('dashboard');
+    }
+  }, [view, zoneEditingSupported]);
 
   const refreshLiveState = React.useCallback(async () => {
     if (!selectedRoom || !selectedRoom.deviceId || !selectedProfile) {
@@ -644,6 +663,18 @@ function App() {
               setSelectedRoomId(roomId);
               if (profileId) setSelectedProfileId(profileId);
             }}
+            onGoRoomBuilder={(roomId, profileId) => {
+              setSelectedRoomId(roomId);
+              if (profileId) setSelectedProfileId(profileId);
+              setView('roomBuilder');
+            }}
+            onGoZoneEditor={(roomId, profileId) => {
+              setSelectedRoomId(roomId);
+              if (profileId) setSelectedProfileId(profileId);
+              // The guard above still has the final say; sending an unsupported
+              // room here simply lands on the dashboard.
+              setView('zoneEditor');
+            }}
             onRoomUpdate={(updatedRoom) => {
               setRooms((prev) => prev.map((r) => (r.id === updatedRoom.id ? updatedRoom : r)));
             }}
@@ -684,7 +715,8 @@ function App() {
             targetPositions={targetPositions}
           />
         )}
-        {view === 'zoneEditor' && (
+        {view === 'zoneEditor' && !zoneEditingSupported && dashboard}
+        {view === 'zoneEditor' && zoneEditingSupported && (
           <ZoneEditorPage
             onNavigate={(targetView) => {
               if (targetView === 'wizard') {

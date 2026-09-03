@@ -16,6 +16,7 @@ import {
   CanvasTopBar,
 } from '../components/CanvasLayout';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { HelpTooltip } from '../components/HelpTooltip';
 import { BasicRoomShapesPicker, resizeBasicRoomShapeWall, type BasicRoomShapeSelection } from '../components/BasicRoomShapesPicker';
 import type { RoomShapePoint } from '../utils/roomShapes';
 import { clampDoorPosition } from '../utils/doorGeometry';
@@ -25,6 +26,7 @@ import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import { roomSupportsZoneEditing } from '../utils/zoneCapabilities';
 import { formatLengthLabel } from '../utils/lengthLabels';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import {
@@ -473,6 +475,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const caps = selectedProfile?.capabilities as { tracking?: boolean; distanceOnlyTracking?: boolean } | undefined;
     return Boolean(caps?.tracking) && !caps?.distanceOnlyTracking;
   }, [selectedProfile]);
+
+  // Room Builder supports every device, but the Zone Editor does not: a
+  // distance-only sensor (EP1) has no zones to draw, so the menu entry is
+  // greyed out here exactly as it is on the live dashboard.
+  const zoneEditingSupported = useMemo(
+    () => roomSupportsZoneEditing(selectedRoom, profiles),
+    [profiles, selectedRoom],
+  );
+  const zoneEditorDisabledReason = 'Zone editor is not available for EP1 (distance-only tracking)';
 
   // Device mappings context for entity resolution
   const { getEntityId } = useDeviceMappings();
@@ -2194,12 +2205,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   </button>
                   <button
                     onClick={() => {
+                      if (!zoneEditingSupported) return;
                       setShowNavMenu(false);
                       navigateTo('zoneEditor');
                     }}
-                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
+                    disabled={!zoneEditingSupported}
+                    className={`w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg transition-all ${
+                      zoneEditingSupported
+                        ? 'text-slate-100 hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95'
+                        : 'text-slate-500 cursor-not-allowed'
+                    }`}
+                    title={zoneEditingSupported ? '' : zoneEditorDisabledReason}
                   >
-                    📐 Zone Editor
+                    📐 Zone Editor {!zoneEditingSupported && '(Not Available)'}
                   </button>
                   <button
                     onClick={() => {
@@ -2777,18 +2795,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Rotate floor plan</div>
                         <p className="text-[11px] leading-relaxed text-slate-400">
-                          Turns the whole plan — walls, doors and furniture — in one undoable step.
-                          Use this instead of redrawing a room that came out the wrong way round.
+                          Turns the whole plan in one single step. Use this instead of redrawing a room that came out the wrong way round
                         </p>
 
-                        <div className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          What moves
+                        <div className="flex items-center gap-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          What moves<HelpTooltip id="room-layout-scope-help">Choose whether rotation moves the sensor with the plan or keeps the sensor fixed.</HelpTooltip>
                         </div>
                         <div className="space-y-1">
                           {([
                             {
                               scope: 'layout' as RotationScope,
-                              detail: 'Turns the plan and the sensor together. Zones, targets and the heatmap stay exactly where they are on the walls — pick this to simply view the room the other way up.',
+                              detail: 'Turns the plan and the sensor together. Zones, targets and the heatmap stay exactly where they are on the walls. Pick this to simply view the room the other way up.',
                             },
                             {
                               scope: 'roomOnly' as RotationScope,
@@ -2798,6 +2815,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             <button
                               key={scope}
                               type="button"
+                              aria-describedby="room-layout-scope-help"
                               aria-pressed={rotationScope === scope}
                               onClick={() => setRotationScope(scope)}
                               className={`w-full rounded-md border px-2 py-1.5 text-left transition ${
@@ -2847,8 +2865,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
                         <div className="flex items-center gap-2 pt-2">
                           <label className="flex items-center gap-2">
-                            <span className="w-14 text-xs">Custom</span>
+                            <span className="inline-flex w-14 items-center gap-1 text-xs">Custom<HelpTooltip id="room-layout-custom-help">Turns the selected layout scope by a custom angle from minus 180 to 180 degrees.</HelpTooltip></span>
                             <input
+                              aria-describedby="room-layout-custom-help"
                               type="number"
                               className="w-20 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                               value={customRotationInput}
@@ -2895,8 +2914,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Canvas</div>
                         <label className="flex items-center gap-2">
-                          <span className="w-16">Snap (mm)</span>
+                          <span className="inline-flex w-16 items-center gap-1">Snap (mm)<HelpTooltip id="room-canvas-snap-help">Rounds placed and moved objects to this grid size in millimetres. Set it to zero to turn snapping off.</HelpTooltip></span>
                           <input
+                            aria-describedby="room-canvas-snap-help"
                             type="number"
                             className="w-20 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                             value={snapGridMm}
@@ -2921,6 +2941,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </div>
                         <div className="flex gap-1">
                           <button
+                            type="button"
+                            aria-describedby="room-canvas-units-help"
                             className={`rounded-md border px-2 py-1 ${
                               displayUnits === 'metric' ? 'border-aqua-500 text-aqua-100' : 'border-slate-700 text-slate-200'
                             }`}
@@ -2929,6 +2951,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             Metric
                           </button>
                           <button
+                            type="button"
+                            aria-describedby="room-canvas-units-help"
                             className={`rounded-md border px-2 py-1 ${
                               displayUnits === 'imperial' ? 'border-aqua-500 text-aqua-100' : 'border-slate-700 text-slate-200'
                             }`}
@@ -2936,6 +2960,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           >
                             Imperial
                           </button>
+                          <HelpTooltip id="room-canvas-units-help">Changes how measurements are displayed. Stored room coordinates remain in millimetres.</HelpTooltip>
                         </div>
                       </div>
                       )}
@@ -2946,6 +2971,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           <div className="font-semibold text-slate-200">Device placement</div>
                           <button
                             type="button"
+                            aria-describedby="room-device-lock-help"
                             aria-pressed={devicePositionLocked}
                             title={devicePositionLocked
                               ? 'Unlock the device position'
@@ -2959,17 +2985,19 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           >
                             {devicePositionLocked ? '🔒 Position locked' : '🔓 Lock position'}
                           </button>
+                          <HelpTooltip id="room-device-lock-help">Prevents dragging or editing the device position while leaving rotation, mounting and coverage adjustable.</HelpTooltip>
                         </div>
                         {devicePositionLocked && (
                           <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
-                            Position is locked — the device cannot be dragged on the canvas. Rotation,
+                            Position is locked. The device cannot be dragged on the canvas. Rotation,
                             mounting and coverage are still adjustable.
                           </div>
                         )}
                         <div className="grid grid-cols-2 gap-2">
                           <label className="flex items-center gap-2">
-                            <span className="w-6">X</span>
+                            <span className="inline-flex w-6 items-center gap-1">X<HelpTooltip id="room-device-x-help">Sets the device horizontal position in millimetres relative to the room origin.</HelpTooltip></span>
                             <input
+                              aria-describedby="room-device-x-help"
                               type="number"
                               disabled={devicePositionLocked}
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-40"
@@ -2980,8 +3008,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             />
                           </label>
                           <label className="flex items-center gap-2">
-                            <span className="w-6">Y</span>
+                            <span className="inline-flex w-6 items-center gap-1">Y<HelpTooltip id="room-device-y-help">Sets the device vertical position in millimetres relative to the room origin.</HelpTooltip></span>
                             <input
+                              aria-describedby="room-device-y-help"
                               type="number"
                               disabled={devicePositionLocked}
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-40"
@@ -2993,8 +3022,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </label>
                         </div>
                         <label className="flex items-center gap-2">
-                          <span className="w-14">Rotation</span>
+                          <span className="inline-flex w-14 items-center gap-1">Rotation<HelpTooltip id="room-device-rotation-help">Turns the device coverage direction without moving the device.</HelpTooltip></span>
                           <input
+                            aria-describedby="room-device-rotation-help"
                             type="range"
                             min={-180}
                             max={180}
@@ -3036,8 +3066,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <label className="flex items-center gap-2">
-                            <span className="w-14">Mount</span>
+                            <span className="inline-flex w-14 items-center gap-1">Mount<HelpTooltip id="room-device-mount-help">Selects whether the sensor is mounted on a wall or ceiling and applies suitable placement defaults.</HelpTooltip></span>
                             <select
+                              aria-describedby="room-device-mount-help"
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                               value={selectedRoom?.devicePlacement?.mountType ?? 'wall'}
                               onChange={(e) => {
@@ -3054,8 +3085,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             </select>
                           </label>
                           <label className="flex items-center gap-2">
-                            <span className="w-14">Height</span>
+                            <span className="inline-flex w-14 items-center gap-1">Height<HelpTooltip id="room-device-height-help">Sets the sensor height above the floor in metres for coverage projection.</HelpTooltip></span>
                             <input
+                              aria-describedby="room-device-height-help"
                               type="number"
                               min={0}
                               step={0.1}
@@ -3075,8 +3107,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </label>
                         </div>
                         <label className="flex items-center gap-2">
-                          <span className="w-14">Pitch</span>
+                          <span className="inline-flex w-14 items-center gap-1">Pitch<HelpTooltip id="room-device-pitch-help">Sets the sensor tilt from horizontal toward the floor. Ceiling mounts use 90 degrees.</HelpTooltip></span>
                           <input
+                            aria-describedby="room-device-pitch-help"
                             type="number"
                             min={0}
                             max={90}
@@ -3103,8 +3136,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           {coveragePresets ? (
                             <>
                               <label className="flex items-center gap-2">
-                                <span className="w-14">Sensor</span>
+                                <span className="inline-flex w-14 items-center gap-1">Sensor<HelpTooltip id="room-device-sensor-help">Chooses the field-of-view preset used only for the visual coverage overlay.</HelpTooltip></span>
                                 <select
+                                  aria-describedby="room-device-sensor-help"
                                   className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                                   value={coveragePresetId ?? 'default'}
                                   onChange={(e) => {
@@ -3160,8 +3194,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           {(!coveragePresets || coveragePresetId === 'custom') && (
                             <div className="grid grid-cols-2 gap-2">
                               <label className="flex items-center gap-2">
-                                <span className="w-14">Horiz</span>
+                                <span className="inline-flex w-14 items-center gap-1">Horiz<HelpTooltip id="room-device-horizontal-fov-help">Sets the custom horizontal field of view in degrees for the visual overlay.</HelpTooltip></span>
                                 <input
+                                  aria-describedby="room-device-horizontal-fov-help"
                                   type="number"
                                   min={1}
                                   max={180}
@@ -3179,8 +3214,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                                 />
                               </label>
                               <label className="flex items-center gap-2">
-                                <span className="w-14">Vert</span>
+                                <span className="inline-flex w-14 items-center gap-1">Vert<HelpTooltip id="room-device-vertical-fov-help">Sets the custom vertical field of view in degrees for the visual overlay.</HelpTooltip></span>
                                 <input
+                                  aria-describedby="room-device-vertical-fov-help"
                                   type="number"
                                   min={1}
                                   max={180}
@@ -3207,8 +3243,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Floor Material</div>
                         <label className="flex items-center gap-2">
-                          <span className="w-16">Fill Mode</span>
+                          <span className="inline-flex w-16 items-center gap-1">Fill Mode<HelpTooltip id="room-floor-fill-help">Chooses between the canvas overlay colour and a floor material inside the room outline.</HelpTooltip></span>
                           <select
+                            aria-describedby="room-floor-fill-help"
                             className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                             value={selectedRoom?.roomShellFillMode ?? 'overlay'}
                             onChange={(e) => {
@@ -3223,8 +3260,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </label>
                         {selectedRoom?.roomShellFillMode === 'material' && (
                           <label className="flex items-center gap-2">
-                            <span className="w-16">Material</span>
+                            <span className="inline-flex w-16 items-center gap-1">Material<HelpTooltip id="room-floor-material-help">Selects the floor pattern shown inside the room outline.</HelpTooltip></span>
                             <select
+                              aria-describedby="room-floor-material-help"
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                               value={selectedRoom?.floorMaterial ?? 'none'}
                               onChange={(e) => {
@@ -3883,12 +3921,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  if (!zoneEditingSupported) return;
                   setActiveMobileSheet(null);
                   navigateTo('zoneEditor');
                 }}
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+                disabled={!zoneEditingSupported}
+                title={zoneEditingSupported ? '' : zoneEditorDisabledReason}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Zone Editor
+                Zone Editor {!zoneEditingSupported && '(Not Available)'}
               </button>
               <button
                 type="button"
