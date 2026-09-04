@@ -61,6 +61,9 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: false
           load: false
+          build-args: |
+            BUILD_VERSION=${{ env.VERSION }}
+            BUILD_REF=${{ github.sha }}
           tags: |
             ${{ env.STANDALONE_IMAGE_TAG }}
 
@@ -74,6 +77,8 @@ jobs:
           load: false
           build-args: |
             BUILD_FROM=${{ matrix.build_from }}
+            BUILD_VERSION=${{ env.VERSION }}
+            BUILD_REF=${{ github.sha }}
           tags: |
             ${{ env.ADDON_IMAGE_TAG }}
 
@@ -147,6 +152,9 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           load: false
+          build-args: |
+            BUILD_VERSION=${{ env.VERSION }}
+            BUILD_REF=${{ github.sha }}
           tags: |
             ${{ env.IMAGE_TAG }}-${{ matrix.arch }}
             ${{ env.LATEST_TAG }}-${{ matrix.arch }}
@@ -155,6 +163,17 @@ jobs:
       - name: Test Docker image
         run: |
           docker run --rm --platform ${{ matrix.platform }} --entrypoint /bin/echo ${{ env.IMAGE_TAG }}-${{ matrix.arch }} "Image built successfully"
+
+      - name: Verify image version label
+        run: |
+          LABEL_VERSION=$(docker inspect \
+            --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+            ${{ env.IMAGE_TAG }}-${{ matrix.arch }})
+          echo "org.opencontainers.image.version = '$LABEL_VERSION'"
+          if [ "$LABEL_VERSION" != "${{ env.VERSION }}" ]; then
+            echo "::error::Expected label 'org.opencontainers.image.version' to be '${{ env.VERSION }}' but got '$LABEL_VERSION'"
+            exit 1
+          fi
 
   build-push-addon:
     name: Build and Push Add-on Image
@@ -217,6 +236,8 @@ jobs:
           load: false
           build-args: |
             BUILD_FROM=${{ matrix.build_from }}
+            BUILD_VERSION=${{ env.VERSION }}
+            BUILD_REF=${{ github.sha }}
           tags: |
             ${{ env.ADDON_IMAGE_TAG }}-${{ matrix.arch }}
             ${{ env.ADDON_LATEST_TAG }}-${{ matrix.arch }}
@@ -225,6 +246,17 @@ jobs:
       - name: Test Docker image
         run: |
           docker run --rm --platform ${{ matrix.platform }} --entrypoint /bin/echo ${{ env.ADDON_IMAGE_TAG }}-${{ matrix.arch }} "Image built successfully"
+
+      - name: Verify image version label
+        run: |
+          LABEL_VERSION=$(docker inspect \
+            --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+            ${{ env.ADDON_IMAGE_TAG }}-${{ matrix.arch }})
+          echo "org.opencontainers.image.version = '$LABEL_VERSION'"
+          if [ "$LABEL_VERSION" != "${{ env.VERSION }}" ]; then
+            echo "::error::Expected label 'org.opencontainers.image.version' to be '${{ env.VERSION }}' but got '$LABEL_VERSION'"
+            exit 1
+          fi
 
   manifest-standalone:
     name: Create Standalone Multi-Arch Manifest
@@ -261,17 +293,28 @@ jobs:
 
       - name: Create multi-arch manifests
         run: |
-          docker buildx imagetools create \
+          # Per-arch LABELs live in each image config and are not lifted onto the
+          # index that `imagetools create` builds, so mirror them as index
+          # annotations to keep `imagetools inspect` and registry UIs in step.
+          ANNOTATIONS=(
+            --annotation "index:org.opencontainers.image.version=${{ env.VERSION }}"
+            --annotation "index:org.opencontainers.image.revision=${{ github.sha }}"
+            --annotation "index:org.opencontainers.image.title=Everything Presence Zone Configurator"
+            --annotation "index:org.opencontainers.image.source=https://github.com/EverythingSmartHome/everything-presence-addons"
+            --annotation "index:org.opencontainers.image.url=https://github.com/EverythingSmartHome/everything-presence-addons"
+            --annotation "index:org.opencontainers.image.vendor=Everything Smart Home"
+          )
+          docker buildx imagetools create "${ANNOTATIONS[@]}" \
             -t ${{ env.IMAGE_TAG }} \
             ${{ env.IMAGE_TAG }}-amd64 \
             ${{ env.IMAGE_TAG }}-arm64 \
             ${{ env.IMAGE_TAG }}-armv7
-          docker buildx imagetools create \
+          docker buildx imagetools create "${ANNOTATIONS[@]}" \
             -t ${{ env.LATEST_TAG }} \
             ${{ env.LATEST_TAG }}-amd64 \
             ${{ env.LATEST_TAG }}-arm64 \
             ${{ env.LATEST_TAG }}-armv7
-          docker buildx imagetools create \
+          docker buildx imagetools create "${ANNOTATIONS[@]}" \
             -t ${{ env.MAJOR_TAG }} \
             ${{ env.MAJOR_TAG }}-amd64 \
             ${{ env.MAJOR_TAG }}-arm64 \
@@ -312,17 +355,28 @@ jobs:
 
       - name: Create multi-arch manifests
         run: |
-          docker buildx imagetools create \
+          # Per-arch LABELs live in each image config and are not lifted onto the
+          # index that `imagetools create` builds, so mirror them as index
+          # annotations to keep `imagetools inspect` and registry UIs in step.
+          ANNOTATIONS=(
+            --annotation "index:org.opencontainers.image.version=${{ env.VERSION }}"
+            --annotation "index:org.opencontainers.image.revision=${{ github.sha }}"
+            --annotation "index:org.opencontainers.image.title=Everything Presence Zone Configurator (add-on)"
+            --annotation "index:org.opencontainers.image.source=https://github.com/EverythingSmartHome/everything-presence-addons"
+            --annotation "index:org.opencontainers.image.url=https://github.com/EverythingSmartHome/everything-presence-addons"
+            --annotation "index:org.opencontainers.image.vendor=Everything Smart Home"
+          )
+          docker buildx imagetools create "${ANNOTATIONS[@]}" \
             -t ${{ env.ADDON_IMAGE_TAG }} \
             ${{ env.ADDON_IMAGE_TAG }}-amd64 \
             ${{ env.ADDON_IMAGE_TAG }}-arm64 \
             ${{ env.ADDON_IMAGE_TAG }}-armv7
-          docker buildx imagetools create \
+          docker buildx imagetools create "${ANNOTATIONS[@]}" \
             -t ${{ env.ADDON_LATEST_TAG }} \
             ${{ env.ADDON_LATEST_TAG }}-amd64 \
             ${{ env.ADDON_LATEST_TAG }}-arm64 \
             ${{ env.ADDON_LATEST_TAG }}-armv7
-          docker buildx imagetools create \
+          docker buildx imagetools create "${ANNOTATIONS[@]}" \
             -t ${{ env.ADDON_MAJOR_TAG }} \
             ${{ env.ADDON_MAJOR_TAG }}-amd64 \
             ${{ env.ADDON_MAJOR_TAG }}-arm64 \
