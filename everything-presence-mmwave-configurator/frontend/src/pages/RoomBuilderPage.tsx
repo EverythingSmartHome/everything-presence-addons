@@ -83,6 +83,7 @@ import {
   rotateRoomSnapshot,
   type RotationScope,
 } from '../utils/roomRotation';
+import { canCenterRoomSnapshot, centerRoomSnapshot, isRoomCentered } from '../utils/roomCentering';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
@@ -108,6 +109,20 @@ type RoomBuilderView = 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'l
 type PendingLeave = { type: 'navigate'; view: RoomBuilderView } | { type: 'back' };
 
 const roomSignature = (room: RoomConfig | null | undefined): string => (room ? stableStringify(room) : '');
+
+/**
+ * Did the wall outline itself change since the last save?
+ *
+ * This is the trigger for the automatic re-centre on save, so it compares only
+ * the points - not the locks, and not the rest of the room. A room with no
+ * saved baseline yet counts as changed, which is what makes its first save
+ * centre it.
+ */
+const outlineChangedSinceSave = (
+  room: RoomConfig | null | undefined,
+  saved: RoomConfig | null | undefined,
+): boolean =>
+  stableStringify(room?.roomShell?.points ?? []) !== stableStringify(saved?.roomShell?.points ?? []);
 
 /** Keep in step with the `room-rotate-spin` keyframes in index.css. */
 const ROOM_ROTATION_SPIN_MS = 420;
@@ -1001,6 +1016,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const canRotateLayout = !!selectedRoom && (selectedRoom.roomShell?.points?.length ?? 0) > 0;
 
+  const canCenterLayout = canCenterRoomSnapshot(selectedRoom);
+  /** Drives the "already centred" copy, and disables the button so it cannot spend an undo step on a no-op. */
+  const isLayoutCentered = canCenterLayout && isRoomCentered(selectedRoom);
+
   /**
    * Play the one-shot spin: the geometry is already committed, so the canvas
    * starts back at the orientation the plan *had* and turns into its new one.
@@ -1102,6 +1121,60 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     (angleDeg: number) => rotateLayout(angleDeg, rotationScope),
     [rotateLayout, rotationScope],
   );
+
+  /**
+   * Slide the whole floor plan so the outline's bounding-box centre lands on
+   * (0,0). An outline drawn by hand is anchored wherever the user first
+   * clicked, so a to-scale room can sit metres away from the origin - and the
+   * grid's axis lines, the cursor read-out, the pan resets and the spawn point
+   * for new furniture are all anchored there.
+   *
+   * Wall outline, doors, furniture and the sensor move together as one rigid
+   * translation through `commitRoom`, so nothing shifts relative to anything
+   * else and the move is a single undoable step. Zones, live targets and the
+   * heatmap are device-relative, so they follow the sensor for free; see
+   * `roomCentering` for why that holds.
+   *
+   * Returns the re-centred room when it moved and `null` when there was
+   * nothing to do, so the save path can persist the moved room in the same
+   * pass rather than waiting for the next render.
+   */
+  const centerLayout = useCallback((): RoomConfig | null => {
+    const room = selectedRoom;
+    if (!room) return null;
+    const snapshot = snapshotRoom(room);
+    const centered = centerRoomSnapshot(snapshot);
+    // Already on the origin (or no outline at all): never burn an undo step.
+    if (centered === snapshot) return null;
+
+    const nextRoom = applyRoomSnapshot(room, centered);
+    // Re-centring is never part of a drag gesture, so it always opens a fresh
+    // undo step rather than collapsing into the previous one.
+    endHistoryGesture();
+    commitRoom(nextRoom);
+
+    // Wall indices and door anchors survive a translation, but every transient
+    // interaction is now pointing at coordinates that have just moved.
+    stopDrawing();
+    setSelectedSegment(null);
+    setHoveredSegment(null);
+    setSegmentDragIndex(null);
+    setSegmentDragStart(null);
+    setSegmentDragBase(null);
+    setEndpointDrag(null);
+    setDoorDrag(null);
+    setIsDoorPlacementMode(false);
+    setCursorPos(null);
+    setCursorDelta(null);
+    // The plan is on the origin now, so the default view frames it. Without
+    // this the room appears to fly off screen by exactly the distance it moved.
+    setPanOffsetMm({ x: 0, y: 0 });
+    // Deliberately left alone: a translation changes no headings, so
+    // `basicShapeRotationDeg` and the installation-angle suggestion (which is
+    // computed from wall directions relative to the sensor, all of which this
+    // move preserves) are both still valid.
+    return nextRoom;
+  }, [commitRoom, endHistoryGesture, selectedRoom, stopDrawing]);
 
   useEffect(() => {
     const load = async () => {
@@ -1760,11 +1833,21 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     if (!selectedRoom) return false;
     setSaving(true);
     try {
+      // Land the plan on the origin whenever the walls have moved since the
+      // last save, so a room drawn far from (0,0) does not leave the grid, the
+      // cursor read-out and the pan resets meaningless. Scoped to outline edits
+      // on purpose: a save that only nudged furniture or retuned the sensor
+      // must never slide the whole plan out from under the user. Existing
+      // rooms therefore migrate lazily, and only on a save they initiated.
+      const roomToSave =
+        (outlineChangedSinceSave(selectedRoom, savedRooms[selectedRoom.id]) && centerLayout()) ||
+        selectedRoom;
+
       // The backend only removes a stored outline on an explicit `roomShell: null`,
       // so an intentional save of an emptied room has to say so.
       const payload: RoomUpdatePayload = {
-        ...selectedRoom,
-        roomShell: selectedRoom.roomShell?.points?.length ? selectedRoom.roomShell : null,
+        ...roomToSave,
+        roomShell: roomToSave.roomShell?.points?.length ? roomToSave.roomShell : null,
       };
       const result = await updateRoom(selectedRoom.id, payload);
       setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? result.room : r)));
@@ -1778,7 +1861,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [onWizardProgress, selectedRoom]);
+  }, [centerLayout, onWizardProgress, savedRooms, selectedRoom]);
 
   const leave = useCallback(
     (target: PendingLeave) => {
@@ -2907,6 +2990,44 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         {!canRotateLayout && (
                           <div className="text-[11px] text-slate-400">Draw a wall outline first.</div>
                         )}
+
+                        <div className="mt-3 border-t border-slate-700/60 pt-3">
+                          <div className="flex items-center gap-1 font-semibold text-slate-200">
+                            Position on grid<HelpTooltip id="room-layout-center-help">Moves the whole plan - walls, doors, furniture and the sensor together - so the middle of the room sits on the grid origin (0,0). Nothing moves relative to anything else, and zones stay where they are on the walls.</HelpTooltip>
+                          </div>
+                          <p className="text-[11px] leading-relaxed text-slate-400">
+                            A room drawn far from the origin makes the grid's centre lines and the cursor
+                            read-out meaningless. Rooms are re-centred automatically when you save a change to
+                            the walls; use this to move one whose walls you are not editing
+                          </p>
+                          <button
+                            type="button"
+                            aria-describedby="room-layout-center-help"
+                            className="mt-2 w-full rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => {
+                              if (centerLayout()) showTransientHint('Room centred on the grid origin. Save to keep it.');
+                            }}
+                            disabled={!canCenterLayout || isLayoutCentered}
+                            title={
+                              isLayoutCentered
+                                ? 'The room is already centred on (0,0)'
+                                : 'Move the room onto the grid origin'
+                            }
+                          >
+                            Center room on origin
+                          </button>
+                          {isLayoutCentered && (
+                            <div className="mt-1 text-[11px] text-slate-400">
+                              Already centred on (0,0).
+                            </div>
+                          )}
+                          {lockedObjectCount > 0 && !isLayoutCentered && canCenterLayout && (
+                            <div className="mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] leading-relaxed text-amber-200">
+                              {lockedObjectCount} pinned {lockedObjectCount === 1 ? 'object' : 'objects'} will be
+                              moved. Press Undo (Ctrl/Cmd+Z) to revert changes.
+                            </div>
+                          )}
+                        </div>
                       </div>
                       )}
 

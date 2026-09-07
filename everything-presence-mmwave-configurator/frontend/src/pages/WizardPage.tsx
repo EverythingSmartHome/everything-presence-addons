@@ -33,6 +33,7 @@ import {
   rotateRoomSnapshot,
   type RotationScope,
 } from '../utils/roomRotation';
+import { centerRoomSnapshot } from '../utils/roomCentering';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
@@ -635,6 +636,58 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to rotate the floor plan');
       // Revert on error
+      onRoomUpdate?.(selectedRoom);
+    }
+  }, [selectedRoom, onRoomUpdate, stopDrawing]);
+
+  /**
+   * Slide the finished outline onto the grid origin.
+   *
+   * An outline drawn by hand is anchored wherever the user first clicked, so a
+   * to-scale room can end up metres from (0,0) - which is where the grid's
+   * centre lines, the cursor read-out, the default view and the next step's
+   * device placement all live. Doing this once, as the user leaves the outline
+   * step, means every later step works in sensible coordinates.
+   *
+   * Same pure transform the Room Builder uses: walls, doors, furniture and the
+   * sensor move together as one rigid translation, so nothing shifts relative
+   * to anything else and zones stay where they are on the walls. No heading
+   * changes, so unlike a rotation there is no slider range to fold.
+   */
+  const centerRoomOnOrigin = useCallback(async () => {
+    if (!selectedRoom) return;
+    const snapshot = {
+      roomShell: selectedRoom.roomShell,
+      roomShellFillMode: selectedRoom.roomShellFillMode,
+      floorMaterial: selectedRoom.floorMaterial,
+      devicePlacement: selectedRoom.devicePlacement,
+      furniture: selectedRoom.furniture,
+      doors: selectedRoom.doors,
+    };
+    const centered = centerRoomSnapshot(snapshot);
+    // Already on the origin (or no outline at all): nothing to save.
+    if (centered === snapshot) return;
+
+    // Every transient interaction is now pointing at coordinates that have
+    // just moved.
+    stopDrawing();
+    setCursorPos(null);
+    // The plan is on the origin now, so the default view frames it. Without
+    // this the room appears to fly off screen by exactly the distance it moved.
+    setCanvasPan({ x: 0, y: 0 });
+
+    const updatedRoom: RoomConfig = { ...selectedRoom, ...centered };
+    // Optimistic update
+    onRoomUpdate?.(updatedRoom);
+    try {
+      await updateRoom(selectedRoom.id, updatedRoom);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to center the floor plan');
+      // Revert on error. This puts `devicePlacement` back as it was, which on
+      // the usual path is "not placed yet" - the next step's auto-placement
+      // effect then re-fires and drops the sensor at the reverted outline's
+      // centre, which is the right answer for an outline that did not move.
       onRoomUpdate?.(selectedRoom);
     }
   }, [selectedRoom, onRoomUpdate, stopDrawing]);
@@ -1272,6 +1325,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const nextStep = () => {
     if (!canNext) return;
     setError(null);
+    // Leaving the outline step is where a hand-drawn room gets put on the grid
+    // origin. Hooked here rather than on the buttons because all three Next
+    // affordances (mobile top bar, desktop floating, non-canvas fallback) come
+    // through this one function. Deliberately not awaited: the optimistic
+    // update lands synchronously, so the next step already renders the centred
+    // room and the advance never waits on the network.
+    if (currentStep === 'outline') void centerRoomOnOrigin();
     setSlideDirection('forward');
     setStepIndex((prev) => {
       const next = Math.min(steps.length - 1, prev + 1);
