@@ -38,6 +38,10 @@ export function isZoneRect(zone: Zone): zone is ZoneRect {
 
 export interface RoomShell {
   points: Array<{ x: number; y: number }>;
+  /** Locks the whole outline: no wall is selectable or draggable in the builder. */
+  locked?: boolean;
+  /** Indices of individually locked wall segments (`points[i] -> points[i + 1]`). */
+  lockedSegments?: number[];
 }
 
 export interface DevicePlacement {
@@ -50,6 +54,8 @@ export interface DevicePlacement {
   coveragePresetId?: string;
   horizontalFovDeg?: number;
   verticalFovDeg?: number;
+  /** Pins the device's position only; rotation and coverage stay editable. */
+  locked?: boolean;
 }
 
 export interface FurnitureInstance {
@@ -62,15 +68,19 @@ export interface FurnitureInstance {
   height: number;
   rotationDeg: number;
   aspectRatioLocked: boolean;
+  locked?: boolean;
 }
 
 export interface Door {
   id: string;
+  /** Visual/operational style. Missing persisted values are legacy single doors. */
+  style: 'single' | 'sliding' | 'opening' | 'double';
   segmentIndex: number;
   positionOnSegment: number;
   widthMm: number;
   swingDirection: 'in' | 'out';
   swingSide: 'left' | 'right';
+  locked?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -226,6 +236,8 @@ export interface RoomConfig {
 export interface AppSettings {
   wizardCompleted: boolean;
   wizardStep?: string;
+  wizardDeviceId?: string | null;
+  wizardProfileId?: string | null;
   outlineDone?: boolean;
   placementDone?: boolean;
   zonesReady?: boolean;

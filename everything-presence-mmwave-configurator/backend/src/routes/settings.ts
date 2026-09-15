@@ -17,6 +17,16 @@ export const createSettingsRouter = (): Router => {
     if (typeof req.body?.wizardStep === 'string') {
       nextSettings.wizardStep = req.body.wizardStep;
     }
+    if (typeof req.body?.wizardDeviceId === 'string') {
+      nextSettings.wizardDeviceId = req.body.wizardDeviceId;
+    } else if (req.body?.wizardDeviceId === null) {
+      nextSettings.wizardDeviceId = null;
+    }
+    if (typeof req.body?.wizardProfileId === 'string') {
+      nextSettings.wizardProfileId = req.body.wizardProfileId;
+    } else if (req.body?.wizardProfileId === null) {
+      nextSettings.wizardProfileId = null;
+    }
     if (typeof req.body?.outlineDone === 'boolean') {
       nextSettings.outlineDone = req.body.outlineDone;
     }

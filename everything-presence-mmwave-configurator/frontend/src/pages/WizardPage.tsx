@@ -15,12 +15,25 @@ import {
   CanvasTopBar,
 } from '../components/CanvasLayout';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { BasicRoomShapesPicker, resizeBasicRoomShapeWall, type BasicRoomShapeSelection } from '../components/BasicRoomShapesPicker';
+import type { RoomShapePoint } from '../utils/roomShapes';
+import { clampDoorPosition } from '../utils/doorGeometry';
 import { updateRoom } from '../api/rooms';
 import { useWallDrawing } from '../hooks/useWallDrawing';
 import { pushZonesToDevice, fetchZonesFromDevice, fetchPolygonModeStatus, setPolygonMode, fetchPolygonZonesFromDevice, pushPolygonZonesToDevice, PolygonModeStatus } from '../api/zones';
 import { fetchMetaConfig, fetchZoneAvailability, ingressAware } from '../api/client';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
+import {
+  ROTATION_STEP_DEG,
+  canRotateRoomSnapshot,
+  normalizeSignedAngle,
+  normalizeUnsignedAngle,
+  rotatePointsKeepingBoundsCenter,
+  rotateRoomSnapshot,
+  type RotationScope,
+} from '../utils/roomRotation';
+import { centerRoomSnapshot } from '../utils/roomCentering';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
@@ -28,6 +41,7 @@ import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverag
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { resolveZoneLimits, supportsZoneEditing } from '../utils/zoneCapabilities';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -38,12 +52,13 @@ interface WizardPageProps {
   onBack?: () => void;
   onCreateRoom: (name: string, deviceId: string | null, profileId: string | null, entityMappings?: EntityMappings) => Promise<RoomConfig>;
   onSelectRoom: (roomId: string | null, profileId?: string | null) => void;
-  onGoRoomBuilder: (roomId: string | null, profileId?: string | null) => void;
-  onGoZoneEditor: (roomId: string | null, profileId?: string | null) => void;
+  onGoRoomBuilder?: (roomId: string | null, profileId?: string | null) => void;
+  onGoZoneEditor?: (roomId: string | null, profileId?: string | null) => void;
   onComplete: () => void;
   onRoomUpdate?: (room: RoomConfig) => void;
   initialStep?: string;
   onStepChange?: (key: StepKey) => void;
+  onSelectionChange?: (deviceId: string | null, profileId: string | null) => void;
   outlineDone: boolean;
   placementDone: boolean;
   zonesReady: boolean;
@@ -90,6 +105,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   onRoomUpdate,
   initialStep = 'device',
   onStepChange,
+  onSelectionChange,
   outlineDone,
   placementDone,
   zonesReady,
@@ -101,10 +117,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 }) => {
   const [deviceId, setDeviceId] = useState<string | null>(selectedDeviceId ?? null);
   const [profileId, setProfileId] = useState<string | null>(selectedProfileId ?? null);
+
   const [roomId, setRoomId] = useState<string | null>(rooms[0]?.id ?? null);
   const [roomPath, setRoomPath] = useState<'new' | 'existing' | 'skip' | null>(null);
   const [newRoomName, setNewRoomName] = useState('');
-  const [units, setUnits] = useState<'metric' | 'imperial'>('metric');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pushingZones, setPushingZones] = useState(false);
@@ -114,11 +130,35 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   // Entity discovery mappings (discovered after device selection)
   const [discoveredMappings, setDiscoveredMappings] = useState<EntityMappings | null>(null);
 
+  // Report device/profile selection changes to parent so they persist across reloads
+  const lastSelectionRef = useRef<{ deviceId: string | null; profileId: string | null } | null>(null);
+  useEffect(() => {
+    const prev = lastSelectionRef.current;
+    if (prev?.deviceId === deviceId && prev?.profileId === profileId) return;
+    lastSelectionRef.current = { deviceId, profileId };
+    onSelectionChange?.(deviceId, profileId);
+  }, [deviceId, profileId, onSelectionChange]);
+
   // Canvas controls for embedded room drawing
   const [canvasZoom, setCanvasZoom] = useState(1.1);
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [canvasSnap, setCanvasSnap] = useState(100);
   const [canvasPan, setCanvasPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [showOutlineShapeChoice, setShowOutlineShapeChoice] = useState(false);
+  const [activeBasicShape, setActiveBasicShape] = useState<BasicRoomShapeSelection | null>(null);
+  /**
+   * How far the basic shape has been turned since it was placed.
+   *
+   * The shape itself is parametric and always regenerates axis-aligned, so this
+   * is what a wall-length edit re-applies to keep a rotated room rotated instead
+   * of snapping it back to square.
+   */
+  const [basicShapeRotationDeg, setBasicShapeRotationDeg] = useState(0);
+  // Leaving shape mode - by any route - retires the angle with it, so a shape
+  // placed later never inherits the last one's orientation.
+  useEffect(() => {
+    if (!activeBasicShape) setBasicShapeRotationDeg(0);
+  }, [activeBasicShape]);
 
   // Zone selection for embedded zone drawing
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
@@ -138,10 +178,14 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     showTargets, setShowTargets,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    deviceMarkerStyle, setDeviceMarkerStyle,
+    deviceMarkerScale, setDeviceMarkerScale,
+    deviceMarkerOpacity, setDeviceMarkerOpacity,
     targetMarkerScale, setTargetMarkerScale,
     showZoneLabels, setShowZoneLabels,
     zoneLabelScale, setZoneLabelScale,
     clipRadarToWalls, setClipRadarToWalls,
+    units, setUnits,
   } = useDisplaySettings();
 
   // Cursor position tracking
@@ -397,7 +441,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     const base: StepKey[] = ['device', 'entityDiscovery', 'roomChoice'];
 
     // Check if current profile supports zones
-    const supportsZones = currentProfile?.capabilities?.zones !== false;
+    const supportsZones = supportsZoneEditing(currentProfile);
 
     if (roomPath === 'skip') {
       // Skip room setup: device → entityDiscovery → roomChoice → (zones if supported) → finish
@@ -428,14 +472,26 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const currentStep = steps[stepIndex] ?? 'device';
   const isRoomMode = roomPath !== 'skip';
 
+  // Zone slot counts for the selected device; a profile that declares a zone
+  // type unsupported resolves to zero slots.
+  const zoneLimits = useMemo(() => resolveZoneLimits(currentProfile), [currentProfile]);
+  const zoneEditingSupported = useMemo(() => supportsZoneEditing(currentProfile), [currentProfile]);
+  const allowedZoneTypes = useMemo(() => {
+    const types: ZoneRect['type'][] = [];
+    if (zoneLimits.maxZones > 0) types.push('regular');
+    if (zoneLimits.maxExclusionZones > 0) types.push('exclusion');
+    if (zoneLimits.maxEntryZones > 0) types.push('entry');
+    return types;
+  }, [zoneLimits]);
+
   // Generate all possible zone slots based on profile limits
   const allPossibleZones = useMemo(() => {
     if (!currentProfile) return [];
-    const limits = currentProfile.limits;
+    const limits = zoneLimits;
     const zones: ZoneRect[] = [];
 
     // Regular zones
-    for (let i = 1; i <= (limits.maxZones ?? 4); i++) {
+    for (let i = 1; i <= limits.maxZones; i++) {
       zones.push({
         id: `Zone ${i}`,
         type: 'regular',
@@ -448,7 +504,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
 
     // Exclusion zones
-    for (let i = 1; i <= (limits.maxExclusionZones ?? 2); i++) {
+    for (let i = 1; i <= limits.maxExclusionZones; i++) {
       zones.push({
         id: `Exclusion ${i}`,
         type: 'exclusion',
@@ -461,7 +517,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
 
     // Entry zones
-    for (let i = 1; i <= (limits.maxEntryZones ?? 2); i++) {
+    for (let i = 1; i <= limits.maxEntryZones; i++) {
       zones.push({
         id: `Entry ${i}`,
         type: 'entry',
@@ -474,7 +530,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
 
     return zones;
-  }, [currentProfile]);
+  }, [currentProfile, zoneLimits]);
 
   // Merge device zones with all possible zones
   const displayZones = useMemo(() => {
@@ -514,6 +570,127 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       onRoomUpdate?.(selectedRoom);
     }
   }, [selectedRoom, onRoomUpdate]);
+
+  const canRotateLayout = (selectedRoom?.roomShell?.points?.length ?? 0) > 0;
+
+  /**
+   * Turn the whole floor plan during setup, so a room drawn the wrong way round
+   * can be corrected here instead of being redrawn (or left to the Room Builder).
+   *
+   * Same pure transform the Room Builder uses. The wizard has no undo stack, so
+   * this persists straight away through the usual optimistic-update-then-save
+   * path; pressing the opposite arrow is the way back.
+   */
+  const rotateLayout = useCallback(async (angleDeg: number, scope: RotationScope) => {
+    if (!selectedRoom) return;
+    const snapshot = {
+      roomShell: selectedRoom.roomShell,
+      roomShellFillMode: selectedRoom.roomShellFillMode,
+      floorMaterial: selectedRoom.floorMaterial,
+      devicePlacement: selectedRoom.devicePlacement,
+      furniture: selectedRoom.furniture,
+      doors: selectedRoom.doors,
+    };
+    if (!canRotateRoomSnapshot(snapshot)) return;
+
+    const rotated = rotateRoomSnapshot(snapshot, angleDeg, scope);
+    if (rotated === snapshot) return;
+
+    // Drawing a wall while the plan turns under you would drop the next point in
+    // the wrong place, and every other transient interaction now points at
+    // coordinates that have just moved.
+    stopDrawing();
+    // Basic-shape mode survives a rotation: dropping it here would take the wall
+    // dimension labels with it and there is no way to get them back short of
+    // replacing the outline. Remember the angle instead, so a later wall-length
+    // edit regenerates the shape at its current orientation.
+    setBasicShapeRotationDeg((prev) => normalizeSignedAngle(prev + angleDeg));
+    setIsDoorPlacementMode(false);
+    setDoorDrag(null);
+    setSelectedDoorId(null);
+    setSelectedFurnitureId(null);
+    setCursorPos(null);
+    // The suggested installation angle was worked out against the old walls.
+    setShowRotationSuggestion(false);
+    lastRotationSuggestionRef.current = null;
+
+    const updatedRoom: RoomConfig = {
+      ...selectedRoom,
+      ...rotated,
+      // This screen's rotation slider spans 0..359, so a signed heading would
+      // leave its thumb pinned at zero. Fold it back into the range it edits.
+      ...(rotated.devicePlacement
+        ? {
+          devicePlacement: {
+            ...rotated.devicePlacement,
+            rotationDeg: normalizeUnsignedAngle(rotated.devicePlacement.rotationDeg ?? 0),
+          },
+        }
+        : {}),
+    };
+    // Optimistic update
+    onRoomUpdate?.(updatedRoom);
+    try {
+      await updateRoom(selectedRoom.id, updatedRoom);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rotate the floor plan');
+      // Revert on error
+      onRoomUpdate?.(selectedRoom);
+    }
+  }, [selectedRoom, onRoomUpdate, stopDrawing]);
+
+  /**
+   * Slide the finished outline onto the grid origin.
+   *
+   * An outline drawn by hand is anchored wherever the user first clicked, so a
+   * to-scale room can end up metres from (0,0) - which is where the grid's
+   * centre lines, the cursor read-out, the default view and the next step's
+   * device placement all live. Doing this once, as the user leaves the outline
+   * step, means every later step works in sensible coordinates.
+   *
+   * Same pure transform the Room Builder uses: walls, doors, furniture and the
+   * sensor move together as one rigid translation, so nothing shifts relative
+   * to anything else and zones stay where they are on the walls. No heading
+   * changes, so unlike a rotation there is no slider range to fold.
+   */
+  const centerRoomOnOrigin = useCallback(async () => {
+    if (!selectedRoom) return;
+    const snapshot = {
+      roomShell: selectedRoom.roomShell,
+      roomShellFillMode: selectedRoom.roomShellFillMode,
+      floorMaterial: selectedRoom.floorMaterial,
+      devicePlacement: selectedRoom.devicePlacement,
+      furniture: selectedRoom.furniture,
+      doors: selectedRoom.doors,
+    };
+    const centered = centerRoomSnapshot(snapshot);
+    // Already on the origin (or no outline at all): nothing to save.
+    if (centered === snapshot) return;
+
+    // Every transient interaction is now pointing at coordinates that have
+    // just moved.
+    stopDrawing();
+    setCursorPos(null);
+    // The plan is on the origin now, so the default view frames it. Without
+    // this the room appears to fly off screen by exactly the distance it moved.
+    setCanvasPan({ x: 0, y: 0 });
+
+    const updatedRoom: RoomConfig = { ...selectedRoom, ...centered };
+    // Optimistic update
+    onRoomUpdate?.(updatedRoom);
+    try {
+      await updateRoom(selectedRoom.id, updatedRoom);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to center the floor plan');
+      // Revert on error. This puts `devicePlacement` back as it was, which on
+      // the usual path is "not placed yet" - the next step's auto-placement
+      // effect then re-fires and drops the sensor at the reverted outline's
+      // centre, which is the right answer for an outline that did not move.
+      onRoomUpdate?.(selectedRoom);
+    }
+  }, [selectedRoom, onRoomUpdate, stopDrawing]);
 
   // Generate UUID helper
   const generateId = useCallback(() => {
@@ -606,10 +783,17 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const handleWallSegmentClick = useCallback(async (segmentIndex: number, positionOnSegment: number) => {
     if (!isDoorPlacementMode || !selectedRoom) return;
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[segmentIndex];
+    const end = points[(segmentIndex + 1) % points.length];
+    const boundedPosition = start && end
+      ? clampDoorPosition(positionOnSegment, 850, Math.hypot(end.x - start.x, end.y - start.y))
+      : positionOnSegment;
     const newDoor: Door = {
       id: generateId(),
+      style: 'single',
       segmentIndex,
-      positionOnSegment,
+      positionOnSegment: boundedPosition,
       widthMm: 850,
       swingDirection: 'in',
       swingSide: 'left',
@@ -631,9 +815,20 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const handleDoorChange = useCallback(async (updatedDoor: Door) => {
     if (!selectedRoom) return;
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[updatedDoor.segmentIndex];
+    const end = points[(updatedDoor.segmentIndex + 1) % points.length];
+    const boundedDoor = start && end ? {
+      ...updatedDoor,
+      positionOnSegment: clampDoorPosition(
+        updatedDoor.positionOnSegment,
+        updatedDoor.widthMm,
+        Math.hypot(end.x - start.x, end.y - start.y),
+      ),
+    } : updatedDoor;
     const updatedRoom: RoomConfig = {
       ...selectedRoom,
-      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? updatedDoor : d)),
+      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? boundedDoor : d)),
     };
     onRoomUpdate?.(updatedRoom);
     try {
@@ -741,12 +936,41 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     stopDrawing();
   }, [selectedRoom, handleRoomOutlineChange, stopDrawing]);
 
-  // Auto-enable drawing mode when on outline step
+  // New outlines begin with a simple method choice; saved outlines resume in review mode.
   useEffect(() => {
     if (currentStep === 'outline') {
-      setIsDrawingWall(true);
+      const hasUsableOutline = (selectedRoom?.roomShell?.points?.length ?? 0) >= 3;
+      setShowOutlineShapeChoice(!hasUsableOutline);
+      setIsDrawingWall(false);
     }
-  }, [currentStep, setIsDrawingWall]);
+  }, [currentStep, selectedRoom?.id, setIsDrawingWall]);
+
+  const handleApplyWizardShape = useCallback(async (points: RoomShapePoint[], selection: BasicRoomShapeSelection) => {
+    if (!selectedRoom) return;
+    if (selectedRoom.roomShell?.points?.length && !window.confirm(
+      'Replace the current walls? Manual wall adjustments and doors attached to those walls will be removed.'
+    )) return;
+    const updatedRoom: RoomConfig = { ...selectedRoom, roomShell: { points }, doors: [] };
+    onRoomUpdate?.(updatedRoom);
+    try {
+      await updateRoom(selectedRoom.id, updatedRoom);
+      setError(null);
+      setShowOutlineShapeChoice(false);
+      setActiveBasicShape(selection);
+      // A freshly placed shape is axis-aligned again.
+      setBasicShapeRotationDeg(0);
+      setIsDrawingWall(false);
+      setCanvasPan({ x: 0, y: 0 });
+      const maxDimension = Math.max(
+        Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+        Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+      );
+      setCanvasZoom(Math.min(5, Math.max(0.1, (0.8 * 15000) / Math.max(100, maxDimension + 1000))));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to update room outline');
+      onRoomUpdate?.(selectedRoom);
+    }
+  }, [onRoomUpdate, selectedRoom, setIsDrawingWall]);
 
   // Keyboard shortcuts for outline step
   useEffect(() => {
@@ -755,11 +979,23 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const tag = target.tagName.toLowerCase();
-      const isEditable =
+      const isTextEntry =
+        target.isContentEditable ||
         tag === 'input' ||
         tag === 'textarea' ||
-        tag === 'select' ||
-        tag === 'button';
+        tag === 'select';
+      const isEditable = isTextEntry || tag === 'button';
+
+      // Rotate is handled before the "focus is on a control" bail-out, so
+      // pressing R straight after clicking a rotate button still works.
+      if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntry) return;
+        if (!canRotateLayout) return;
+        e.preventDefault();
+        rotateLayout(e.shiftKey ? -ROTATION_STEP_DEG : ROTATION_STEP_DEG, 'layout');
+        return;
+      }
+
       if (isEditable) return;
 
       if (e.key === 'Escape') {
@@ -768,7 +1004,12 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       }
       if (e.key === 'a' || e.key === 'A') {
         e.preventDefault();
-        setIsDrawingWall((prev) => !prev);
+        if (activeBasicShape) {
+          setActiveBasicShape(null);
+          setIsDrawingWall(true);
+        } else {
+          setIsDrawingWall((prev) => !prev);
+        }
         return;
       }
       if (e.key === 'Enter') {
@@ -779,7 +1020,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
         return;
       }
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (selectedRoom?.roomShell?.points?.length) {
+        // Only while drawing: on a finished outline this would delete points the
+        // user never placed in this session.
+        if (isDrawingWall && selectedRoom?.roomShell?.points?.length) {
           e.preventDefault();
           removeLastPoint();
         }
@@ -787,7 +1030,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [currentStep, isDrawingWall, selectedRoom?.roomShell?.points, stopDrawing, setIsDrawingWall, removeLastPoint, handleCloseLoop]);
+  }, [currentStep, isDrawingWall, activeBasicShape, canRotateLayout, rotateLayout, selectedRoom?.roomShell?.points, stopDrawing, setIsDrawingWall, removeLastPoint, handleCloseLoop]);
 
   // Auto-initialize device placement to room center when entering placement step
   useEffect(() => {
@@ -1082,6 +1325,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   const nextStep = () => {
     if (!canNext) return;
     setError(null);
+    // Leaving the outline step is where a hand-drawn room gets put on the grid
+    // origin. Hooked here rather than on the buttons because all three Next
+    // affordances (mobile top bar, desktop floating, non-canvas fallback) come
+    // through this one function. Deliberately not awaited: the optimistic
+    // update lands synchronously, so the next step already renders the centred
+    // room and the advance never waits on the network.
+    if (currentStep === 'outline') void centerRoomOnOrigin();
     setSlideDirection('forward');
     setStepIndex((prev) => {
       const next = Math.min(steps.length - 1, prev + 1);
@@ -1401,6 +1651,23 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     const mobileZonesBadge = polygonModeStatus.enabled ? polygonZones.length : `${enabledZones.length}/${displayZones.length}`;
     const currentRoomName = selectedRoom?.name ?? 'Setup Wizard';
 
+    if (currentStep === 'outline' && showOutlineShapeChoice) {
+      return (
+        <div className="fixed inset-0 flex items-center justify-center overflow-y-auto bg-slate-950 p-4">
+          <BasicRoomShapesPicker
+            units={units}
+            onApply={handleApplyWizardShape}
+            onDrawOwn={() => {
+              setShowOutlineShapeChoice(false);
+              setActiveBasicShape(null);
+              setShowWelcomePopup(false);
+              setIsDrawingWall(true);
+            }}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="fixed inset-0 bg-slate-950 overflow-hidden">
         {/* Welcome Popup */}
@@ -1572,12 +1839,32 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           }}
         >
           {currentStep === 'outline' && (
+            <>
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={handleRoomOutlineChange}
               onCanvasClick={wallDrawingClick}
               onCanvasMove={wallDrawingMove}
               onDragStateChange={setIsCanvasDragging}
+              lockShell={!!activeBasicShape}
+              showAllWallLengthLabels={!!activeBasicShape}
+              onWallLengthChange={activeBasicShape ? (segmentIndex, lengthMm) => {
+                try {
+                  const resized = resizeBasicRoomShapeWall(activeBasicShape, segmentIndex, lengthMm);
+                  // The shape regenerates axis-aligned, so put back however far
+                  // the plan has been rotated since it was placed.
+                  const points = rotatePointsKeepingBoundsCenter(resized.points, basicShapeRotationDeg);
+                  setActiveBasicShape(resized.selection);
+                  void handleRoomOutlineChange(points);
+                  setCanvasPan({ x: 0, y: 0 });
+                  const maxDimension = Math.max(
+                    Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+                    Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+                  );
+                  setCanvasZoom(Math.min(5, Math.max(0.1, (0.8 * 15000) / Math.max(100, maxDimension + 1000))));
+                } catch { /* Invalid dimensions leave the last valid centered outline unchanged. */ }
+              } : undefined}
               previewFrom={pendingStart}
               previewTo={pendingStart && previewPoint ? previewPoint : null}
               rangeMm={15000}
@@ -1591,10 +1878,12 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               displayUnits={units}
               showWalls={showWalls}
             />
+            </>
           )}
 
           {currentStep === 'doors' && (
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -1619,7 +1908,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onDoorDragEnd={handleDoorDragEnd}
               showWalls={showWalls}
               showDoors={showDoors}
-              devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
+              devicePlacement={selectedRoom?.devicePlacement}
+              showDevice={showDeviceIcon}
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
@@ -1653,6 +1943,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {currentStep === 'furniture' && (
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -1677,7 +1968,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               }}
               onFurnitureChange={handleFurnitureChange}
               showFurniture={showFurniture}
-              devicePlacement={showDeviceIcon ? selectedRoom?.devicePlacement : undefined}
+              devicePlacement={selectedRoom?.devicePlacement}
+              showDevice={showDeviceIcon}
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
@@ -1711,6 +2003,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {currentStep === 'placement' && (
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -1793,6 +2086,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               }}
             >
               <ZoneCanvas
+                deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
                 zones={enabledZones}
                 onZonesChange={(updatedZones) => {
                   // When zones change on canvas, update only the enabled ones
@@ -1923,12 +2217,24 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           {currentStep === 'outline' && (
             <div className="absolute top-24 left-6 z-40 hidden flex-col gap-2 md:flex">
               <button
+                className="rounded-xl border border-aqua-600/50 bg-aqua-600/10 px-4 py-2.5 text-sm font-semibold text-aqua-100 shadow-lg hover:bg-aqua-600/20"
+                onClick={() => {
+                  stopDrawing();
+                  setShowOutlineShapeChoice(true);
+                }}
+              >
+                ▭ Basic Shapes
+              </button>
+              <button
                 className={`rounded-xl border px-4 py-2.5 text-sm font-semibold shadow-lg transition-all active:scale-95 ${
                   isDrawingWall
                     ? 'border-rose-600/50 bg-rose-600/10 text-rose-100 hover:bg-rose-600/20'
                     : 'border-aqua-600/50 bg-aqua-600/10 text-aqua-100 hover:bg-aqua-600/20'
                 }`}
-                onClick={() => setIsDrawingWall((prev) => !prev)}
+                onClick={() => {
+                  if (activeBasicShape) setActiveBasicShape(null);
+                  setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+                }}
               >
                 {isDrawingWall ? '✕ Stop (Esc)' : '✏️ Add wall (A)'}
               </button>
@@ -1942,10 +2248,34 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               <button
                 className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-4 py-2.5 text-sm font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
                 onClick={removeLastPoint}
-                disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+                title="Remove the point you just drew"
+                disabled={!selectedRoom || !isDrawingWall || !(selectedRoom.roomShell?.points?.length)}
               >
-                ↶ Undo (Del)
+                ⤺ Remove last point (Del)
               </button>
+              {/*
+                Drawn the room the wrong way round? Turn the whole plan rather
+                than starting again. 'layout' scope keeps the sensor rigid with
+                the walls, so nothing about the setup so far is disturbed.
+              */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 text-sm font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'layout')}
+                  disabled={!canRotateLayout}
+                  title="Rotate the whole floor plan 90° anti-clockwise"
+                >
+                  ↺ 90°
+                </button>
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 text-sm font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayout(ROTATION_STEP_DEG, 'layout')}
+                  disabled={!canRotateLayout}
+                  title="Rotate the whole floor plan 90° clockwise"
+                >
+                  ↻ 90°
+                </button>
+              </div>
               <button
                 className="rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 text-sm font-semibold text-rose-100 shadow-lg transition-all hover:bg-rose-600/20 disabled:opacity-40 active:scale-95"
                 onClick={handleClear}
@@ -2172,6 +2502,36 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   <span className="w-12 text-right font-mono font-semibold">{selectedRoom.devicePlacement.rotationDeg ?? 0}°</span>
                 </label>
               </div>
+              {/*
+                The other half of the alignment problem: the sensor is aimed
+                correctly but the room was drawn at the wrong orientation. This
+                swings the drawing around the sensor and leaves its aim alone,
+                which the rotation slider above cannot do.
+              */}
+              <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-4 shadow-lg space-y-2">
+                <div className="text-xs font-semibold text-slate-300">Room drawn the wrong way round?</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="rounded-lg border border-sky-600/50 bg-sky-600/10 px-3 py-2 text-xs font-semibold text-sky-100 transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                    onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'roomOnly')}
+                    disabled={!canRotateLayout}
+                    title="Turn the room 90° anti-clockwise around the sensor, leaving the sensor's aim unchanged"
+                  >
+                    ↺ 90°
+                  </button>
+                  <button
+                    className="rounded-lg border border-sky-600/50 bg-sky-600/10 px-3 py-2 text-xs font-semibold text-sky-100 transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                    onClick={() => rotateLayout(ROTATION_STEP_DEG, 'roomOnly')}
+                    disabled={!canRotateLayout}
+                    title="Turn the room 90° clockwise around the sensor, leaving the sensor's aim unchanged"
+                  >
+                    ↻ 90°
+                  </button>
+                </div>
+                <div className="text-[11px] leading-relaxed text-slate-400">
+                  Turns the walls around the sensor without changing where it is aimed.
+                </div>
+              </div>
               <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-3 shadow-lg">
                 <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
                   <input
@@ -2256,12 +2616,25 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               {currentStep === 'outline' && (
                 <div className="space-y-3">
                   <button
+                    className="w-full rounded-lg border border-aqua-600/50 bg-aqua-600/20 px-4 py-3 text-sm font-semibold text-aqua-100"
+                    onClick={() => {
+                      setActiveMobileCanvasSheet(null);
+                      stopDrawing();
+                      setShowOutlineShapeChoice(true);
+                    }}
+                  >
+                    Basic Shapes
+                  </button>
+                  <button
                     className={`w-full rounded-lg border px-4 py-3 text-sm font-semibold ${
                       isDrawingWall
                         ? 'border-rose-600/50 bg-rose-600/20 text-rose-100'
                         : 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100'
                     }`}
-                    onClick={() => setIsDrawingWall((prev) => !prev)}
+                    onClick={() => {
+                      if (activeBasicShape) setActiveBasicShape(null);
+                      setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+                    }}
                   >
                     {isDrawingWall ? 'Stop Drawing' : 'Add Wall'}
                   </button>
@@ -2276,9 +2649,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                     <button
                       className="rounded-lg border border-amber-600/50 bg-amber-600/20 px-3 py-3 text-sm font-semibold text-amber-100 disabled:opacity-40"
                       onClick={removeLastPoint}
-                      disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+                      disabled={!selectedRoom || !isDrawingWall || !(selectedRoom.roomShell?.points?.length)}
                     >
-                      Undo
+                      Remove point
                     </button>
                     <button
                       className="rounded-lg border border-rose-600/50 bg-rose-600/20 px-3 py-3 text-sm font-semibold text-rose-100 disabled:opacity-40"
@@ -2286,6 +2659,22 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       disabled={!selectedRoom}
                     >
                       Clear
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                      onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'layout')}
+                      disabled={!canRotateLayout}
+                    >
+                      ↺ Rotate 90°
+                    </button>
+                    <button
+                      className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                      onClick={() => rotateLayout(ROTATION_STEP_DEG, 'layout')}
+                      disabled={!canRotateLayout}
+                    >
+                      ↻ Rotate 90°
                     </button>
                   </div>
                   <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-xs text-slate-300">
@@ -2432,6 +2821,28 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       className="w-full"
                     />
                   </label>
+                  <div className="space-y-2 rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                    <div className="text-sm font-semibold text-slate-200">Room drawn the wrong way round?</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                        onClick={() => rotateLayout(-ROTATION_STEP_DEG, 'roomOnly')}
+                        disabled={!canRotateLayout}
+                      >
+                        ↺ 90°
+                      </button>
+                      <button
+                        className="rounded-lg border border-sky-600/50 bg-sky-600/20 px-3 py-3 text-sm font-semibold text-sky-100 disabled:opacity-40"
+                        onClick={() => rotateLayout(ROTATION_STEP_DEG, 'roomOnly')}
+                        disabled={!canRotateLayout}
+                      >
+                        ↻ 90°
+                      </button>
+                    </div>
+                    <div className="text-xs leading-relaxed text-slate-400">
+                      Turns the walls around the sensor without changing where it is aimed.
+                    </div>
+                  </div>
                   <label className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/50 p-3 text-sm text-slate-200">
                     <input
                       type="checkbox"
@@ -2460,10 +2871,14 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
                   { label: 'Doors', checked: showDoors, onChange: setShowDoors },
                   { label: 'Zones', checked: showZones, onChange: setShowZones },
-                  { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                  { label: 'Device marker', checked: showDeviceIcon, onChange: setShowDeviceIcon },
                   { label: 'Targets', checked: showTargets, onChange: setShowTargets, note: !liveState?.deviceId ? 'No device' : undefined },
                 ]}
                 appearance={{
+                  showDeviceMarker: showDeviceIcon,
+                  deviceMarkerStyle, setDeviceMarkerStyle,
+                  deviceMarkerScale, setDeviceMarkerScale,
+                  deviceMarkerOpacity, setDeviceMarkerOpacity,
                   targetMarkerScale,
                   setTargetMarkerScale,
                   showZoneLabels,
@@ -2690,6 +3105,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                         <ZoneEditor
                           key={zone.id}
                           zone={zone}
+                          allowedTypes={allowedZoneTypes}
                           onChange={(updated) => {
                             const newDisplayZones = displayZones.map((z) =>
                               z.id === updated.id ? { ...updated, enabled: true } : z
@@ -3214,6 +3630,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             }}
           >
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={handleRoomOutlineChange}
               onCanvasClick={wallDrawingClick}
@@ -3310,6 +3727,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             }}
           >
             <RoomCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -3630,6 +4048,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             }}
           >
             <ZoneCanvas
+              deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
               zones={enabledZones}
               onZonesChange={(updatedZones) => {
                 // When zones change on canvas, update only the enabled ones
@@ -3856,14 +4275,18 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              className="flex-1 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-6 py-3 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
-              onClick={() => {
-                onGoZoneEditor(selectedRoom?.id ?? null, selectedRoom?.profileId ?? profileId ?? null);
-              }}
-            >
-              Continue to Zone Editor
-            </button>
+            {/* A distance-only device (EP1) has no zones to edit, so it is never
+                offered the Zone Editor as a next step. */}
+            {zoneEditingSupported && onGoZoneEditor && (
+              <button
+                className="flex-1 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-6 py-3 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95"
+                onClick={() => {
+                  onGoZoneEditor(selectedRoom?.id ?? null, selectedRoom?.profileId ?? profileId ?? null);
+                }}
+              >
+                Continue to Zone Editor
+              </button>
+            )}
             <button
               className="flex-1 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/30 transition-all hover:shadow-xl hover:shadow-emerald-500/40 active:scale-95"
               onClick={() => {
@@ -3886,4 +4309,3 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     </div>
   );
 };
-

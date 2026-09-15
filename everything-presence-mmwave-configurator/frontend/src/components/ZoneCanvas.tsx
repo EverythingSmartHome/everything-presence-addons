@@ -4,6 +4,12 @@ import { RoomCanvas } from './RoomCanvas';
 import { DevicePlacement, Point as RoomPoint } from './RoomCanvas';
 import { getFurnitureIcon } from '../furniture/icons';
 import { getFurnitureColors } from '../furniture/colors';
+import { canDeleteVertex } from '../utils/polygonVertices';
+
+export interface PolygonVertexSelection {
+  zoneId: string;
+  vertexIndex: number;
+}
 
 interface ZoneCanvasProps {
   zones: ZoneRect[];
@@ -16,6 +22,11 @@ interface ZoneCanvasProps {
   polygonLateralOnlyAxis?: 'x' | 'y';
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
+  // Polygon vertex (node) selection + deletion. Selection state lives in the
+  // owning page so the keyboard shortcut stays out of read-only canvases.
+  selectedVertex?: PolygonVertexSelection | null;
+  onVertexSelect?: (selection: PolygonVertexSelection | null) => void;
+  onVertexDelete?: (zoneId: string, vertexIndex: number) => void;
   rangeMm?: number;
   snapGridMm?: number;
   height?: number | string;
@@ -58,6 +69,9 @@ interface ZoneCanvasProps {
   showZoneLabels?: boolean;
   zoneLabelScale?: number;
   showDevice?: boolean;
+  deviceMarkerStyle?: 'icon' | 'node';
+  deviceMarkerScale?: number;
+  deviceMarkerOpacity?: number;
   renderOverlay?: (params: {
     toCanvas: (point: { x: number; y: number }) => { x: number; y: number };
     fromCanvas: (point: { x: number; y: number }) => { x: number; y: number };
@@ -77,6 +91,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   polygonLateralOnlyAxis,
   selectedId,
   onSelect,
+  selectedVertex,
+  onVertexSelect,
+  onVertexDelete,
   rangeMm = 6000,
   snapGridMm = 0,
   height = 520,
@@ -110,6 +127,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   showZoneLabels = true,
   zoneLabelScale = 1,
   showDevice = true,
+  deviceMarkerStyle = 'icon',
+  deviceMarkerScale = 0.5,
+  deviceMarkerOpacity = 1,
   renderOverlay,
 }) => {
   // Rectangle zone dragging state
@@ -135,6 +155,11 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       // Older embedded webviews can reject capture on SVG nodes.
     }
   };
+
+  // Node (vertex) deletion is only offered while polygons are hand-editable:
+  // never read-only, and never in ceiling-slice mode where the lateral-only
+  // axis makes vertex count structural.
+  const vertexEditingEnabled = !polygonReadOnly && !polygonLateralOnlyAxis && !!onVertexDelete;
 
   const effectiveRotationDeg =
     devicePlacement ? (devicePlacement.rotationDeg ?? 0) + (installationAngle ?? 0) : 0;
@@ -511,6 +536,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       showFurniture={false}
       showDoors={showDoors}
       showDevice={showDevice}
+      deviceMarkerStyle={deviceMarkerStyle}
+      deviceMarkerScale={deviceMarkerScale}
+      deviceMarkerOpacity={deviceMarkerOpacity}
       deviceInteractive={false}
       lockShell
       renderOverlay={(params) => {
@@ -575,6 +603,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
           setDraggingVertex({ zoneId: polygon.id, vertexIndex });
           onDragStateChange?.(true);
           onSelect?.(polygon.id);
+          if (vertexEditingEnabled) {
+            onVertexSelect?.({ zoneId: polygon.id, vertexIndex });
+          }
         };
 
         // Render furniture (before zones, so zones appear on top)
@@ -641,6 +672,10 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
           // Get device rotation for SVG transform
           const rotationDeg = devicePlacement ? effectiveRotationDeg : 0;
 
+          // Label anchor in canvas space, so the label can be drawn upright
+          // (untransformed) at the zone centre like polygon zone labels are
+          const canvasCenter = toCanvas(deviceToRoom(zone.x + zone.width / 2, zone.y + zone.height / 2));
+
           const isSelected = selectedId === zone.id;
 
           // Zone colors: different colors for each regular zone, fixed colors for special types
@@ -703,14 +738,14 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
               />
               {showZoneLabels && (
                 <text
-                  x={canvasWidth / 2}
-                  y={20 * effectiveZoneLabelScale}
+                  x={canvasCenter.x}
+                  y={canvasCenter.y}
                   fill="white"
                   fontSize={13 * effectiveZoneLabelScale}
                   fontWeight="600"
                   textAnchor="middle"
+                  dominantBaseline="middle"
                   pointerEvents="none"
-                  transform={`translate(${canvasTopLeft.x}, ${canvasTopLeft.y}) rotate(${rotationDeg})`}
                   style={{
                     filter: 'drop-shadow(0 1px 2px rgb(0 0 0 / 0.8))',
                     textShadow: '0 1px 3px rgba(0,0,0,0.8)'
@@ -771,6 +806,10 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
           const pointsStr = canvasVertices.map((v) => `${v.x},${v.y}`).join(' ');
 
           const isSelected = selectedId === polygon.id;
+          const activeVertexIndex =
+            vertexEditingEnabled && selectedVertex && selectedVertex.zoneId === polygon.id
+              ? selectedVertex.vertexIndex
+              : null;
 
           // Zone colors based on type
           let color: string;
@@ -865,27 +904,34 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 </text>
               )}
               {/* Vertex handles (only when selected) */}
-              {isSelected && !polygonReadOnly && canvasVertices.map((v, idx) => (
-                <circle
-                  key={`vertex-${idx}`}
-                  cx={v.x}
-                  cy={v.y}
-                  r={11}
-                  fill="white"
-                  stroke={color}
-                  strokeWidth={2}
-                  style={{ cursor: polygonLateralOnlyAxis === 'x' ? 'ew-resize' : polygonLateralOnlyAxis === 'y' ? 'ns-resize' : 'move' }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect?.(polygon.id);
-                  }}
-                  pointerEvents="all"
-                  onPointerDown={(e) => startPolygonVertexDrag(e, polygon, idx)}
-                  onPointerMove={handlePolygonPointerMove}
-                  onPointerUp={handlePolygonPointerRelease}
-                  onPointerCancel={handlePolygonPointerRelease}
-                />
-              ))}
+              {isSelected && !polygonReadOnly && canvasVertices.map((v, idx) => {
+                const isVertexSelected = activeVertexIndex === idx;
+
+                return (
+                  <circle
+                    key={`vertex-${idx}`}
+                    cx={v.x}
+                    cy={v.y}
+                    r={isVertexSelected ? 13 : 11}
+                    fill={isVertexSelected ? color : 'white'}
+                    stroke={isVertexSelected ? 'white' : color}
+                    strokeWidth={isVertexSelected ? 3 : 2}
+                    style={{ cursor: polygonLateralOnlyAxis === 'x' ? 'ew-resize' : polygonLateralOnlyAxis === 'y' ? 'ns-resize' : 'move' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect?.(polygon.id);
+                      if (vertexEditingEnabled) {
+                        onVertexSelect?.({ zoneId: polygon.id, vertexIndex: idx });
+                      }
+                    }}
+                    pointerEvents="all"
+                    onPointerDown={(e) => startPolygonVertexDrag(e, polygon, idx)}
+                    onPointerMove={handlePolygonPointerMove}
+                    onPointerUp={handlePolygonPointerRelease}
+                    onPointerCancel={handlePolygonPointerRelease}
+                  />
+                );
+              })}
               {isSelected && !polygonReadOnly && polygonLateralOnlyAxis && lateralDragEdges.map(({ start, end, idx }) => (
                 <line
                   key={`lateral-edge-${idx}`}
@@ -941,6 +987,8 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                       const updatedPolygon = { ...polygon, vertices: newVertices };
                       const next = polygonZones.map(p => p.id === polygon.id ? updatedPolygon : p);
                       onPolygonZonesChange(next);
+                      // Indices shift once a node is inserted, so drop any selection.
+                      onVertexSelect?.(null);
                     }}
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -949,6 +997,46 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   />
                 );
               })}
+              {/* Delete badge for the selected node - rendered last so it stays
+                  on top of the vertex and midpoint handles (touch-friendly). */}
+              {isSelected && activeVertexIndex !== null && (() => {
+                const vertexIndex = activeVertexIndex;
+                const anchor = canvasVertices[vertexIndex];
+                if (!anchor) return null;
+                if (!canDeleteVertex(polygon.vertices, vertexIndex)) return null;
+
+                const badgeX = anchor.x + 20;
+                const badgeY = anchor.y - 20;
+
+                return (
+                  <g
+                    key={`vertex-delete-${vertexIndex}`}
+                    style={{ cursor: 'pointer' }}
+                    pointerEvents="all"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onVertexDelete?.(polygon.id, vertexIndex);
+                    }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      if (e.cancelable) e.preventDefault();
+                      capturePointer(e);
+                    }}
+                  >
+                    <title>{`Delete node ${vertexIndex + 1}`}</title>
+                    {/* Enlarged transparent hit area for touch */}
+                    <circle cx={badgeX} cy={badgeY} r={18} fill="transparent" />
+                    <circle cx={badgeX} cy={badgeY} r={11} fill="#f43f5e" stroke="white" strokeWidth={2} />
+                    <path
+                      d={`M ${badgeX - 4} ${badgeY - 4} L ${badgeX + 4} ${badgeY + 4} M ${badgeX + 4} ${badgeY - 4} L ${badgeX - 4} ${badgeY + 4}`}
+                      stroke="white"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      pointerEvents="none"
+                    />
+                  </g>
+                );
+              })()}
             </g>
           );
         }).filter(Boolean) : [];

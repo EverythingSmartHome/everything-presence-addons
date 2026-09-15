@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { AppSettings, CustomFloorMaterial, CustomFurnitureType, RoomConfig } from '../domain/types';
 import { logger } from '../logger';
+import { roomSnapshotStorage } from './roomSnapshotStorage';
 
 // Use /config/everything-presence-zone-configurator for persistent storage across add-on reinstalls
 // The /config directory is mapped to Home Assistant's config folder via config:rw in config.yaml
@@ -45,6 +46,8 @@ const readSettings = (): AppSettings => {
     return {
       wizardCompleted: false,
       wizardStep: 'device',
+      wizardDeviceId: undefined,
+      wizardProfileId: undefined,
       outlineDone: false,
       placementDone: false,
       zonesReady: false,
@@ -56,9 +59,13 @@ const readSettings = (): AppSettings => {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
       const rawDefaultRoom = (parsed as any).defaultRoomId;
+      const rawWizardDeviceId = (parsed as any).wizardDeviceId;
+      const rawWizardProfileId = (parsed as any).wizardProfileId;
       return {
         wizardCompleted: Boolean((parsed as any).wizardCompleted),
         wizardStep: typeof (parsed as any).wizardStep === 'string' ? (parsed as any).wizardStep : 'device',
+        wizardDeviceId: typeof rawWizardDeviceId === 'string' ? rawWizardDeviceId : rawWizardDeviceId === null ? null : undefined,
+        wizardProfileId: typeof rawWizardProfileId === 'string' ? rawWizardProfileId : rawWizardProfileId === null ? null : undefined,
         outlineDone: Boolean((parsed as any).outlineDone),
         placementDone: Boolean((parsed as any).placementDone),
         zonesReady: Boolean((parsed as any).zonesReady),
@@ -73,6 +80,8 @@ const readSettings = (): AppSettings => {
     return {
       wizardCompleted: false,
       wizardStep: 'device',
+      wizardDeviceId: undefined,
+      wizardProfileId: undefined,
       outlineDone: false,
       placementDone: false,
       zonesReady: false,
@@ -83,6 +92,8 @@ const readSettings = (): AppSettings => {
     return {
       wizardCompleted: false,
       wizardStep: 'device',
+      wizardDeviceId: undefined,
+      wizardProfileId: undefined,
       outlineDone: false,
       placementDone: false,
       zonesReady: false,
@@ -138,6 +149,18 @@ const writeCustomFurniture = (furniture: CustomFurnitureType[]) => {
   fs.writeFileSync(CUSTOM_FURNITURE_FILE, JSON.stringify(furniture, null, 2));
 };
 
+// Geometry is the expensive-to-recreate part of a room (walls, doors, furniture,
+// device placement). We snapshot the previous version whenever it changes so an
+// accidental overwrite - e.g. a room saved with its outline cleared - stays
+// recoverable, instead of rooms.json being overwritten with no history.
+const geometrySignature = (room: RoomConfig): string =>
+  JSON.stringify({
+    roomShell: room.roomShell ?? null,
+    doors: room.doors ?? [],
+    furniture: room.furniture ?? [],
+    devicePlacement: room.devicePlacement ?? null,
+  });
+
 export const storage = {
   // Rooms
   listRooms: (): RoomConfig[] => readRooms(),
@@ -146,6 +169,10 @@ export const storage = {
     const rooms = readRooms();
     const idx = rooms.findIndex((r) => r.id === room.id);
     if (idx >= 0) {
+      const previous = rooms[idx];
+      if (geometrySignature(previous) !== geometrySignature(room)) {
+        roomSnapshotStorage.appendSnapshot(previous);
+      }
       rooms[idx] = room;
     } else {
       rooms.push(room);

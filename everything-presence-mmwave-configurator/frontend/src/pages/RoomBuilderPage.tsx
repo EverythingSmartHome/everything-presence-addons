@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { fetchDevices, fetchProfiles, ingressAware } from '../api/client';
 import { fetchRooms, updateRoom } from '../api/rooms';
+import type { RoomUpdatePayload } from '../api/rooms';
 import { RoomCanvas } from '../components/RoomCanvas';
 import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, FurnitureInstance, FurnitureType, Door, DevicePlacement } from '../api/types';
 import { useWallDrawing } from '../hooks/useWallDrawing';
@@ -15,12 +16,17 @@ import {
   CanvasTopBar,
 } from '../components/CanvasLayout';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { HelpTooltip } from '../components/HelpTooltip';
+import { BasicRoomShapesPicker, resizeBasicRoomShapeWall, type BasicRoomShapeSelection } from '../components/BasicRoomShapesPicker';
+import type { RoomShapePoint } from '../utils/roomShapes';
+import { clampDoorPosition } from '../utils/doorGeometry';
 import { useDisplaySettings } from '../hooks/useDisplaySettings';
 import { useIsMobileCanvas } from '../hooks/useMediaQuery';
 import { getInstallationAngleSuggestion } from '../utils/rotationSuggestion';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
+import { roomSupportsZoneEditing } from '../utils/zoneCapabilities';
 import { formatLengthLabel } from '../utils/lengthLabels';
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import {
@@ -28,12 +34,63 @@ import {
   getCeilingSlicePosition,
   normalizeCeilingSliceConfig,
 } from '../utils/ceilingSlices';
+import { resolveLoadedRoomSelection } from '../utils/roomSelection';
+import {
+  resolveDeleteKeyTarget,
+  resolveSelectionState,
+  type BuilderSelection,
+} from '../utils/roomBuilderSelection';
+import {
+  applyDevicePlacementUpdate,
+  areAllItemsLocked,
+  areAllSegmentsLocked,
+  countLockedObjects,
+  getLockedSegments,
+  isDevicePositionLocked,
+  isSegmentLocked,
+  isShellLocked,
+  isVertexLocked,
+  normalizeLockedSegments,
+  remapDoorsForPointRemoval,
+  remapDoorsForSplit,
+  remapLockedSegmentsForPointRemoval,
+  remapLockedSegmentsForSplit,
+  resolveLockedUpdate,
+  setItemsLocked,
+  setShellLocked,
+  toggleSegmentLock,
+} from '../utils/lockState';
+import { stableStringify } from '../utils/stableStringify';
+import {
+  ROOM_HISTORY_LIMIT,
+  applyRoomSnapshot,
+  canRedoRoomHistory,
+  canUndoRoomHistory,
+  createRoomHistory,
+  pushRoomHistory,
+  redoRoomHistory,
+  roomSnapshotSignature,
+  snapshotRoom,
+  undoRoomHistory,
+  type RoomHistory,
+} from '../utils/roomHistory';
+import {
+  ROTATION_STEP_DEG,
+  canRotateRoomSnapshot,
+  describeRotationScope,
+  normalizeSignedAngle,
+  rotatePointsKeepingBoundsCenter,
+  rotateRoomSnapshot,
+  type RotationScope,
+} from '../utils/roomRotation';
+import { canCenterRoomSnapshot, centerRoomSnapshot, isRoomCentered } from '../utils/roomCentering';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
   onNavigate?: (view: 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard') => void;
   initialRoomId?: string | null;
   initialProfileId?: string | null;
+  onRoomChange?: (roomId: string | null, profileId: string | null) => void;
   onWizardProgress?: (progress: { outlineDone?: boolean; placementDone?: boolean }) => void;
   liveState?: LiveState | null;
   targetPositions?: Array<{
@@ -47,15 +104,51 @@ interface RoomBuilderPageProps {
 }
 
 type MobileRoomBuilderSheet = 'navigation' | 'tools' | 'zoom' | null;
-type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor';
+type RoomBuilderSettingsTab = 'canvas' | 'device' | 'display' | 'floor' | 'layout';
+type RoomBuilderView = 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard';
+type PendingLeave = { type: 'navigate'; view: RoomBuilderView } | { type: 'back' };
 
-const clampNumber = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
+const roomSignature = (room: RoomConfig | null | undefined): string => (room ? stableStringify(room) : '');
+
+/**
+ * Did the wall outline itself change since the last save?
+ *
+ * This is the trigger for the automatic re-centre on save, so it compares only
+ * the points - not the locks, and not the rest of the room. A room with no
+ * saved baseline yet counts as changed, which is what makes its first save
+ * centre it.
+ */
+const outlineChangedSinceSave = (
+  room: RoomConfig | null | undefined,
+  saved: RoomConfig | null | undefined,
+): boolean =>
+  stableStringify(room?.roomShell?.points ?? []) !== stableStringify(saved?.roomShell?.points ?? []);
+
+/** Keep in step with the `room-rotate-spin` keyframes in index.css. */
+const ROOM_ROTATION_SPIN_MS = 420;
+
+// One user gesture should be one undo step. Continuous input (dragging
+// furniture, sweeping a slider, dragging a wall) fires a change per pointer
+// move, so those commits share a key and collapse onto the first snapshot until
+// the gesture ends.
+type CommitRoomOptions = { coalesceKey?: string };
+
+/**
+ * A points edit normally carries the outline's locks through untouched.
+ * `lockedSegments` and `doors` are only passed by the two edits that renumber
+ * walls (splitting one, deleting a corner), which have to remap them.
+ */
+type PointsChangeOptions = CommitRoomOptions & {
+  lockedSegments?: number[];
+  doors?: Door[];
+};
 
 export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   onBack,
   onNavigate,
   initialRoomId,
   initialProfileId,
+  onRoomChange,
   onWizardProgress,
   liveState,
   targetPositions,
@@ -66,10 +159,29 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [rangeMm, setRangeMm] = useState(15000);
-  const [widthMm, setWidthMm] = useState(4000);
-  const [heightMm, setHeightMm] = useState(4000);
+  const [showBasicShapes, setShowBasicShapes] = useState(false);
+  const [activeBasicShape, setActiveBasicShape] = useState<BasicRoomShapeSelection | null>(null);
+  /**
+   * How far the basic shape has been turned since it was placed.
+   *
+   * The shape itself is parametric and always regenerates axis-aligned, so this
+   * is what a wall-length edit re-applies to keep a rotated room rotated instead
+   * of snapping it back to square.
+   */
+  const [basicShapeRotationDeg, setBasicShapeRotationDeg] = useState(0);
+  // Leaving shape mode - by any route, including an undo - retires the angle
+  // with it, so a shape placed later never inherits the last one's orientation.
+  useEffect(() => {
+    if (!activeBasicShape) setBasicShapeRotationDeg(0);
+  }, [activeBasicShape]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Last state each room was known to have on the server; the baseline for
+  // "do I have unsaved changes?" and for discarding them again.
+  const [savedRooms, setSavedRooms] = useState<Record<string, RoomConfig>>({});
+  const [pendingLeave, setPendingLeave] = useState<PendingLeave | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearedPoints, setClearedPoints] = useState<{ x: number; y: number }[] | null>(null);
   const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
   const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
   const [wallLengthInput, setWallLengthInput] = useState('');
@@ -88,13 +200,26 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [angleSnapEnabled, setAngleSnapEnabled] = useState(false);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
   const [cursorDelta, setCursorDelta] = useState<{ dx: number; dy: number; len: number } | null>(null);
-  const [displayUnits, setDisplayUnits] = useState<'metric' | 'imperial'>('metric');
   const [zoom, setZoom] = useState(1.1);
   const [isCanvasDragging, setIsCanvasDragging] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<RoomBuilderSettingsTab>('display');
   const [showNavMenu, setShowNavMenu] = useState(false);
   const [activeMobileSheet, setActiveMobileSheet] = useState<MobileRoomBuilderSheet>(null);
+  /**
+   * Which way a floor-plan rotation is meant to be read. 'layout' turns the plan
+   * and the sensor together (a pure reorientation); 'roomOnly' turns the drawing
+   * around a fixed sensor, which is the repair for "the sensor detects things 90
+   * degrees off what I drew".
+   */
+  const [rotationScope, setRotationScope] = useState<RotationScope>('layout');
+  /** Free-text angle for the Layout panel's "Custom" rotation. */
+  const [customRotationInput, setCustomRotationInput] = useState('45');
+  /** Drives the one-shot spin the canvas plays after a rotation is committed. */
+  const [rotationSpin, setRotationSpin] = useState<{ fromDeg: number; id: number } | null>(null);
+  const rotationSpinIdRef = useRef(0);
+  const rotationSpinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rotationSpinFrameRef = useRef<number | null>(null);
   // Display settings (persisted to localStorage)
   const {
     showWalls, setShowWalls,
@@ -102,11 +227,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     showDoors, setShowDoors,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    deviceMarkerStyle, setDeviceMarkerStyle,
+    deviceMarkerScale, setDeviceMarkerScale,
+    deviceMarkerOpacity, setDeviceMarkerOpacity,
     showTargets, setShowTargets,
     targetMarkerScale, setTargetMarkerScale,
     showZoneLabels, setShowZoneLabels,
     zoneLabelScale, setZoneLabelScale,
     clipRadarToWalls, setClipRadarToWalls,
+    units: displayUnits, setUnits: setDisplayUnits,
   } = useDisplaySettings();
   const isMobileCanvas = useIsMobileCanvas();
   const [panOffsetMm, setPanOffsetMm] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -127,10 +256,55 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const [wallEditorDragOffset, setWallEditorDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [wallEditorDragging, setWallEditorDragging] = useState(false);
   const [canvasViewportSize, setCanvasViewportSize] = useState({ width: 0, height: 0 });
+  // Session-only undo/redo, one stack per room. Held in a ref so a drag does not
+  // re-render per snapshot; `historyAvailability` mirrors just what the buttons
+  // need. Nothing here is persisted, so it dies with the page.
+  const historyRef = useRef<Map<string, RoomHistory>>(new Map());
+  const activeCoalesceKeyRef = useRef<string | null>(null);
+  const [historyAvailability, setHistoryAvailability] = useState({ canUndo: false, canRedo: false });
   const lastRotationSuggestionRef = useRef<number | null>(null);
   const wallEditorDragPointerRef = useRef<number | null>(null);
   const wallEditorDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
+  // Mirrors of the current selection, so the one-shot loader can consult them
+  // without depending on (and therefore re-running off) its own state.
+  const selectedRoomIdRef = useRef(selectedRoomId);
+  const selectedProfileIdRef = useRef(selectedProfileId);
+  selectedRoomIdRef.current = selectedRoomId;
+  selectedProfileIdRef.current = selectedProfileId;
+  // Last `initialRoomId` we acted on, so the sync effect below can tell an actual
+  // prop change from a re-render.
+  const lastInitialRoomIdRef = useRef<string | null>(initialRoomId ?? null);
+
+  /**
+   * The single owner of "what is selected". Furniture, doors and wall segments
+   * are mutually exclusive, and routing every selection change through here is
+   * what keeps them that way - a leftover wall selection used to send Del to the
+   * wall branch while the furniture panel was open.
+   */
+  const selectEntity = useCallback((selection: BuilderSelection) => {
+    const next = resolveSelectionState(selection);
+    setSelectedFurnitureId(next.selectedFurnitureId);
+    setSelectedDoorId(next.selectedDoorId);
+    setSelectedSegment(next.selectedSegment);
+    if (next.selectedSegment === null) setHoveredSegment(null);
+  }, []);
+
+  /** Short-lived nudge for keyboard actions that have no visible button to grey out. */
+  const [transientHint, setTransientHint] = useState<string | null>(null);
+  const transientHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTransientHint = useCallback((message: string) => {
+    setTransientHint(message);
+    if (transientHintTimerRef.current) clearTimeout(transientHintTimerRef.current);
+    transientHintTimerRef.current = setTimeout(() => {
+      setTransientHint(null);
+      transientHintTimerRef.current = null;
+    }, 3000);
+  }, []);
+  useEffect(() => () => {
+    if (transientHintTimerRef.current) clearTimeout(transientHintTimerRef.current);
+  }, []);
+
   const CANVAS_SIZE = 700;
   const HALF = CANVAS_SIZE / 2;
   const WALL_EDITOR_WIDTH = 280;
@@ -141,6 +315,65 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const selectedRoom = useMemo(
     () => (selectedRoomId ? rooms.find((r) => r.id === selectedRoomId) ?? null : null),
     [rooms, selectedRoomId],
+  );
+
+  const syncHistoryAvailability = useCallback((roomId: string | null) => {
+    const history = roomId ? historyRef.current.get(roomId) : null;
+    const next = { canUndo: canUndoRoomHistory(history), canRedo: canRedoRoomHistory(history) };
+    setHistoryAvailability((prev) =>
+      prev.canUndo === next.canUndo && prev.canRedo === next.canRedo ? prev : next,
+    );
+  }, []);
+
+  // A gesture ends on pointer-up or when focus leaves the control being used;
+  // the next edit then starts a fresh undo step.
+  const endHistoryGesture = useCallback(() => {
+    activeCoalesceKeyRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const handler = () => endHistoryGesture();
+    window.addEventListener('pointerup', handler);
+    window.addEventListener('pointercancel', handler);
+    window.addEventListener('focusout', handler);
+    return () => {
+      window.removeEventListener('pointerup', handler);
+      window.removeEventListener('pointercancel', handler);
+      window.removeEventListener('focusout', handler);
+    };
+  }, [endHistoryGesture]);
+
+  /**
+   * The single write path for room edits made in the builder. Every edit
+   * records the pre-edit state so Undo can put it back, then applies the new
+   * room. Loading and saving deliberately bypass this: neither is a user edit.
+   */
+  const commitRoom = useCallback(
+    (nextRoom: RoomConfig, options?: CommitRoomOptions) => {
+      const previous = selectedRoom;
+      if (!previous || previous.id !== nextRoom.id) return;
+
+      const previousSnapshot = snapshotRoom(previous);
+      const coalesceKey = options?.coalesceKey ?? null;
+      // Events that change nothing (a slider re-emitting its current value)
+      // must not consume an undo step.
+      if (roomSnapshotSignature(previousSnapshot) !== roomSnapshotSignature(snapshotRoom(nextRoom))) {
+        const history = historyRef.current.get(previous.id) ?? createRoomHistory();
+        historyRef.current.set(
+          previous.id,
+          pushRoomHistory(history, previousSnapshot, {
+            coalesceKey,
+            activeCoalesceKey: activeCoalesceKeyRef.current,
+            limit: ROOM_HISTORY_LIMIT,
+          }),
+        );
+        activeCoalesceKeyRef.current = coalesceKey;
+        syncHistoryAvailability(previous.id);
+      }
+
+      setRooms((prev) => prev.map((r) => (r.id === previous.id ? nextRoom : r)));
+    },
+    [selectedRoom, syncHistoryAvailability],
   );
 
   const selectedProfile = useMemo(
@@ -195,10 +428,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const updateDevicePlacement = useCallback((updates: Partial<DevicePlacement>) => {
     if (!selectedRoom) return;
     const base: DevicePlacement = selectedRoom.devicePlacement ?? { x: 0, y: 0, rotationDeg: 0 };
-    const nextPlacement: DevicePlacement = { ...base, ...updates };
+    // A locked device keeps its coordinates; rotation, mounting and coverage
+    // all still apply, so aiming the sensor is unaffected.
+    const nextPlacement: DevicePlacement = applyDevicePlacementUpdate(base, updates);
     const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: nextPlacement };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
-  }, [selectedRoom]);
+    commitRoom(nextRoom, { coalesceKey: 'device:placement' });
+  }, [commitRoom, selectedRoom]);
 
   const coveragePresets = selectedProfile?.coverage?.presets ?? null;
   const coveragePresetId = useMemo(() => {
@@ -234,7 +469,6 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const currentInstallationAngle =
     typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : null;
-  const currentUpsideDownMounting = liveState?.config?.upsideDownMounting === true;
   const deviceLocalToRoom = useCallback((deviceX: number, deviceY: number) => {
     if (!selectedRoom?.devicePlacement) {
       return { x: deviceX, y: deviceY };
@@ -243,17 +477,28 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const angleRad = (((rotationDeg ?? 0) + (currentInstallationAngle ?? 0)) * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
-    const localX = currentUpsideDownMounting ? -deviceX : deviceX;
+    // Orientation (upside-down mounting) is normalised on-device by the firmware,
+    // so Target X is already in the correct frame here — do not re-flip it.
+    const localX = deviceX;
     return {
       x: localX * cos - deviceY * sin + x,
       y: localX * sin + deviceY * cos + y,
     };
-  }, [currentInstallationAngle, currentUpsideDownMounting, selectedRoom?.devicePlacement]);
+  }, [currentInstallationAngle, selectedRoom?.devicePlacement]);
 
   const isEplDevice = useMemo(() => {
     const caps = selectedProfile?.capabilities as { tracking?: boolean; distanceOnlyTracking?: boolean } | undefined;
     return Boolean(caps?.tracking) && !caps?.distanceOnlyTracking;
   }, [selectedProfile]);
+
+  // Room Builder supports every device, but the Zone Editor does not: a
+  // distance-only sensor (EP1) has no zones to draw, so the menu entry is
+  // greyed out here exactly as it is on the live dashboard.
+  const zoneEditingSupported = useMemo(
+    () => roomSupportsZoneEditing(selectedRoom, profiles),
+    [profiles, selectedRoom],
+  );
+  const zoneEditorDisabledReason = 'Zone editor is not available for EP1 (distance-only tracking)';
 
   // Device mappings context for entity resolution
   const { getEntityId } = useDeviceMappings();
@@ -330,11 +575,97 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   }, [selectedRoom?.deviceId, rotationSuggestion, resolveInstallationAngleEntityId]);
 
-  const handlePointsChange = useCallback((nextPoints: { x: number; y: number }[]) => {
+  const handlePointsChange = useCallback((nextPoints: { x: number; y: number }[], options?: PointsChangeOptions) => {
     if (!selectedRoom) return;
-    const updated: RoomConfig = { ...selectedRoom, roomShell: { points: nextPoints } };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-  }, [selectedRoom]);
+    const previousShell = selectedRoom.roomShell;
+    // Locks are part of the outline, so rebuilding `roomShell` here has to carry
+    // them over or every wall edit would silently unlock the room.
+    const lockedSegments = normalizeLockedSegments(
+      options?.lockedSegments ?? previousShell?.lockedSegments,
+      nextPoints.length,
+    );
+    const updated: RoomConfig = {
+      ...selectedRoom,
+      roomShell: {
+        ...previousShell,
+        points: nextPoints,
+        locked: previousShell?.locked ? true : undefined,
+        lockedSegments: lockedSegments.length ? lockedSegments : undefined,
+      },
+      ...(options?.doors?.length ? { doors: options.doors } : {}),
+    };
+    commitRoom(updated, options);
+  }, [commitRoom, selectedRoom]);
+
+  // ── Object locking ────────────────────────────────────────────────────────
+  // A locked object is pinned: the canvas drops it from hit-testing so it can no
+  // longer be selected or dragged by accident, and the mutation handlers below
+  // refuse every edit except the one that unlocks it again.
+  const activeShell = selectedRoom?.roomShell;
+  const shellPointCount = activeShell?.points?.length ?? 0;
+  const lockedWallSegments = useMemo(
+    () => getLockedSegments(activeShell, shellPointCount),
+    [activeShell, shellPointCount],
+  );
+  const wholeRoomLocked = isShellLocked(activeShell);
+  const allWallsLocked = areAllSegmentsLocked(activeShell);
+  const allFurnitureLocked = areAllItemsLocked(selectedRoom?.furniture);
+  const allDoorsLocked = areAllItemsLocked(selectedRoom?.doors);
+  const selectedSegmentLocked = isSegmentLocked(activeShell, selectedSegment);
+  const devicePositionLocked = isDevicePositionLocked(selectedRoom?.devicePlacement);
+  const lockedObjectCount = countLockedObjects(selectedRoom) + (devicePositionLocked ? 1 : 0);
+
+  /**
+   * Locking never closes the object's editor panel: the panel is where the lock
+   * was turned on, so it has to stay put as the way to turn it off again. Its
+   * controls go inert instead, and the canvas stops hit-testing the object.
+   */
+  const handleSegmentLockToggle = useCallback((index: number) => {
+    const shell = selectedRoom?.roomShell;
+    if (!selectedRoom || !shell?.points?.length) return;
+    commitRoom({ ...selectedRoom, roomShell: toggleSegmentLock(shell, index) });
+    setHoveredSegment(null);
+  }, [commitRoom, selectedRoom]);
+
+  const handleShellLockChange = useCallback((locked: boolean) => {
+    const shell = selectedRoom?.roomShell;
+    if (!selectedRoom || !shell?.points?.length) return;
+    commitRoom({ ...selectedRoom, roomShell: setShellLocked(shell, locked) });
+    setHoveredSegment(null);
+  }, [commitRoom, selectedRoom]);
+
+  const handleFurnitureLockToggle = useCallback((id: string) => {
+    if (!selectedRoom) return;
+    const existing = (selectedRoom.furniture ?? []).find((f) => f.id === id);
+    if (!existing) return;
+    const locked = !existing.locked;
+    commitRoom({
+      ...selectedRoom,
+      furniture: (selectedRoom.furniture ?? []).map((f) =>
+        (f.id === id ? { ...f, locked: locked ? true : undefined } : f)),
+    });
+  }, [commitRoom, selectedRoom]);
+
+  const handleDoorLockToggle = useCallback((id: string) => {
+    if (!selectedRoom) return;
+    const existing = (selectedRoom.doors ?? []).find((d) => d.id === id);
+    if (!existing) return;
+    const locked = !existing.locked;
+    commitRoom({
+      ...selectedRoom,
+      doors: (selectedRoom.doors ?? []).map((d) => (d.id === id ? { ...d, locked: locked ? true : undefined } : d)),
+    });
+  }, [commitRoom, selectedRoom]);
+
+  const handleLockAllFurniture = useCallback((locked: boolean) => {
+    if (!selectedRoom?.furniture?.length) return;
+    commitRoom({ ...selectedRoom, furniture: setItemsLocked(selectedRoom.furniture, locked) });
+  }, [commitRoom, selectedRoom]);
+
+  const handleLockAllDoors = useCallback((locked: boolean) => {
+    if (!selectedRoom?.doors?.length) return;
+    commitRoom({ ...selectedRoom, doors: setItemsLocked(selectedRoom.doors, locked) });
+  }, [commitRoom, selectedRoom]);
 
   const handleAddFurniture = useCallback((furnitureType: FurnitureType) => {
     if (!selectedRoom) return;
@@ -366,30 +697,45 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       furniture: [...(selectedRoom.furniture ?? []), newFurniture],
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-    setSelectedFurnitureId(newFurniture.id);
+    commitRoom(updated);
+    // Selecting through the helper drops any wall segment or door still selected
+    // behind the library, so Del now means "delete this new piece of furniture".
+    selectEntity({ kind: 'furniture', id: newFurniture.id });
     setShowFurnitureLibrary(false);
     setActiveMobileSheet(null);
-  }, [selectedRoom]);
+  }, [commitRoom, selectEntity, selectedRoom]);
 
   const handleFurnitureChange = useCallback((updatedFurniture: FurnitureInstance) => {
     if (!selectedRoom) return;
+    // Canvas gating alone is not enough: the editor panel writes here too, as
+    // does any drag still in flight. A locked item accepts nothing but unlocking.
+    const existing = (selectedRoom.furniture ?? []).find((f) => f.id === updatedFurniture.id);
+    const nextFurniture = resolveLockedUpdate(existing, updatedFurniture);
+    if (!nextFurniture) return;
     const updated: RoomConfig = {
       ...selectedRoom,
-      furniture: (selectedRoom.furniture ?? []).map((f) => (f.id === updatedFurniture.id ? updatedFurniture : f)),
+      furniture: (selectedRoom.furniture ?? []).map((f) => (f.id === updatedFurniture.id ? nextFurniture : f)),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-  }, [selectedRoom]);
+    // Dragging, resizing, rotating and the sliders all land here per input
+    // event - one key per item keeps a whole gesture at one undo step.
+    commitRoom(updated, { coalesceKey: `furniture:${updatedFurniture.id}` });
+  }, [commitRoom, selectedRoom]);
 
   const handleFurnitureDelete = useCallback(() => {
     if (!selectedRoom || !selectedFurnitureId) return;
+    // Pinned means pinned: unlock it first. The panel button greys itself out to
+    // say so; pressing Del has no such affordance, hence the hint.
+    if ((selectedRoom.furniture ?? []).some((f) => f.id === selectedFurnitureId && f.locked)) {
+      showTransientHint('This furniture is locked. Unlock it before deleting it.');
+      return;
+    }
     const updated: RoomConfig = {
       ...selectedRoom,
       furniture: (selectedRoom.furniture ?? []).filter((f) => f.id !== selectedFurnitureId),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
+    commitRoom(updated);
     setSelectedFurnitureId(null);
-  }, [selectedRoom, selectedFurnitureId]);
+  }, [commitRoom, selectedRoom, selectedFurnitureId, showTransientHint]);
 
   const handleAddDoor = useCallback(() => {
     if (!selectedRoom) return;
@@ -401,30 +747,51 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setIsDoorPlacementMode((prev) => !prev);
     if (!isDoorPlacementMode) {
       // Entering placement mode - deselect everything
-      setSelectedDoorId(null);
-      setSelectedFurnitureId(null);
-      setSelectedSegment(null);
+      selectEntity({ kind: 'none' });
     }
-  }, [selectedRoom, isDoorPlacementMode]);
+  }, [selectEntity, selectedRoom, isDoorPlacementMode]);
 
   const handleDoorChange = useCallback((updatedDoor: Door) => {
     if (!selectedRoom) return;
+    // Door drags are routed through the host, so the canvas gate alone would
+    // still leave a locked door movable. A locked door accepts only unlocking.
+    const existing = (selectedRoom.doors ?? []).find((d) => d.id === updatedDoor.id);
+    const unlockedDoor = resolveLockedUpdate(existing, updatedDoor);
+    if (!unlockedDoor) return;
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[unlockedDoor.segmentIndex];
+    const end = points[(unlockedDoor.segmentIndex + 1) % points.length];
+    const nextDoor = start && end ? {
+      ...unlockedDoor,
+      positionOnSegment: clampDoorPosition(
+        unlockedDoor.positionOnSegment,
+        unlockedDoor.widthMm,
+        Math.hypot(end.x - start.x, end.y - start.y),
+      ),
+    } : unlockedDoor;
     const updated: RoomConfig = {
       ...selectedRoom,
-      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? updatedDoor : d)),
+      doors: (selectedRoom.doors ?? []).map((d) => (d.id === updatedDoor.id ? nextDoor : d)),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-  }, [selectedRoom]);
+    // Sliding a door along a wall fires per pointer move; coalesce per door.
+    commitRoom(updated, { coalesceKey: `door:${updatedDoor.id}` });
+  }, [commitRoom, selectedRoom]);
 
   const handleDoorDelete = useCallback(() => {
     if (!selectedRoom || !selectedDoorId) return;
+    // Pinned means pinned: unlock it first. Del has no disabled state to show
+    // that, so say it out loud.
+    if ((selectedRoom.doors ?? []).some((d) => d.id === selectedDoorId && d.locked)) {
+      showTransientHint('This door is locked. Unlock it before deleting it.');
+      return;
+    }
     const updated: RoomConfig = {
       ...selectedRoom,
       doors: (selectedRoom.doors ?? []).filter((d) => d.id !== selectedDoorId),
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
+    commitRoom(updated);
     setSelectedDoorId(null);
-  }, [selectedRoom, selectedDoorId]);
+  }, [commitRoom, selectedRoom, selectedDoorId, showTransientHint]);
 
   // Helper to generate UUID
   const generateId = () => {
@@ -441,11 +808,20 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleWallSegmentClick = useCallback((segmentIndex: number, positionOnSegment: number) => {
     if (!selectedRoom || !isDoorPlacementMode) return;
+    if (isSegmentLocked(selectedRoom.roomShell, segmentIndex)) return;
+
+    const points = selectedRoom.roomShell?.points ?? [];
+    const start = points[segmentIndex];
+    const end = points[(segmentIndex + 1) % points.length];
+    const boundedPosition = start && end
+      ? clampDoorPosition(positionOnSegment, 800, Math.hypot(end.x - start.x, end.y - start.y))
+      : positionOnSegment;
 
     const newDoor: Door = {
       id: generateId(),
+      style: 'single',
       segmentIndex,
-      positionOnSegment,
+      positionOnSegment: boundedPosition,
       widthMm: 800, // Standard door width
       swingDirection: 'in',
       swingSide: 'left',
@@ -454,14 +830,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       ...selectedRoom,
       doors: [...(selectedRoom.doors ?? []), newDoor],
     };
-    setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? updated : r)));
-    setSelectedDoorId(newDoor.id);
+    commitRoom(updated);
+    selectEntity({ kind: 'door', id: newDoor.id });
     setIsDoorPlacementMode(false); // Exit placement mode after placing
-  }, [selectedRoom, isDoorPlacementMode]);
+  }, [commitRoom, selectEntity, selectedRoom, isDoorPlacementMode]);
 
   const handleDoorDragStart = useCallback((doorId: string, x: number, y: number) => {
     const door = selectedRoom?.doors?.find((d) => d.id === doorId);
-    if (!door) return;
+    if (!door || door.locked) return;
     setDoorDrag({
       doorId,
       startX: x,
@@ -474,7 +850,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     if (!doorDrag || !selectedRoom) return;
 
     const door = selectedRoom.doors?.find((d) => d.id === doorDrag.doorId);
-    if (!door || !selectedRoom.roomShell?.points) return;
+    if (!door || door.locked || !selectedRoom.roomShell?.points) return;
 
     const pts = selectedRoom.roomShell.points;
     if (door.segmentIndex < 0 || door.segmentIndex >= pts.length) return;
@@ -584,11 +960,221 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     stopDrawing,
     removeLastPoint,
     setIsDrawingWall,
+    setPendingStart,
   } = useWallDrawing({
     snapGridMm,
     onPointsChange: handlePointsChange,
     currentPoints: selectedRoom?.roomShell?.points ?? [],
   });
+
+  /**
+   * Undo/redo restores the whole builder state of the room, so it reverses any
+   * edit - a deleted door or furniture item comes back, not just wall points.
+   */
+  const stepHistory = useCallback(
+    (direction: 'undo' | 'redo') => {
+      const room = selectedRoom;
+      if (!room) return;
+      const history = historyRef.current.get(room.id);
+      if (!history) return;
+
+      const current = snapshotRoom(room);
+      const step = direction === 'undo' ? undoRoomHistory(history, current) : redoRoomHistory(history, current);
+      if (!step) return;
+
+      historyRef.current.set(room.id, step.history);
+      endHistoryGesture();
+      const restored = applyRoomSnapshot(room, step.snapshot);
+      setRooms((prev) => prev.map((r) => (r.id === room.id ? restored : r)));
+      syncHistoryAvailability(room.id);
+
+      // Drop any transient interaction that may now point at something that no
+      // longer exists (or exists again at a different index).
+      const points = restored.roomShell?.points ?? [];
+      setSelectedSegment((prev) => (prev !== null && prev >= points.length ? null : prev));
+      setHoveredSegment(null);
+      setSegmentDragIndex(null);
+      setSegmentDragStart(null);
+      setSegmentDragBase(null);
+      setEndpointDrag(null);
+      setDoorDrag(null);
+      setIsDoorPlacementMode(false);
+      setActiveBasicShape(null);
+      setSelectedFurnitureId((prev) => (prev && !(restored.furniture ?? []).some((f) => f.id === prev) ? null : prev));
+      setSelectedDoorId((prev) => (prev && !(restored.doors ?? []).some((d) => d.id === prev) ? null : prev));
+      if (isDrawingWall) {
+        setPendingStart(points.length ? points[points.length - 1] : null);
+      }
+    },
+    [endHistoryGesture, isDrawingWall, selectedRoom, setPendingStart, syncHistoryAvailability],
+  );
+
+  const handleUndo = useCallback(() => stepHistory('undo'), [stepHistory]);
+  const handleRedo = useCallback(() => stepHistory('redo'), [stepHistory]);
+  const canUndo = historyAvailability.canUndo && !!selectedRoom;
+  const canRedo = historyAvailability.canRedo && !!selectedRoom;
+
+  const canRotateLayout = !!selectedRoom && (selectedRoom.roomShell?.points?.length ?? 0) > 0;
+
+  const canCenterLayout = canCenterRoomSnapshot(selectedRoom);
+  /** Drives the "already centred" copy, and disables the button so it cannot spend an undo step on a no-op. */
+  const isLayoutCentered = canCenterLayout && isRoomCentered(selectedRoom);
+
+  /**
+   * Play the one-shot spin: the geometry is already committed, so the canvas
+   * starts back at the orientation the plan *had* and turns into its new one.
+   * The animation is restarted by clearing it for a frame first, otherwise a
+   * second press inside the same ROOM_ROTATION_SPIN_MS would leave the class in
+   * place and silently skip the animation.
+   */
+  const playRotationSpin = useCallback((appliedAngleDeg: number) => {
+    if (rotationSpinTimerRef.current) clearTimeout(rotationSpinTimerRef.current);
+    if (rotationSpinFrameRef.current !== null) cancelAnimationFrame(rotationSpinFrameRef.current);
+    rotationSpinFrameRef.current = null;
+    setRotationSpin(null);
+
+    // With reduced motion the CSS animation is `none`, so animationend never
+    // fires and the plan would only sit there un-interactive. Skip the spin
+    // entirely instead: the geometry is already committed either way.
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
+    const id = (rotationSpinIdRef.current += 1);
+    const start = () => {
+      rotationSpinFrameRef.current = null;
+      setRotationSpin({ fromDeg: -appliedAngleDeg, id });
+      // Belt and braces alongside onAnimationEnd, which can be missed if the
+      // canvas is re-mounted or the tab is backgrounded mid-animation.
+      rotationSpinTimerRef.current = setTimeout(() => {
+        setRotationSpin((current) => (current?.id === id ? null : current));
+      }, ROOM_ROTATION_SPIN_MS + 120);
+    };
+    // One frame with the class removed, so pressing rotate twice in quick
+    // succession restarts the animation instead of silently skipping it.
+    if (typeof requestAnimationFrame === 'function') {
+      rotationSpinFrameRef.current = requestAnimationFrame(start);
+    } else {
+      start();
+    }
+  }, []);
+
+  useEffect(() => () => {
+    if (rotationSpinTimerRef.current) clearTimeout(rotationSpinTimerRef.current);
+    if (rotationSpinFrameRef.current !== null) cancelAnimationFrame(rotationSpinFrameRef.current);
+  }, []);
+
+  /**
+   * Turn the whole floor plan. Wall outline, doors, furniture and (in 'layout'
+   * scope) the sensor all move together through `commitRoom`, so a rotation is a
+   * single undoable step that persists with the normal room save.
+   *
+   * Locks are deliberately overridden: rotating some objects but not others
+   * would tear the plan apart, so pinned walls, furniture, doors and even a
+   * position-locked sensor all come along. The Layout panel says so, and Undo is
+   * one keystroke away.
+   */
+  const rotateLayout = useCallback(
+    (angleDeg: number, scope: RotationScope) => {
+      const room = selectedRoom;
+      if (!room) return;
+      const snapshot = snapshotRoom(room);
+      if (!canRotateRoomSnapshot(snapshot)) return;
+
+      const angle = normalizeSignedAngle(angleDeg);
+      const rotated = rotateRoomSnapshot(snapshot, angle, scope);
+      if (rotated === snapshot) return;
+
+      // A rotation is never part of a drag gesture, so it always opens a fresh
+      // undo step rather than collapsing into the previous one.
+      endHistoryGesture();
+      commitRoom(applyRoomSnapshot(room, rotated));
+
+      // Wall indices and door anchors survive a rotation, but every transient
+      // interaction is now pointing at coordinates that have just moved.
+      stopDrawing();
+      setSelectedSegment(null);
+      setHoveredSegment(null);
+      setSegmentDragIndex(null);
+      setSegmentDragStart(null);
+      setSegmentDragBase(null);
+      setEndpointDrag(null);
+      setDoorDrag(null);
+      setIsDoorPlacementMode(false);
+      // Basic-shape mode survives a rotation: dropping it here would take the
+      // wall dimension labels with it and there is no way to get them back short
+      // of replacing the outline. Remember the angle instead, so a later
+      // wall-length edit regenerates the shape at its current orientation.
+      setBasicShapeRotationDeg((prev) => normalizeSignedAngle(prev + angle));
+      setCursorPos(null);
+      setCursorDelta(null);
+      // The suggested installation angle was computed against the old walls.
+      setShowRotationSuggestion(false);
+      lastRotationSuggestionRef.current = null;
+
+      playRotationSpin(angle);
+    },
+    [commitRoom, endHistoryGesture, playRotationSpin, selectedRoom, stopDrawing],
+  );
+
+  const rotateLayoutBy = useCallback(
+    (angleDeg: number) => rotateLayout(angleDeg, rotationScope),
+    [rotateLayout, rotationScope],
+  );
+
+  /**
+   * Slide the whole floor plan so the outline's bounding-box centre lands on
+   * (0,0). An outline drawn by hand is anchored wherever the user first
+   * clicked, so a to-scale room can sit metres away from the origin - and the
+   * grid's axis lines, the cursor read-out, the pan resets and the spawn point
+   * for new furniture are all anchored there.
+   *
+   * Wall outline, doors, furniture and the sensor move together as one rigid
+   * translation through `commitRoom`, so nothing shifts relative to anything
+   * else and the move is a single undoable step. Zones, live targets and the
+   * heatmap are device-relative, so they follow the sensor for free; see
+   * `roomCentering` for why that holds.
+   *
+   * Returns the re-centred room when it moved and `null` when there was
+   * nothing to do, so the save path can persist the moved room in the same
+   * pass rather than waiting for the next render.
+   */
+  const centerLayout = useCallback((): RoomConfig | null => {
+    const room = selectedRoom;
+    if (!room) return null;
+    const snapshot = snapshotRoom(room);
+    const centered = centerRoomSnapshot(snapshot);
+    // Already on the origin (or no outline at all): never burn an undo step.
+    if (centered === snapshot) return null;
+
+    const nextRoom = applyRoomSnapshot(room, centered);
+    // Re-centring is never part of a drag gesture, so it always opens a fresh
+    // undo step rather than collapsing into the previous one.
+    endHistoryGesture();
+    commitRoom(nextRoom);
+
+    // Wall indices and door anchors survive a translation, but every transient
+    // interaction is now pointing at coordinates that have just moved.
+    stopDrawing();
+    setSelectedSegment(null);
+    setHoveredSegment(null);
+    setSegmentDragIndex(null);
+    setSegmentDragStart(null);
+    setSegmentDragBase(null);
+    setEndpointDrag(null);
+    setDoorDrag(null);
+    setIsDoorPlacementMode(false);
+    setCursorPos(null);
+    setCursorDelta(null);
+    // The plan is on the origin now, so the default view frames it. Without
+    // this the room appears to fly off screen by exactly the distance it moved.
+    setPanOffsetMm({ x: 0, y: 0 });
+    // Deliberately left alone: a translation changes no headings, so
+    // `basicShapeRotationDeg` and the installation-angle suggestion (which is
+    // computed from wall directions relative to the sensor, all of which this
+    // move preserves) are both still valid.
+    return nextRoom;
+  }, [commitRoom, endHistoryGesture, selectedRoom, stopDrawing]);
 
   useEffect(() => {
     const load = async () => {
@@ -597,38 +1183,60 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         setDevices(deviceRes.devices);
         setProfiles(profileRes.profiles);
         setRooms(roomRes.rooms);
+        setSavedRooms(Object.fromEntries(roomRes.rooms.map((room) => [room.id, room])));
 
-        const initialRoom =
-          (initialRoomId && roomRes.rooms.find((r) => r.id === initialRoomId)) || roomRes.rooms[0] || null;
-        if (initialRoom) {
-          setSelectedRoomId(initialRoom.id);
-          if (initialRoom.profileId) setSelectedProfileId(initialRoom.profileId);
+        // A room the user already picked wins over the incoming prop - the fetch
+        // can resolve after they used the header dropdown.
+        const initialRoom = resolveLoadedRoomSelection(roomRes.rooms, initialRoomId, selectedRoomIdRef.current);
+        let profileId = initialRoom?.profileId ?? selectedProfileIdRef.current ?? null;
+        if (!profileId && profileRes.profiles.length > 0) {
+          profileId = initialProfileId ?? profileRes.profiles[0].id;
         }
-        if (!initialRoom?.profileId && !selectedProfileId && profileRes.profiles.length > 0) {
-          setSelectedProfileId(initialProfileId ?? profileRes.profiles[0].id);
+
+        if (initialRoom) setSelectedRoomId(initialRoom.id);
+        if (profileId) setSelectedProfileId(profileId);
+        // Tell the app what we landed on, so `initialRoomId` tracks the builder
+        // instead of pulling it somewhere else later.
+        if (initialRoom || profileId) {
+          onRoomChange?.(initialRoom?.id ?? selectedRoomIdRef.current ?? null, profileId);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
       }
     };
     load();
-  }, [initialProfileId, initialRoomId, selectedProfileId]);
+    // Initialisation only: this effect writes `rooms`/`savedRooms` and the
+    // selection, so depending on any of them would refetch mid-edit and snap the
+    // user back to `initialRoomId`. External room changes are handled by the
+    // sync effect below.
+  }, []);
+
+  useEffect(() => {
+    // Follow the parent only when it actually points somewhere new, and without
+    // refetching: the builder owns the selection while it is open, so a prop
+    // that simply lags behind must never override the user's own pick.
+    const nextRoomId = initialRoomId ?? null;
+    if (!rooms.length) return; // wait for the load; the prop is handled there
+    const changed = nextRoomId !== lastInitialRoomIdRef.current;
+    lastInitialRoomIdRef.current = nextRoomId;
+    if (!changed || !nextRoomId || nextRoomId === selectedRoomId) return;
+    const room = rooms.find((r) => r.id === nextRoomId);
+    if (!room) return;
+    setSelectedRoomId(room.id);
+    if (room.profileId) setSelectedProfileId(room.profileId);
+  }, [initialRoomId, rooms, selectedRoomId]);
 
   useEffect(() => {
     // reset pan when switching rooms
     setPanOffsetMm({ x: 0, y: 0 });
-  }, [selectedRoomId]);
-
-  useEffect(() => {
-    if (!selectedRoom?.roomShell?.points?.length) return;
-    const pts = selectedRoom.roomShell.points;
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const width = Math.max(...xs) - Math.min(...xs);
-    const height = Math.max(...ys) - Math.min(...ys);
-    if (Number.isFinite(width)) setWidthMm(Math.round(width));
-    if (Number.isFinite(height)) setHeightMm(Math.round(height));
-  }, [selectedRoom?.roomShell?.points]);
+    setClearedPoints(null);
+    setShowClearConfirm(false);
+    setActiveBasicShape(null);
+    // Each room keeps its own stack for the session, so switching back to a room
+    // keeps its undo history.
+    endHistoryGesture();
+    syncHistoryAvailability(selectedRoomId);
+  }, [endHistoryGesture, selectedRoomId, syncHistoryAvailability]);
 
   const handleAddPoint = (p: { x: number; y: number }) => {
     if (!selectedRoom) return;
@@ -636,23 +1244,73 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     handlePointsChange(nextPoints);
   };
 
-  const handleSetRectangle = () => {
+  const handleApplyBasicShape = (points: RoomShapePoint[], selection: BasicRoomShapeSelection) => {
     if (!selectedRoom) return;
-    const w = clampNumber(widthMm, 500, 20000);
-    const h = clampNumber(heightMm, 500, 20000);
-    const pts = [
-      { x: -w / 2, y: -h / 2 },
-      { x: w / 2, y: -h / 2 },
-      { x: w / 2, y: h / 2 },
-      { x: -w / 2, y: h / 2 },
-    ];
-    handlePointsChange(pts);
+    // Replacing the outline would take locked walls with it.
+    if (lockedWallSegments.length) {
+      window.alert('Some walls are locked. Unlock them before replacing the room shape.');
+      return;
+    }
+    if (selectedRoom.roomShell?.points?.length && !window.confirm(
+      'Replace the current walls? Manual wall adjustments and doors attached to those walls will be removed.'
+    )) return;
+    const nextRoom: RoomConfig = { ...selectedRoom, roomShell: { points }, doors: [] };
+    commitRoom(nextRoom);
+    stopDrawing();
+    setIsDoorPlacementMode(false);
+    setSelectedSegment(null);
+    setSegmentDragIndex(null);
+    setSegmentDragStart(null);
+    setSegmentDragBase(null);
+    setEndpointDrag(null);
+    setDoorDrag(null);
+    setSelectedDoorId(null);
+    setActiveBasicShape(selection);
+    // Swapping one shape straight for another never passes through "no shape",
+    // so the effect above cannot clear this - a freshly placed shape is
+    // axis-aligned again.
+    setBasicShapeRotationDeg(0);
+    setShowBasicShapes(false);
+    setActiveMobileSheet(null);
+    const maxDimension = Math.max(
+      Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+      Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+    );
+    setZoom(Math.min(5, Math.max(0.1, (0.8 * rangeMm) / Math.max(100, maxDimension + 1000))));
+    setPanOffsetMm({ x: 0, y: 0 });
   };
 
   const handleClear = () => {
     if (!selectedRoom) return;
+    if (!selectedRoom.roomShell?.points?.length) {
+      stopDrawing();
+      return;
+    }
+    // Clearing removes every wall at once, including any that are pinned.
+    if (lockedWallSegments.length) {
+      window.alert('Some walls are locked. Unlock them before clearing the room outline.');
+      return;
+    }
+    // Ask first even though Undo can now bring them back within this session.
+    setShowClearConfirm(true);
+  };
+
+  const confirmClear = () => {
+    if (!selectedRoom) {
+      setShowClearConfirm(false);
+      return;
+    }
+    setClearedPoints(selectedRoom.roomShell?.points ?? null);
     handlePointsChange([]);
+    setActiveBasicShape(null);
     stopDrawing();
+    setShowClearConfirm(false);
+  };
+
+  const restoreClearedPoints = () => {
+    if (!clearedPoints?.length) return;
+    handlePointsChange(clearedPoints);
+    setClearedPoints(null);
   };
 
   const handleCloseLoop = () => {
@@ -694,24 +1352,105 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const deleteSelectedWallPoint = useCallback(() => {
     const ptsDelete = selectedRoom?.roomShell?.points ?? [];
     if (selectedSegment === null || ptsDelete.length <= 2) return;
+    if (isSegmentLocked(selectedRoom?.roomShell, selectedSegment)) return;
 
     const removeIdx = (selectedSegment + 1) % ptsDelete.length;
+    // Removing a corner merges the two walls that meet at it, so the other one
+    // has to be unlocked too before this is allowed.
+    if (isSegmentLocked(selectedRoom?.roomShell, removeIdx)) return;
     const nextDelete = ptsDelete.filter((_, idx) => idx !== removeIdx);
-    handlePointsChange(nextDelete);
+    // Every later wall is renumbered; locks and doors are anchored by index and
+    // have to follow, or they end up attached to the wrong wall.
+    handlePointsChange(nextDelete, {
+      lockedSegments: remapLockedSegmentsForPointRemoval(
+        selectedRoom?.roomShell?.lockedSegments,
+        removeIdx,
+        ptsDelete.length,
+      ),
+      doors: remapDoorsForPointRemoval(selectedRoom?.doors, removeIdx, ptsDelete.length),
+    });
     setSelectedSegment(null);
     setHoveredSegment(null);
-  }, [handlePointsChange, selectedRoom?.roomShell?.points, selectedSegment]);
+  }, [handlePointsChange, selectedRoom?.doors, selectedRoom?.roomShell, selectedSegment]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
-      const isEditable =
+      const isTextEntry =
         target?.isContentEditable ||
         tag === 'input' ||
         tag === 'textarea' ||
-        tag === 'select' ||
-        tag === 'button';
+        tag === 'select';
+      const isEditable = isTextEntry || tag === 'button';
+
+      // Undo/redo stay available right after clicking a toolbar button, so they
+      // are handled before the "focus is on a control" bail-out. Text fields
+      // keep the browser's own undo.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'z' || key === 'y') {
+          if (isTextEntry) return;
+          e.preventDefault();
+          if (key === 'y' || e.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+          return;
+        }
+      }
+
+      // Rotate follows undo/redo above rather than the bail-out below: the
+      // toolbar buttons advertise "(R)", and pressing it right after clicking
+      // one has to work even though focus is still on that button. Text fields
+      // keep their own letter.
+      if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (isTextEntry) return;
+        if (!canRotateLayout) return;
+        e.preventDefault();
+        rotateLayoutBy(e.shiftKey ? -ROTATION_STEP_DEG : ROTATION_STEP_DEG);
+        return;
+      }
+
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (isTextEntry) return;
+        // Del acts on whatever is selected, and only falls back to the
+        // wall-level meanings when nothing is: it is never a general undo.
+        const target = resolveDeleteKeyTarget({
+          selectedFurnitureId,
+          selectedDoorId,
+          selectedSegment,
+          isDrawingWall,
+          hasRoomOutline: !!selectedRoom?.roomShell?.points?.length,
+        });
+        // Furniture and doors get picked from panel buttons too (the library,
+        // the mobile sheet), so their delete runs before the "focus is on a
+        // control" bail-out - the exemption undo/redo and R already have. The
+        // wall meanings stay behind it, exactly as before.
+        if (target === 'furniture') {
+          e.preventDefault();
+          handleFurnitureDelete();
+          return;
+        }
+        if (target === 'door') {
+          e.preventDefault();
+          handleDoorDelete();
+          return;
+        }
+        if (isEditable) return;
+        if (target === 'wallPoint') {
+          e.preventDefault();
+          deleteSelectedWallPoint();
+          return;
+        }
+        if (target === 'lastDrawnPoint') {
+          e.preventDefault();
+          removeLastPoint();
+        }
+        return;
+      }
+
       if (isEditable) return;
 
       if (e.key === 'Escape') {
@@ -720,7 +1459,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       }
       if (e.key === 'a' || e.key === 'A') {
         e.preventDefault();
-        setIsDrawingWall((prev) => !prev);
+        if (activeBasicShape) {
+          setActiveBasicShape(null);
+          setIsDrawingWall(true);
+        } else {
+          setIsDrawingWall((prev) => !prev);
+        }
         return;
       }
       if (e.key === 'Enter') {
@@ -730,23 +1474,23 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         }
         return;
       }
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (!selectedRoom?.roomShell?.points?.length) return;
-        e.preventDefault();
-        if (selectedSegment !== null) {
-          deleteSelectedWallPoint();
-          return;
-        }
-        removeLastPoint();
-      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [
+    canRotateLayout,
     deleteSelectedWallPoint,
     handleCloseLoop,
+    handleDoorDelete,
+    handleFurnitureDelete,
+    handleRedo,
+    handleUndo,
     isDrawingWall,
+    activeBasicShape,
     removeLastPoint,
+    rotateLayoutBy,
+    selectedDoorId,
+    selectedFurnitureId,
     selectedRoom?.roomShell?.points,
     selectedSegment,
     setIsDrawingWall,
@@ -772,6 +1516,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const adjustSegmentLength = (meters: number) => {
     if (selectedSegment === null || !selectedRoom?.roomShell?.points) return;
+    if (isSegmentLocked(selectedRoom.roomShell, selectedSegment)) return;
     const pts = selectedRoom.roomShell.points;
     if (pts.length < 2) return;
     const start = pts[selectedSegment];
@@ -802,6 +1547,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const offsetSegmentNormal = (meters: number) => {
     if (selectedSegment === null || !selectedRoom?.roomShell?.points) return;
+    if (isSegmentLocked(selectedRoom.roomShell, selectedSegment)) return;
     const pts = selectedRoom.roomShell.points;
     if (pts.length < 2) return;
     const aIdx = selectedSegment;
@@ -987,6 +1733,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const insertPointOnSegment = useCallback((segmentIndex: number, point?: { x: number; y: number }) => {
     if (!selectedRoom?.roomShell?.points) return;
     if (isDrawingWall || isDoorPlacementMode) return;
+    if (isSegmentLocked(selectedRoom.roomShell, segmentIndex)) return;
     const pts = selectedRoom.roomShell.points;
     if (pts.length < 2) return;
     const a = pts[segmentIndex];
@@ -1002,9 +1749,16 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const insertIndex = segmentIndex === pts.length - 1 ? pts.length : segmentIndex + 1;
     const next = [...pts];
     next.splice(insertIndex, 0, snapped);
-    handlePointsChange(next);
-    setSelectedSegment(segmentIndex);
-  }, [selectedRoom, isDrawingWall, isDoorPlacementMode, snapPointToGrid, handlePointsChange]);
+    // Splitting shifts every later wall index up by one, so the index-anchored
+    // locks and doors have to be carried across with it.
+    const segmentLength = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const splitRatio = Math.hypot(snapped.x - a.x, snapped.y - a.y) / segmentLength;
+    handlePointsChange(next, {
+      lockedSegments: remapLockedSegmentsForSplit(selectedRoom.roomShell.lockedSegments, segmentIndex),
+      doors: remapDoorsForSplit(selectedRoom.doors, segmentIndex, splitRatio),
+    });
+    selectEntity({ kind: 'segment', index: segmentIndex });
+  }, [selectedRoom, isDrawingWall, isDoorPlacementMode, selectEntity, snapPointToGrid, handlePointsChange]);
 
   const handleCanvasMove = (pt: { x: number; y: number }) => {
     setCursorPos(pt);
@@ -1040,7 +1794,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       const adjDx = snappedTarget.x - endpointDrag.base[targetIdx].x;
       const adjDy = snappedTarget.y - endpointDrag.base[targetIdx].y;
       next[targetIdx] = { x: endpointDrag.base[targetIdx].x + adjDx, y: endpointDrag.base[targetIdx].y + adjDy };
-      handlePointsChange(next);
+      handlePointsChange(next, { coalesceKey: `points:endpoint-drag:${endpointDrag.segment}:${endpointDrag.endpoint}` });
       return;
     }
 
@@ -1058,7 +1812,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       const snappedB = snapPointToGrid({ x: segmentDragBase[bIdx].x + dx, y: segmentDragBase[bIdx].y + dy });
       next[aIdx] = snappedA;
       next[bIdx] = snappedB;
-      handlePointsChange(next);
+      handlePointsChange(next, { coalesceKey: `points:segment-drag:${segmentDragIndex}` });
       return;
     }
 
@@ -1068,12 +1822,36 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     }
   };
 
-  const handleSaveRoom = async (): Promise<boolean> => {
+  const hasUnsavedChanges = useMemo(() => {
+    if (!selectedRoom) return false;
+    const saved = savedRooms[selectedRoom.id];
+    if (!saved) return false;
+    return roomSignature(saved) !== roomSignature(selectedRoom);
+  }, [savedRooms, selectedRoom]);
+
+  const handleSaveRoom = useCallback(async (): Promise<boolean> => {
     if (!selectedRoom) return false;
     setSaving(true);
     try {
-      const result = await updateRoom(selectedRoom.id, selectedRoom);
+      // Land the plan on the origin whenever the walls have moved since the
+      // last save, so a room drawn far from (0,0) does not leave the grid, the
+      // cursor read-out and the pan resets meaningless. Scoped to outline edits
+      // on purpose: a save that only nudged furniture or retuned the sensor
+      // must never slide the whole plan out from under the user. Existing
+      // rooms therefore migrate lazily, and only on a save they initiated.
+      const roomToSave =
+        (outlineChangedSinceSave(selectedRoom, savedRooms[selectedRoom.id]) && centerLayout()) ||
+        selectedRoom;
+
+      // The backend only removes a stored outline on an explicit `roomShell: null`,
+      // so an intentional save of an emptied room has to say so.
+      const payload: RoomUpdatePayload = {
+        ...roomToSave,
+        roomShell: roomToSave.roomShell?.points?.length ? roomToSave.roomShell : null,
+      };
+      const result = await updateRoom(selectedRoom.id, payload);
       setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? result.room : r)));
+      setSavedRooms((prev) => ({ ...prev, [result.room.id]: result.room }));
       onWizardProgress?.({ outlineDone: true, placementDone: true });
       setError(null);
       return true;
@@ -1083,19 +1861,76 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     } finally {
       setSaving(false);
     }
-  };
+  }, [centerLayout, onWizardProgress, savedRooms, selectedRoom]);
 
-  const navigateWithSave = useCallback(
-    async (view: 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard') => {
-      if (!onNavigate) return;
-      if (selectedRoom) {
-        const saved = await handleSaveRoom();
-        if (!saved) return;
+  const leave = useCallback(
+    (target: PendingLeave) => {
+      if (target.type === 'back') {
+        onBack?.();
+        return;
       }
-      onNavigate(view);
+      onNavigate?.(target.view);
     },
-    [onNavigate, selectedRoom, handleSaveRoom]
+    [onBack, onNavigate]
   );
+
+  // Leaving the Room Builder never writes silently: unsaved edits (including
+  // deleted walls) prompt for Save / Discard / Cancel first.
+  const requestLeave = useCallback(
+    (target: PendingLeave) => {
+      if (target.type === 'navigate' && !onNavigate) return;
+      if (target.type === 'back' && !onBack) return;
+      if (selectedRoom && hasUnsavedChanges) {
+        setPendingLeave(target);
+        return;
+      }
+      leave(target);
+    },
+    [hasUnsavedChanges, leave, onBack, onNavigate, selectedRoom]
+  );
+
+  const navigateTo = useCallback(
+    (view: RoomBuilderView) => requestLeave({ type: 'navigate', view }),
+    [requestLeave]
+  );
+
+  const handlePendingSaveAndLeave = useCallback(async () => {
+    const target = pendingLeave;
+    if (!target) return;
+    const saved = await handleSaveRoom();
+    if (!saved) return; // keep the prompt open; the error toast explains why
+    setPendingLeave(null);
+    leave(target);
+  }, [handleSaveRoom, leave, pendingLeave]);
+
+  const handlePendingDiscardAndLeave = useCallback(() => {
+    const target = pendingLeave;
+    if (!target) return;
+    if (selectedRoom) {
+      const saved = savedRooms[selectedRoom.id];
+      if (saved) {
+        setRooms((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
+      }
+      // Discarded edits must not be reachable through Undo afterwards.
+      historyRef.current.delete(selectedRoom.id);
+      endHistoryGesture();
+      syncHistoryAvailability(selectedRoom.id);
+    }
+    setClearedPoints(null);
+    setPendingLeave(null);
+    leave(target);
+  }, [endHistoryGesture, leave, pendingLeave, savedRooms, selectedRoom, syncHistoryAvailability]);
+
+  // Reloading or closing the tab also discards unsaved room edits - warn first.
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedChanges]);
 
   const handleAutoZoom = useCallback((room: RoomConfig | null) => {
     if (!room?.roomShell?.points?.length) {
@@ -1141,7 +1976,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     setSelectedRoomId(roomId);
     const room = rooms.find((candidate) => candidate.id === roomId);
     if (room?.profileId) setSelectedProfileId(room.profileId);
-  }, [rooms]);
+    // Keep the rest of the app on the same room, so `initialRoomId` cannot pull
+    // the builder back and the choice survives navigating away and back.
+    onRoomChange?.(roomId, room?.profileId ?? selectedProfileId);
+  }, [onRoomChange, rooms, selectedProfileId]);
 
   const toggleMobileToolsSheet = () => {
     setShowSettings(false);
@@ -1170,6 +2008,32 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       {error && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
           {error}
+        </div>
+      )}
+
+      {/* Keyboard hint: says out loud what a disabled button would have shown. */}
+      {transientHint && (
+        <div
+          role="status"
+          className="absolute top-20 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-amber-500/50 bg-amber-500/10 backdrop-blur px-6 py-3 text-amber-100 shadow-xl animate-in slide-in-from-top-4 fade-in"
+        >
+          {transientHint}
+        </div>
+      )}
+
+      {showBasicShapes && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+          <BasicRoomShapesPicker
+            units={displayUnits}
+            onApply={handleApplyBasicShape}
+            onDrawOwn={() => {
+              setShowBasicShapes(false);
+              setActiveBasicShape(null);
+              setIsDoorPlacementMode(false);
+              setIsDrawingWall(true);
+            }}
+            onCancel={() => setShowBasicShapes(false)}
+          />
         </div>
       )}
 
@@ -1233,12 +2097,107 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         </div>
       )}
 
+      {/* Unsaved changes prompt - shown instead of silently saving when leaving */}
+      {pendingLeave && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setPendingLeave(null)} />
+          <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl animate-in zoom-in-95 fade-in duration-200">
+            <div className="p-6">
+              <h3 className="text-xl font-bold text-white text-center mb-2">Unsaved changes</h3>
+              <p className="text-sm text-slate-300 text-center mb-5">
+                This room has changes that have not been saved yet. Save them before leaving, or discard them and keep
+                the last saved version of the room.
+              </p>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handlePendingSaveAndLeave}
+                  disabled={saving}
+                  className="w-full rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl disabled:opacity-50 active:scale-95"
+                >
+                  {saving ? 'Saving...' : 'Save and leave'}
+                </button>
+                <button
+                  onClick={handlePendingDiscardAndLeave}
+                  disabled={saving}
+                  className="w-full rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 text-sm font-semibold text-rose-100 transition-all hover:bg-rose-600/20 disabled:opacity-50 active:scale-95"
+                >
+                  Discard changes
+                </button>
+                <button
+                  onClick={() => setPendingLeave(null)}
+                  disabled={saving}
+                  className="w-full rounded-xl border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 disabled:opacity-50 active:scale-95"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear walls confirmation */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowClearConfirm(false)} />
+          <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl animate-in zoom-in-95 fade-in duration-200">
+            <div className="p-6">
+              <div className="flex justify-center mb-4">
+                <div className="w-12 h-12 rounded-full bg-rose-500/20 flex items-center justify-center">
+                  <span className="text-xl">🗑️</span>
+                </div>
+              </div>
+              <h3 className="text-xl font-bold text-white text-center mb-2">Delete all walls?</h3>
+              <p className="text-sm text-slate-300 text-center mb-5">
+                This removes the entire outline of {selectedRoom?.name ?? 'this room'}. Undo (Ctrl/Cmd+Z) can bring it
+                back while you stay on this page - after a reload, only the saved version on disk can.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="flex-1 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-semibold text-slate-200 transition-all hover:bg-slate-700 active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmClear}
+                  className="flex-1 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-rose-500/30 transition-all hover:shadow-xl active:scale-95"
+                >
+                  Delete walls
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-session recovery for a cleared outline */}
+      {clearedPoints?.length && !(selectedRoom?.roomShell?.points?.length) ? (
+        <div className="absolute bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-amber-500/40 bg-slate-900/95 px-4 py-3 text-sm text-amber-100 shadow-2xl backdrop-blur md:bottom-6">
+          <span>Walls cleared. Nothing is saved until you press Save Room.</span>
+          <button
+            type="button"
+            onClick={restoreClearedPoints}
+            className="rounded-lg border border-amber-500/50 bg-amber-500/20 px-3 py-1.5 text-xs font-bold text-amber-100 transition-all hover:bg-amber-500/30 active:scale-95"
+          >
+            Restore walls
+          </button>
+          <button
+            type="button"
+            onClick={() => setClearedPoints(null)}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition-all hover:bg-slate-800 active:scale-95"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
       <div className="md:hidden">
         <CanvasTopBar
           left={onBack && !onNavigate ? (
             <button
               type="button"
-              onClick={onBack}
+              onClick={() => requestLeave({ type: 'back' })}
               className="min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-slate-100"
             >
               Back
@@ -1273,7 +2232,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               disabled={saving || !selectedRoom}
               className="min-h-[40px] rounded-lg bg-aqua-600 px-3 text-xs font-bold text-white shadow-lg shadow-aqua-500/20 disabled:opacity-50"
             >
-              {saving ? 'Saving' : 'Save'}
+              {saving ? 'Saving' : hasUnsavedChanges ? 'Save •' : 'Save'}
             </button>
           )}
         />
@@ -1282,7 +2241,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
       {/* Navigation (top left) */}
       {onBack && !onNavigate && (
         <button
-          onClick={onBack}
+          onClick={() => requestLeave({ type: 'back' })}
           className="absolute top-6 left-6 z-40 hidden group rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm font-semibold text-slate-100 shadow-lg transition-all hover:border-slate-600 hover:bg-slate-800 hover:shadow-xl active:scale-95 md:block"
         >
           <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span> Back
@@ -1310,36 +2269,43 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               <div className="absolute top-14 left-0 z-50 min-w-[200px] rounded-xl border border-slate-700/50 bg-slate-900/95 backdrop-blur shadow-2xl overflow-hidden">
                 <div className="p-2 space-y-1">
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('liveDashboard');
+                    onClick={() => {
                       setShowNavMenu(false);
+                      navigateTo('liveDashboard');
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
                   >
                     📡 Live Dashboard
                   </button>
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('wizard');
+                    onClick={() => {
                       setShowNavMenu(false);
+                      navigateTo('wizard');
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
                   >
                     ➕ Add Device
                   </button>
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('zoneEditor');
+                    onClick={() => {
+                      if (!zoneEditingSupported) return;
                       setShowNavMenu(false);
+                      navigateTo('zoneEditor');
                     }}
-                    className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
+                    disabled={!zoneEditingSupported}
+                    className={`w-full text-left px-4 py-2.5 text-sm font-medium rounded-lg transition-all ${
+                      zoneEditingSupported
+                        ? 'text-slate-100 hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95'
+                        : 'text-slate-500 cursor-not-allowed'
+                    }`}
+                    title={zoneEditingSupported ? '' : zoneEditorDisabledReason}
                   >
-                    📐 Zone Editor
+                    📐 Zone Editor {!zoneEditingSupported && '(Not Available)'}
                   </button>
                   <button
-                    onClick={async () => {
-                      await navigateWithSave('settings');
+                    onClick={() => {
                       setShowNavMenu(false);
+                      navigateTo('settings');
                     }}
                     className="w-full text-left px-4 py-2.5 text-sm font-medium text-slate-100 rounded-lg transition-all hover:bg-aqua-600/20 hover:text-aqua-400 active:scale-95"
                   >
@@ -1358,8 +2324,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         disabled={saving}
         className={`absolute top-6 z-40 hidden rounded-xl bg-gradient-to-r from-aqua-600 to-aqua-500 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-aqua-500/30 transition-all hover:shadow-xl hover:shadow-aqua-500/40 disabled:opacity-50 active:scale-95 md:block ${desktopEditorOpen ? 'right-[22rem]' : 'right-6'}`}
       >
-        {saving ? 'Saving...' : 'Save Room'}
+        {saving ? 'Saving...' : hasUnsavedChanges ? 'Save Room •' : 'Save Room'}
       </button>
+      {hasUnsavedChanges && !saving && (
+        <div
+          className={`pointer-events-none absolute top-[4.25rem] z-40 hidden rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 backdrop-blur md:block ${
+            desktopEditorOpen ? 'right-[22rem]' : 'right-6'
+          }`}
+        >
+          Unsaved changes
+        </div>
+      )}
 
       {/* Canvas Content - Full Page */}
       {!selectedRoom && (
@@ -1389,9 +2364,32 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             setZoom((z) => Math.min(5, Math.max(0.1, z + delta)));
           }}
         >
+                {/*
+                  Rotation spin: the geometry is already rotated by the time this
+                  renders, so the wrapper starts the canvas back at the old
+                  orientation and turns it into place. `getScreenCTM` keeps
+                  pointer maths honest through the transform, but interacting
+                  with a moving plan is never what anyone means, so the wrapper
+                  swallows pointer events for the duration.
+                */}
+                <div
+                  className={`h-full w-full ${rotationSpin ? 'room-rotate-spin pointer-events-none' : ''}`}
+                  style={
+                    rotationSpin
+                      ? ({ '--room-rotate-from': `${rotationSpin.fromDeg}deg` } as React.CSSProperties)
+                      : undefined
+                  }
+                  onAnimationEnd={(e) => {
+                    // Animation events bubble, so ignore anything the canvas itself animates.
+                    if (e.target !== e.currentTarget) return;
+                    setRotationSpin((current) => (current?.id === rotationSpin?.id ? null : current));
+                  }}
+                >
                 <RoomCanvas
+                  deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
                   points={selectedRoom.roomShell?.points ?? []}
-                  onChange={handlePointsChange}
+                  // The canvas emits this while a corner point is being dragged.
+                  onChange={(nextPoints) => handlePointsChange(nextPoints, { coalesceKey: 'points:vertex-drag' })}
                   onAddPoint={undefined}
                   onCanvasClick={handleCanvasClick}
                   onCanvasMove={handleCanvasMove}
@@ -1404,8 +2402,30 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     setCursorDelta(null);
                     handleDoorDragEnd();
                     setIsCanvasDragging(false);
+                    endHistoryGesture();
                   }}
                   onDragStateChange={setIsCanvasDragging}
+                  lockShell={!!activeBasicShape}
+                  lockedSegments={lockedWallSegments}
+                  // Padlocks are an editing affordance, so only the builder shows them.
+                  showLockIndicators
+                  showAllWallLengthLabels={!!activeBasicShape}
+                  onWallLengthChange={activeBasicShape ? (segmentIndex, lengthMm) => {
+                    try {
+                      const resized = resizeBasicRoomShapeWall(activeBasicShape, segmentIndex, lengthMm);
+                      // The shape regenerates axis-aligned, so put back however
+                      // far the plan has been rotated since it was placed.
+                      const points = rotatePointsKeepingBoundsCenter(resized.points, basicShapeRotationDeg);
+                      setActiveBasicShape(resized.selection);
+                      handlePointsChange(points);
+                      setPanOffsetMm({ x: 0, y: 0 });
+                      const maxDimension = Math.max(
+                        Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+                        Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+                      );
+                      setZoom(Math.min(5, Math.max(0.1, (0.8 * rangeMm) / Math.max(100, maxDimension + 1000))));
+                    } catch { /* Invalid dimensions leave the last valid centered outline unchanged. */ }
+                  } : undefined}
                   rangeMm={rangeMm}
                   gridSpacingMm={1000}
                   snapGridMm={snapGridMm}
@@ -1423,6 +2443,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     }
                   }
                   onDeviceChange={(placement) => updateDevicePlacement(placement)}
+                  // Clicking the device without moving it is a selection: open its
+                  // settings, the same way clicking furniture opens the furniture panel.
+                  onDeviceClick={() => {
+                    selectEntity({ kind: 'none' });
+                    setShowFurnitureLibrary(false);
+                    setActiveMobileSheet(null);
+                    setSettingsTab('device');
+                    setShowSettings(true);
+                  }}
                   fieldOfViewDeg={coverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees}
                   maxRangeMeters={effectiveCoverageMaxRangeMeters}
                   deviceIconUrl={deviceIconUrl}
@@ -1435,9 +2464,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   selectedSegment={selectedSegment}
                   onSegmentHover={(idx) => setHoveredSegment(idx)}
                   onSegmentSelect={(idx) => {
-                    setSelectedSegment(idx);
-                    setSelectedDoorId(null);
-                    setSelectedFurnitureId(null);
+                    selectEntity(idx === null ? { kind: 'none' } : { kind: 'segment', index: idx });
                     setSegmentDragIndex(null);
                     setSegmentDragStart(null);
                     setSegmentDragBase(null);
@@ -1446,6 +2473,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   onSegmentDragStart={(idx, start) => {
                     const pts = selectedRoom?.roomShell?.points ?? [];
                     if (!pts.length) return;
+                    // Dragging a wall moves both of its corners, and with them
+                    // the neighbouring walls - refuse if any of that is locked.
+                    if (
+                      isSegmentLocked(selectedRoom?.roomShell, idx) ||
+                      isVertexLocked(selectedRoom?.roomShell, idx, pts.length) ||
+                      isVertexLocked(selectedRoom?.roomShell, (idx + 1) % pts.length, pts.length)
+                    ) return;
                     setSegmentDragIndex(idx);
                     setSegmentDragStart(start);
                     setSegmentDragBase(pts);
@@ -1454,6 +2488,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   onEndpointDragStart={(segment, endpoint, start) => {
                     const pts = selectedRoom?.roomShell?.points ?? [];
                     if (!pts.length) return;
+                    const cornerIdx = endpoint === 'start' ? segment : (segment + 1) % pts.length;
+                    // The corner is shared with the neighbouring wall.
+                    if (isVertexLocked(selectedRoom?.roomShell, cornerIdx, pts.length)) return;
                     setEndpointDrag({ segment, endpoint, start, base: pts });
                     setSegmentDragIndex(null);
                     setSegmentDragStart(null);
@@ -1470,18 +2507,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   furniture={selectedRoom.furniture ?? []}
                   selectedFurnitureId={selectedFurnitureId}
                   onFurnitureSelect={(id) => {
-                    setSelectedFurnitureId(id);
-                    setSelectedDoorId(null);
-                    setSelectedSegment(null);
+                    selectEntity(id === null ? { kind: 'none' } : { kind: 'furniture', id });
                     setShowFurnitureLibrary(false);
                   }}
                   onFurnitureChange={handleFurnitureChange}
                   doors={selectedRoom.doors ?? []}
                   selectedDoorId={selectedDoorId}
                   onDoorSelect={(id) => {
-                    setSelectedDoorId(id);
-                    setSelectedFurnitureId(null);
-                    setSelectedSegment(null);
+                    selectEntity(id === null ? { kind: 'none' } : { kind: 'door', id });
                   }}
                   onDoorChange={handleDoorChange}
                   isDoorPlacementMode={isDoorPlacementMode}
@@ -1623,6 +2656,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                     );
                   }}
                 />
+                </div>
           {/* Floating Room Selector (top center) */}
           <div className="absolute top-6 left-1/2 z-40 hidden -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-2.5 text-sm text-slate-200 shadow-xl md:flex">
             <span className="text-slate-400 font-medium">Room:</span>
@@ -1646,12 +2680,22 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
           <div className="absolute top-24 left-6 z-40 hidden rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-3 shadow-xl md:block">
             <div className="flex flex-col gap-2 text-sm">
               <button
+                className="rounded-xl border border-aqua-600/50 bg-aqua-600/10 px-4 py-2.5 font-semibold text-aqua-100 shadow-lg transition-all hover:bg-aqua-600/20"
+                onClick={() => setShowBasicShapes(true)}
+                disabled={!selectedRoom}
+              >
+                ▭ Basic Shapes
+              </button>
+              <button
                 className={`rounded-xl border px-4 py-2.5 font-semibold shadow-lg transition-all active:scale-95 ${
                   isDrawingWall
                     ? 'border-aqua-600/50 bg-aqua-600/20 text-aqua-100 hover:bg-aqua-600/30'
                     : 'border-slate-700/50 bg-slate-800/50 text-slate-200 hover:border-slate-600'
                 }`}
-                onClick={() => setIsDrawingWall((prev) => !prev)}
+                onClick={() => {
+                  if (activeBasicShape) setActiveBasicShape(null);
+                  setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+                }}
               >
                 {isDrawingWall ? '✕ Stop (Esc)' : '✏️ Add wall (A)'}
               </button>
@@ -1662,12 +2706,56 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               >
                 ✓ Finish (Enter)
               </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-3 py-2.5 font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  title="Undo the last change (Ctrl/Cmd+Z)"
+                >
+                  ↶ Undo
+                </button>
+                <button
+                  className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-3 py-2.5 font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  title="Redo (Ctrl/Cmd+Shift+Z)"
+                >
+                  ↷ Redo
+                </button>
+              </div>
+              {/*
+                Rotate sits directly under Undo/Redo: it is the same kind of
+                whole-plan action, and having Undo right above it is the point.
+              */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayoutBy(-ROTATION_STEP_DEG)}
+                  disabled={!canRotateLayout}
+                  title={`Rotate the floor plan 90° anti-clockwise (Shift+R) — ${describeRotationScope(rotationScope)}`}
+                >
+                  ↺ 90°
+                </button>
+                <button
+                  className="rounded-xl border border-sky-600/50 bg-sky-600/10 px-3 py-2.5 font-semibold text-sky-100 shadow-lg transition-all hover:bg-sky-600/20 disabled:opacity-40 active:scale-95"
+                  onClick={() => rotateLayoutBy(ROTATION_STEP_DEG)}
+                  disabled={!canRotateLayout}
+                  title={`Rotate the floor plan 90° clockwise (R) — ${describeRotationScope(rotationScope)}`}
+                >
+                  ↻ 90°
+                </button>
+              </div>
               <button
-                className="rounded-xl border border-amber-600/50 bg-amber-600/10 px-4 py-2.5 font-semibold text-amber-100 shadow-lg transition-all hover:bg-amber-600/20 disabled:opacity-40 active:scale-95"
-                onClick={removeLastPoint}
-                disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+                type="button"
+                className="-mt-1 rounded-lg px-1 text-left text-[11px] font-medium text-slate-400 transition hover:text-sky-200"
+                onClick={() => {
+                  setSettingsTab('layout');
+                  setShowSettings(true);
+                }}
+                title="Choose what a rotation moves"
               >
-                ↶ Undo (Del)
+                Rotating: {describeRotationScope(rotationScope)} · change
               </button>
               <button
                 className="rounded-xl border border-rose-600/50 bg-rose-600/10 px-4 py-2.5 font-semibold text-rose-100 shadow-lg transition-all hover:bg-rose-600/20 disabled:opacity-40 active:scale-95"
@@ -1687,7 +2775,10 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 }`}
                 onClick={() => {
                   setShowFurnitureLibrary((v) => !v);
-                  setSelectedFurnitureId(null); // Close furniture settings when opening library
+                  // Close every open editor, not just the furniture one: a wall
+                  // segment left selected behind the library would go on
+                  // answering Del.
+                  selectEntity({ kind: 'none' });
                 }}
                 disabled={!selectedRoom}
               >
@@ -1760,10 +2851,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-4 gap-1 rounded-lg border border-slate-700/60 bg-slate-950/50 p-1">
+                      <div className="grid grid-cols-5 gap-1 rounded-lg border border-slate-700/60 bg-slate-950/50 p-1">
                         {[
                           ['display', 'Display'],
                           ['device', 'Device'],
+                          ['layout', 'Layout'],
                           ['canvas', 'Canvas'],
                           ['floor', 'Floor'],
                         ].map(([tab, label]) => (
@@ -1782,12 +2874,170 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         ))}
                       </div>
 
+                      {settingsTab === 'layout' && (
+                      <div className="space-y-1">
+                        <div className="font-semibold text-slate-200">Rotate floor plan</div>
+                        <p className="text-[11px] leading-relaxed text-slate-400">
+                          Turns the whole plan in one single step. Use this instead of redrawing a room that came out the wrong way round
+                        </p>
+
+                        <div className="flex items-center gap-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          What moves<HelpTooltip id="room-layout-scope-help">Choose whether rotation moves the sensor with the plan or keeps the sensor fixed.</HelpTooltip>
+                        </div>
+                        <div className="space-y-1">
+                          {([
+                            {
+                              scope: 'layout' as RotationScope,
+                              detail: 'Turns the plan and the sensor together. Zones, targets and the heatmap stay exactly where they are on the walls. Pick this to simply view the room the other way up.',
+                            },
+                            {
+                              scope: 'roomOnly' as RotationScope,
+                              detail: 'Leaves the sensor exactly where it is and swings the drawing around it. Pick this when the sensor reports targets at the wrong angle for the room you drew.',
+                            },
+                          ]).map(({ scope, detail }) => (
+                            <button
+                              key={scope}
+                              type="button"
+                              aria-describedby="room-layout-scope-help"
+                              aria-pressed={rotationScope === scope}
+                              onClick={() => setRotationScope(scope)}
+                              className={`w-full rounded-md border px-2 py-1.5 text-left transition ${
+                                rotationScope === scope
+                                  ? 'border-aqua-500 bg-aqua-600/10 text-aqua-100'
+                                  : 'border-slate-700 text-slate-200 hover:border-slate-600'
+                              }`}
+                            >
+                              <div className="text-xs font-semibold">{describeRotationScope(scope)}</div>
+                              <div className="text-[11px] leading-relaxed text-slate-400">{detail}</div>
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Turn
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => rotateLayoutBy(-ROTATION_STEP_DEG)}
+                            disabled={!canRotateLayout}
+                            title="Shift+R"
+                          >
+                            ↺ 90°
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => rotateLayoutBy(ROTATION_STEP_DEG)}
+                            disabled={!canRotateLayout}
+                            title="R"
+                          >
+                            ↻ 90°
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => rotateLayoutBy(180)}
+                            disabled={!canRotateLayout}
+                            title="Turn the plan end to end"
+                          >
+                            ↻ 180°
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-2">
+                          <label className="flex items-center gap-2">
+                            <span className="inline-flex w-14 items-center gap-1 text-xs">Custom<HelpTooltip id="room-layout-custom-help">Turns the selected layout scope by a custom angle from minus 180 to 180 degrees.</HelpTooltip></span>
+                            <input
+                              aria-describedby="room-layout-custom-help"
+                              type="number"
+                              className="w-20 rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              value={customRotationInput}
+                              onChange={(e) => setCustomRotationInput(e.target.value)}
+                              step={1}
+                              min={-180}
+                              max={180}
+                            />
+                            <span className="text-slate-400">deg</span>
+                          </label>
+                          <button
+                            type="button"
+                            className="ml-auto rounded-md border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => {
+                              const angle = Number(customRotationInput);
+                              if (!Number.isFinite(angle) || normalizeSignedAngle(angle) === 0) return;
+                              rotateLayoutBy(angle);
+                            }}
+                            disabled={
+                              !canRotateLayout ||
+                              // `Number('')` is 0, so a blank field would look applicable.
+                              customRotationInput.trim() === '' ||
+                              !Number.isFinite(Number(customRotationInput)) ||
+                              normalizeSignedAngle(Number(customRotationInput)) === 0
+                            }
+                          >
+                            Apply
+                          </button>
+                        </div>
+
+                        {lockedObjectCount > 0 && (
+                          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] leading-relaxed text-amber-200">
+                            {lockedObjectCount} pinned {lockedObjectCount === 1 ? 'object' : 'objects'} will be
+                            rotated. Press Undo (Ctrl/Cmd+Z) to revert changes.
+                          </div>
+                        )}
+                        {!canRotateLayout && (
+                          <div className="text-[11px] text-slate-400">Draw a wall outline first.</div>
+                        )}
+
+                        <div className="mt-3 border-t border-slate-700/60 pt-3">
+                          <div className="flex items-center gap-1 font-semibold text-slate-200">
+                            Position on grid<HelpTooltip id="room-layout-center-help">Moves the whole plan - walls, doors, furniture and the sensor together - so the middle of the room sits on the grid origin (0,0). Nothing moves relative to anything else, and zones stay where they are on the walls.</HelpTooltip>
+                          </div>
+                          <p className="text-[11px] leading-relaxed text-slate-400">
+                            A room drawn far from the origin makes the grid's centre lines and the cursor
+                            read-out meaningless. Rooms are re-centred automatically when you save a change to
+                            the walls; use this to move one whose walls you are not editing
+                          </p>
+                          <button
+                            type="button"
+                            aria-describedby="room-layout-center-help"
+                            className="mt-2 w-full rounded-md border border-slate-700 px-2 py-1.5 text-[11px] font-semibold text-slate-100 transition hover:border-aqua-500 disabled:opacity-40"
+                            onClick={() => {
+                              if (centerLayout()) showTransientHint('Room centred on the grid origin. Save to keep it.');
+                            }}
+                            disabled={!canCenterLayout || isLayoutCentered}
+                            title={
+                              isLayoutCentered
+                                ? 'The room is already centred on (0,0)'
+                                : 'Move the room onto the grid origin'
+                            }
+                          >
+                            Center room on origin
+                          </button>
+                          {isLayoutCentered && (
+                            <div className="mt-1 text-[11px] text-slate-400">
+                              Already centred on (0,0).
+                            </div>
+                          )}
+                          {lockedObjectCount > 0 && !isLayoutCentered && canCenterLayout && (
+                            <div className="mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] leading-relaxed text-amber-200">
+                              {lockedObjectCount} pinned {lockedObjectCount === 1 ? 'object' : 'objects'} will be
+                              moved. Press Undo (Ctrl/Cmd+Z) to revert changes.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      )}
+
                       {settingsTab === 'canvas' && (
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Canvas</div>
                         <label className="flex items-center gap-2">
-                          <span className="w-16">Snap (mm)</span>
+                          <span className="inline-flex w-16 items-center gap-1">Snap (mm)<HelpTooltip id="room-canvas-snap-help">Rounds placed and moved objects to this grid size in millimetres. Set it to zero to turn snapping off.</HelpTooltip></span>
                           <input
+                            aria-describedby="room-canvas-snap-help"
                             type="number"
                             className="w-20 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                             value={snapGridMm}
@@ -1812,6 +3062,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </div>
                         <div className="flex gap-1">
                           <button
+                            type="button"
+                            aria-describedby="room-canvas-units-help"
                             className={`rounded-md border px-2 py-1 ${
                               displayUnits === 'metric' ? 'border-aqua-500 text-aqua-100' : 'border-slate-700 text-slate-200'
                             }`}
@@ -1820,6 +3072,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             Metric
                           </button>
                           <button
+                            type="button"
+                            aria-describedby="room-canvas-units-help"
                             className={`rounded-md border px-2 py-1 ${
                               displayUnits === 'imperial' ? 'border-aqua-500 text-aqua-100' : 'border-slate-700 text-slate-200'
                             }`}
@@ -1827,19 +3081,47 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           >
                             Imperial
                           </button>
+                          <HelpTooltip id="room-canvas-units-help">Changes how measurements are displayed. Stored room coordinates remain in millimetres.</HelpTooltip>
                         </div>
                       </div>
                       )}
 
                       {settingsTab === 'device' && (
                       <div className="space-y-1">
-                        <div className="font-semibold text-slate-200">Device placement</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="font-semibold text-slate-200">Device placement</div>
+                          <button
+                            type="button"
+                            aria-describedby="room-device-lock-help"
+                            aria-pressed={devicePositionLocked}
+                            title={devicePositionLocked
+                              ? 'Unlock the device position'
+                              : 'Lock the device position. Rotation stays adjustable.'}
+                            onClick={() => updateDevicePlacement({ locked: !devicePositionLocked })}
+                            className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+                              devicePositionLocked
+                                ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                : 'border-slate-700 text-slate-200 hover:border-amber-400'
+                            }`}
+                          >
+                            {devicePositionLocked ? '🔒 Position locked' : '🔓 Lock position'}
+                          </button>
+                          <HelpTooltip id="room-device-lock-help">Prevents dragging or editing the device position while leaving rotation, mounting and coverage adjustable.</HelpTooltip>
+                        </div>
+                        {devicePositionLocked && (
+                          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-200">
+                            Position is locked. The device cannot be dragged on the canvas. Rotation,
+                            mounting and coverage are still adjustable.
+                          </div>
+                        )}
                         <div className="grid grid-cols-2 gap-2">
                           <label className="flex items-center gap-2">
-                            <span className="w-6">X</span>
+                            <span className="inline-flex w-6 items-center gap-1">X<HelpTooltip id="room-device-x-help">Sets the device horizontal position in millimetres relative to the room origin.</HelpTooltip></span>
                             <input
+                              aria-describedby="room-device-x-help"
                               type="number"
-                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              disabled={devicePositionLocked}
+                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-40"
                               value={selectedRoom?.devicePlacement?.x ?? 0}
                               onChange={(e) => {
                                 updateDevicePlacement({ x: Number(e.target.value) || 0 });
@@ -1847,10 +3129,12 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             />
                           </label>
                           <label className="flex items-center gap-2">
-                            <span className="w-6">Y</span>
+                            <span className="inline-flex w-6 items-center gap-1">Y<HelpTooltip id="room-device-y-help">Sets the device vertical position in millimetres relative to the room origin.</HelpTooltip></span>
                             <input
+                              aria-describedby="room-device-y-help"
                               type="number"
-                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                              disabled={devicePositionLocked}
+                              className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none disabled:opacity-40"
                               value={selectedRoom?.devicePlacement?.y ?? 0}
                               onChange={(e) => {
                                 updateDevicePlacement({ y: Number(e.target.value) || 0 });
@@ -1859,8 +3143,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </label>
                         </div>
                         <label className="flex items-center gap-2">
-                          <span className="w-14">Rotation</span>
+                          <span className="inline-flex w-14 items-center gap-1">Rotation<HelpTooltip id="room-device-rotation-help">Turns the device coverage direction without moving the device.</HelpTooltip></span>
                           <input
+                            aria-describedby="room-device-rotation-help"
                             type="range"
                             min={-180}
                             max={180}
@@ -1885,7 +3170,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             onClick={() => {
                               updateDevicePlacement({ x: 0, y: 0 });
                             }}
-                            disabled={!selectedRoom}
+                            disabled={!selectedRoom || devicePositionLocked}
+                            title={devicePositionLocked ? 'Unlock the device position first' : undefined}
                           >
                             Center
                           </button>
@@ -1901,8 +3187,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <label className="flex items-center gap-2">
-                            <span className="w-14">Mount</span>
+                            <span className="inline-flex w-14 items-center gap-1">Mount<HelpTooltip id="room-device-mount-help">Selects whether the sensor is mounted on a wall or ceiling and applies suitable placement defaults.</HelpTooltip></span>
                             <select
+                              aria-describedby="room-device-mount-help"
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                               value={selectedRoom?.devicePlacement?.mountType ?? 'wall'}
                               onChange={(e) => {
@@ -1919,8 +3206,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             </select>
                           </label>
                           <label className="flex items-center gap-2">
-                            <span className="w-14">Height</span>
+                            <span className="inline-flex w-14 items-center gap-1">Height<HelpTooltip id="room-device-height-help">Sets the sensor height above the floor in metres for coverage projection.</HelpTooltip></span>
                             <input
+                              aria-describedby="room-device-height-help"
                               type="number"
                               min={0}
                               step={0.1}
@@ -1940,8 +3228,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           </label>
                         </div>
                         <label className="flex items-center gap-2">
-                          <span className="w-14">Pitch</span>
+                          <span className="inline-flex w-14 items-center gap-1">Pitch<HelpTooltip id="room-device-pitch-help">Sets the sensor tilt from horizontal toward the floor. Ceiling mounts use 90 degrees.</HelpTooltip></span>
                           <input
+                            aria-describedby="room-device-pitch-help"
                             type="number"
                             min={0}
                             max={90}
@@ -1968,8 +3257,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           {coveragePresets ? (
                             <>
                               <label className="flex items-center gap-2">
-                                <span className="w-14">Sensor</span>
+                                <span className="inline-flex w-14 items-center gap-1">Sensor<HelpTooltip id="room-device-sensor-help">Chooses the field-of-view preset used only for the visual coverage overlay.</HelpTooltip></span>
                                 <select
+                                  aria-describedby="room-device-sensor-help"
                                   className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                                   value={coveragePresetId ?? 'default'}
                                   onChange={(e) => {
@@ -2025,8 +3315,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           {(!coveragePresets || coveragePresetId === 'custom') && (
                             <div className="grid grid-cols-2 gap-2">
                               <label className="flex items-center gap-2">
-                                <span className="w-14">Horiz</span>
+                                <span className="inline-flex w-14 items-center gap-1">Horiz<HelpTooltip id="room-device-horizontal-fov-help">Sets the custom horizontal field of view in degrees for the visual overlay.</HelpTooltip></span>
                                 <input
+                                  aria-describedby="room-device-horizontal-fov-help"
                                   type="number"
                                   min={1}
                                   max={180}
@@ -2044,8 +3335,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                                 />
                               </label>
                               <label className="flex items-center gap-2">
-                                <span className="w-14">Vert</span>
+                                <span className="inline-flex w-14 items-center gap-1">Vert<HelpTooltip id="room-device-vertical-fov-help">Sets the custom vertical field of view in degrees for the visual overlay.</HelpTooltip></span>
                                 <input
+                                  aria-describedby="room-device-vertical-fov-help"
                                   type="number"
                                   min={1}
                                   max={180}
@@ -2072,14 +3364,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-200">Floor Material</div>
                         <label className="flex items-center gap-2">
-                          <span className="w-16">Fill Mode</span>
+                          <span className="inline-flex w-16 items-center gap-1">Fill Mode<HelpTooltip id="room-floor-fill-help">Chooses between the canvas overlay colour and a floor material inside the room outline.</HelpTooltip></span>
                           <select
+                            aria-describedby="room-floor-fill-help"
                             className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                             value={selectedRoom?.roomShellFillMode ?? 'overlay'}
                             onChange={(e) => {
                               if (!selectedRoom) return;
                               const nextRoom: RoomConfig = { ...selectedRoom, roomShellFillMode: e.target.value as 'overlay' | 'material' };
-                              setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                              commitRoom(nextRoom);
                             }}
                           >
                             <option value="overlay">Blue Overlay</option>
@@ -2088,14 +3381,15 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         </label>
                         {selectedRoom?.roomShellFillMode === 'material' && (
                           <label className="flex items-center gap-2">
-                            <span className="w-16">Material</span>
+                            <span className="inline-flex w-16 items-center gap-1">Material<HelpTooltip id="room-floor-material-help">Selects the floor pattern shown inside the room outline.</HelpTooltip></span>
                             <select
+                              aria-describedby="room-floor-material-help"
                               className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
                               value={selectedRoom?.floorMaterial ?? 'none'}
                               onChange={(e) => {
                                 if (!selectedRoom) return;
                                 const nextRoom: RoomConfig = { ...selectedRoom, floorMaterial: e.target.value as any };
-                                setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? nextRoom : r)));
+                                commitRoom(nextRoom);
                               }}
                             >
                               {Object.entries(FLOOR_MATERIALS).map(([key, material]) => (
@@ -2120,10 +3414,14 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           { label: 'Walls', checked: showWalls, onChange: setShowWalls },
                           { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
                           { label: 'Doors', checked: showDoors, onChange: setShowDoors },
-                          { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+                          { label: 'Device marker', checked: showDeviceIcon, onChange: setShowDeviceIcon },
                           { label: 'Targets', checked: showTargets, onChange: setShowTargets, note: !liveState?.deviceId ? 'No device' : undefined },
                         ]}
                         appearance={{
+                          showDeviceMarker: showDeviceIcon,
+                          deviceMarkerStyle, setDeviceMarkerStyle,
+                          deviceMarkerScale, setDeviceMarkerScale,
+                          deviceMarkerOpacity, setDeviceMarkerOpacity,
                           targetMarkerScale,
                           setTargetMarkerScale,
                           showZoneLabels,
@@ -2131,6 +3429,75 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           zoneLabelScale,
                           setZoneLabelScale,
                         }}
+                        extraSections={
+                          <div className="space-y-2 border-t border-slate-700/70 pt-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Locking</div>
+                              {lockedObjectCount > 0 && (
+                                <span className="rounded-full border border-amber-400/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-200">
+                                  {lockedObjectCount} locked
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] leading-snug text-slate-500">
+                              A locked object can still be clicked to open its panel, but nothing moves it.
+                              Unlock it with the padlock in that panel.
+                            </p>
+                            <button
+                              type="button"
+                              disabled={shellPointCount === 0}
+                              aria-pressed={allWallsLocked}
+                              onClick={() => handleShellLockChange(!allWallsLocked)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                allWallsLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {allWallsLocked ? '🔓 Unlock all walls' : '🔒 Lock all walls'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!selectedRoom?.furniture?.length}
+                              aria-pressed={allFurnitureLocked}
+                              onClick={() => handleLockAllFurniture(!allFurnitureLocked)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                allFurnitureLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {allFurnitureLocked ? '🔓 Unlock all furniture' : '🔒 Lock all furniture'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!selectedRoom?.doors?.length}
+                              aria-pressed={allDoorsLocked}
+                              onClick={() => handleLockAllDoors(!allDoorsLocked)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                allDoorsLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {allDoorsLocked ? '🔓 Unlock all doors' : '🔒 Lock all doors'}
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={devicePositionLocked}
+                              title="Locks where the device sits. Rotation stays adjustable."
+                              onClick={() => updateDevicePlacement({ locked: !devicePositionLocked })}
+                              className={`w-full rounded-lg border px-3 py-2 text-left text-sm font-medium transition disabled:opacity-40 ${
+                                devicePositionLocked
+                                  ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                                  : 'border-slate-700 bg-slate-800/50 text-slate-200 hover:bg-slate-800/70'
+                              }`}
+                            >
+                              {devicePositionLocked ? '🔓 Unlock device position' : '🔒 Lock device position'}
+                              <span className="ml-1 text-[11px] text-slate-500">(rotation stays free)</span>
+                            </button>
+                          </div>
+                        }
                       />
                       )}
                     </div>
@@ -2220,7 +3587,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 </button>
               </div>
               <div className="text-[10px] text-slate-500">
-                Tips: Click a wall to edit it, Shift+Click a wall to split it, A to draw, Enter to finish, Esc to cancel, Del to undo or delete the selected wall point
+                Tips: Click a wall to edit it, Shift+Click a wall to split it, A to draw, Enter to finish, Esc to cancel, Ctrl/Cmd+Z to undo (Shift to redo), Del to remove the point just drawn or the selected wall point
               </div>
             </div>
           </div>
@@ -2259,6 +3626,24 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
+                              className={`rounded-md p-1 transition-colors ${selectedSegmentLocked ? 'text-amber-400 hover:text-amber-300' : 'text-slate-500 hover:text-amber-300'}`}
+                              aria-label={selectedSegmentLocked ? 'Unlock this wall' : 'Lock this wall'}
+                              aria-pressed={selectedSegmentLocked}
+                              title={selectedSegmentLocked ? 'Unlock this wall' : 'Lock this wall so it cannot be selected or moved'}
+                              onClick={() => handleSegmentLockToggle(selectedSegment)}
+                            >
+                              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d={selectedSegmentLocked
+                                    ? 'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18.75v-6a2.25 2.25 0 012.25-2.25z'
+                                    : 'M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H3.75A2.25 2.25 0 011.5 18.75v-6a2.25 2.25 0 012.25-2.25z'}
+                                />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
                               className={`rounded-md p-1 text-slate-500 transition-colors hover:text-slate-200 ${wallEditorDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
                               aria-label="Move wall editor"
                               title="Move"
@@ -2290,7 +3675,17 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             </button>
                           </div>
                         </div>
-                        <div className="space-y-3 px-3 py-3" onWheelCapture={(e) => e.stopPropagation()}>
+                        {selectedSegmentLocked && (
+                          <div className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
+                            <span className="font-semibold">Locked.</span> This wall is pinned, so it cannot be
+                            moved, split or deleted. Use the padlock above to unlock it first.
+                          </div>
+                        )}
+                        <div
+                          className={`space-y-3 px-3 py-3 ${selectedSegmentLocked ? 'pointer-events-none opacity-50' : ''}`}
+                          aria-disabled={selectedSegmentLocked || undefined}
+                          onWheelCapture={(e) => e.stopPropagation()}
+                        >
                           <div>
                             <div className="mb-1 flex items-center justify-between gap-2">
                               <label className="block text-[11px] font-semibold text-slate-300">Length ({lengthUnit})</label>
@@ -2395,6 +3790,20 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             </button>
                           </div>
                         </div>
+                        {/* Outside the body above, so it stays usable while this wall is locked. */}
+                        <div className="border-t border-slate-800 px-3 py-2">
+                          <button
+                            className={`w-full rounded-lg border px-2.5 py-2 text-[11px] font-semibold transition ${
+                              wholeRoomLocked
+                                ? 'border-amber-400 bg-amber-500/10 text-amber-100'
+                                : 'border-slate-700 text-slate-100 hover:border-amber-400'
+                            }`}
+                            aria-pressed={wholeRoomLocked}
+                            onClick={() => handleShellLockChange(!wholeRoomLocked)}
+                          >
+                            {wholeRoomLocked ? '🔓 Unlock whole room' : '🔒 Lock whole room'}
+                          </button>
+                        </div>
                       </div>
                       </div>
 
@@ -2402,7 +3811,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                         <div className="flex items-center justify-between">
                           <div>
                             <div className="font-semibold text-slate-100">Wall</div>
-                            <div className="text-xs text-slate-400">Edit the selected wall segment.</div>
+                            <div className="text-xs text-slate-400">
+                              {selectedSegmentLocked
+                                ? 'Locked — unlock it below before editing.'
+                                : 'Edit the selected wall segment.'}
+                            </div>
                           </div>
                           <button
                             className="rounded-md border border-slate-700 px-2 py-1 hover:border-aqua-500"
@@ -2414,7 +3827,30 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                             Close
                           </button>
                         </div>
-                        <div className="mt-4 space-y-4">
+                        <div className="mt-4 space-y-2">
+                          <button
+                            className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold ${
+                              selectedSegmentLocked ? 'border-amber-400 bg-amber-500/10 text-amber-100' : 'border-slate-700 text-slate-100'
+                            }`}
+                            aria-pressed={selectedSegmentLocked}
+                            onClick={() => handleSegmentLockToggle(selectedSegment)}
+                          >
+                            {selectedSegmentLocked ? '🔓 Unlock this wall' : '🔒 Lock this wall'}
+                          </button>
+                          <button
+                            className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold ${
+                              wholeRoomLocked ? 'border-amber-400 bg-amber-500/10 text-amber-100' : 'border-slate-700 text-slate-100'
+                            }`}
+                            aria-pressed={wholeRoomLocked}
+                            onClick={() => handleShellLockChange(!wholeRoomLocked)}
+                          >
+                            {wholeRoomLocked ? '🔓 Unlock whole room' : '🔒 Lock whole room'}
+                          </button>
+                        </div>
+                        <div
+                          className={`mt-4 space-y-4 ${selectedSegmentLocked ? 'pointer-events-none opacity-50' : ''}`}
+                          aria-disabled={selectedSegmentLocked || undefined}
+                        >
                           <div>
                             <div className="mb-2 flex items-center justify-between gap-2">
                               <label className="block text-sm font-semibold text-slate-300">Length ({lengthUnit})</label>
@@ -2525,6 +3961,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 onChange={handleFurnitureChange}
                 onDelete={handleFurnitureDelete}
                 onClose={() => setSelectedFurnitureId(null)}
+                onToggleLock={() => handleFurnitureLockToggle(selectedFurniture.id)}
               />
             </div>
           )}
@@ -2536,6 +3973,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               onChange={handleDoorChange}
               onDelete={handleDoorDelete}
               onClose={() => setSelectedDoorId(null)}
+              onToggleLock={() => handleDoorLockToggle(selectedDoor.id)}
               maxSegmentIndex={(selectedRoom?.roomShell?.points?.length ?? 1) - 1}
               validation={doorValidation}
             />
@@ -2565,7 +4003,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   setActiveMobileSheet(null);
                   setShowSettings(false);
                   setShowFurnitureLibrary((current) => !current);
-                  setSelectedFurnitureId(null);
+                  selectEntity({ kind: 'none' });
                 }}
               />
             </CanvasBottomToolbar>
@@ -2583,9 +4021,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             <>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('liveDashboard');
+                onClick={() => {
                   setActiveMobileSheet(null);
+                  navigateTo('liveDashboard');
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
               >
@@ -2593,9 +4031,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('wizard');
+                onClick={() => {
                   setActiveMobileSheet(null);
+                  navigateTo('wizard');
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
               >
@@ -2603,19 +4041,22 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('zoneEditor');
+                onClick={() => {
+                  if (!zoneEditingSupported) return;
                   setActiveMobileSheet(null);
+                  navigateTo('zoneEditor');
                 }}
-                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
+                disabled={!zoneEditingSupported}
+                title={zoneEditingSupported ? '' : zoneEditorDisabledReason}
+                className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Zone Editor
+                Zone Editor {!zoneEditingSupported && '(Not Available)'}
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  await navigateWithSave('settings');
+                onClick={() => {
                   setActiveMobileSheet(null);
+                  navigateTo('settings');
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-3 text-left text-sm font-semibold text-slate-100"
               >
@@ -2635,12 +4076,23 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
         <div className="grid grid-cols-2 gap-2 text-sm">
           <button
             type="button"
+            className="col-span-2 rounded-lg border border-aqua-600/60 bg-aqua-600/20 px-3 py-3 font-semibold text-aqua-100 disabled:opacity-40"
+            onClick={() => setShowBasicShapes(true)}
+            disabled={!selectedRoom}
+          >
+            Basic Shapes
+          </button>
+          <button
+            type="button"
             className={`rounded-lg border px-3 py-3 font-semibold ${
               isDrawingWall
                 ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
                 : 'border-slate-700 bg-slate-800 text-slate-100'
             }`}
-            onClick={() => setIsDrawingWall((prev) => !prev)}
+            onClick={() => {
+              if (activeBasicShape) setActiveBasicShape(null);
+              setIsDrawingWall((prev) => activeBasicShape ? true : !prev);
+            }}
           >
             {isDrawingWall ? 'Stop Drawing' : 'Add Wall'}
           </button>
@@ -2655,10 +4107,45 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
           <button
             type="button"
             className="rounded-lg border border-amber-600/60 bg-amber-600/20 px-3 py-3 font-semibold text-amber-100 disabled:opacity-40"
-            onClick={removeLastPoint}
-            disabled={!selectedRoom || !(selectedRoom.roomShell?.points?.length)}
+            onClick={handleUndo}
+            disabled={!canUndo}
           >
             Undo
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-amber-600/60 bg-amber-600/20 px-3 py-3 font-semibold text-amber-100 disabled:opacity-40"
+            onClick={handleRedo}
+            disabled={!canRedo}
+          >
+            Redo
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-sky-600/60 bg-sky-600/20 px-3 py-3 font-semibold text-sky-100 disabled:opacity-40"
+            onClick={() => rotateLayoutBy(-ROTATION_STEP_DEG)}
+            disabled={!canRotateLayout}
+          >
+            ↺ Rotate 90°
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-sky-600/60 bg-sky-600/20 px-3 py-3 font-semibold text-sky-100 disabled:opacity-40"
+            onClick={() => rotateLayoutBy(ROTATION_STEP_DEG)}
+            disabled={!canRotateLayout}
+          >
+            ↻ Rotate 90°
+          </button>
+          <button
+            type="button"
+            className="col-span-2 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-left text-xs font-medium text-slate-300"
+            onClick={() => {
+              setActiveMobileSheet(null);
+              setSettingsTab('layout');
+              setShowSettings(true);
+            }}
+          >
+            Rotating: <span className="font-semibold text-sky-200">{describeRotationScope(rotationScope)}</span> · change
           </button>
           <button
             type="button"
@@ -2686,7 +4173,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             onClick={() => {
               setActiveMobileSheet(null);
               setShowFurnitureLibrary(true);
-              setSelectedFurnitureId(null);
+              selectEntity({ kind: 'none' });
             }}
             disabled={!selectedRoom}
           >
@@ -2700,14 +4187,37 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                 <div className="font-semibold text-white">Selected furniture</div>
                 <div className="text-xs text-slate-400">{selectedFurniture.typeId}</div>
               </div>
-              <button
-                type="button"
-                className="rounded-md border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100"
-                onClick={() => setSelectedFurnitureId(null)}
-              >
-                Deselect
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  aria-pressed={!!selectedFurniture.locked}
+                  className={`rounded-md border px-3 py-2 text-xs font-semibold ${
+                    selectedFurniture.locked
+                      ? 'border-amber-400/70 bg-amber-500/10 text-amber-100'
+                      : 'border-slate-700 text-slate-100'
+                  }`}
+                  onClick={() => handleFurnitureLockToggle(selectedFurniture.id)}
+                >
+                  {selectedFurniture.locked ? '🔓 Unlock' : '🔒 Lock'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-100"
+                  onClick={() => setSelectedFurnitureId(null)}
+                >
+                  Deselect
+                </button>
+              </div>
             </div>
+            {selectedFurniture.locked && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                <span className="font-semibold">Locked.</span> Unlock it above before moving or resizing it.
+              </div>
+            )}
+            <div
+              className={`space-y-3 ${selectedFurniture.locked ? 'pointer-events-none opacity-50' : ''}`}
+              aria-disabled={selectedFurniture.locked || undefined}
+            >
             <label className="block">
               <span className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
                 <span>Rotation</span>
@@ -2763,6 +4273,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             >
               Delete Furniture
             </button>
+            </div>
           </div>
         )}
       </CanvasMobileSheet>
@@ -2831,6 +4342,3 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     </div>
   );
 };
-
-
-

@@ -1,5 +1,15 @@
-import { RoomConfig } from '../types';
+import { RoomConfig } from './types';
 import { ingressAware } from './client';
+
+/**
+ * Payload accepted by the rooms PUT endpoint. The backend never removes a stored
+ * room outline implicitly: omit `roomShell` (or send one that has no points) to
+ * leave the saved outline untouched, and send `roomShell: null` to clear it on
+ * purpose.
+ */
+export type RoomUpdatePayload = Partial<Omit<RoomConfig, 'roomShell'>> & {
+  roomShell?: RoomConfig['roomShell'] | null;
+};
 
 const handle = async <T>(res: Response): Promise<T> => {
   if (!res.ok) {
@@ -23,7 +33,7 @@ export const createRoom = async (payload: Partial<RoomConfig>) => {
   return handle<{ room: RoomConfig }>(res);
 };
 
-export const updateRoom = async (id: string, payload: Partial<RoomConfig>) => {
+export const updateRoom = async (id: string, payload: RoomUpdatePayload) => {
   const res = await fetch(ingressAware(`api/rooms/${id}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

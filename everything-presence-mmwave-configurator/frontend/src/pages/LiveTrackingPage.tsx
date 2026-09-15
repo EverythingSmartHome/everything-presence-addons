@@ -17,6 +17,7 @@ import { ZoneStatsPanel } from '../components/ZoneStatsPanel';
 import { HourlyActivityChart } from '../components/HourlyActivityChart';
 import { ThemeSwitcher } from '../components/ThemeSwitcher';
 import { DisplaySettingsControls } from '../components/DisplaySettingsControls';
+import { HelpTooltip } from '../components/HelpTooltip';
 import {
   CanvasBottomToolbar,
   CanvasMobileSheet,
@@ -122,6 +123,9 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     showZones, setShowZones,
     showDeviceIcon, setShowDeviceIcon,
     showDeviceRadar, setShowDeviceRadar,
+    deviceMarkerStyle, setDeviceMarkerStyle,
+    deviceMarkerScale, setDeviceMarkerScale,
+    deviceMarkerOpacity, setDeviceMarkerOpacity,
     showMaxDistanceOverlay, setShowMaxDistanceOverlay,
     showTriggerDistanceOverlay, setShowTriggerDistanceOverlay,
     showTargets, setShowTargets,
@@ -177,8 +181,6 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     hasLiveStateForRoom && typeof liveState?.config?.installationAngle === 'number'
       ? liveState.config.installationAngle
       : 0;
-  const upsideDownMounting =
-    hasLiveStateForRoom && liveState?.config?.upsideDownMounting === true;
 
   const heightCoverageConfig = useMemo(() => {
     if (!selectedRoom?.devicePlacement || !isCeilingMount) return null;
@@ -213,12 +215,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     const angleRad = (((rotationDeg ?? 0) + installationAngle) * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
-    const localX = upsideDownMounting ? -deviceX : deviceX;
+    // Orientation (upside-down mounting) is normalised on-device by the firmware,
+    // so Target X is already in the correct frame here — do not re-flip it.
+    const localX = deviceX;
     return {
       x: localX * cos - deviceY * sin + x,
       y: localX * sin + deviceY * cos + y,
     };
-  }, [installationAngle, selectedRoom?.devicePlacement, upsideDownMounting]);
+  }, [installationAngle, selectedRoom?.devicePlacement]);
 
   const showCoverageOverlay = showDeviceRadar;
 
@@ -1115,6 +1119,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           }}
         >
           <ZoneCanvas
+            deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
             zones={displayedRectZones}
             onZonesChange={() => {}}
             // Polygon zones support - show polygon zones when polygon mode is enabled
@@ -1157,7 +1162,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               // Heatmap overlay (renders behind everything else)
               // Pass devicePlacement to transform device-relative coordinates to room coordinates
               const heatmapOverlay = showLiveOverlays ? (
-                <HeatmapOverlay data={heatmapData} visible={heatmapEnabled} toCanvas={toCanvas} devicePlacement={selectedRoom?.devicePlacement} installationAngle={installationAngle} upsideDownMounting={upsideDownMounting} intensityThreshold={heatmapThreshold} roomShellPoints={roomShellPoints} />
+                <HeatmapOverlay data={heatmapData} visible={heatmapEnabled} toCanvas={toCanvas} devicePlacement={selectedRoom?.devicePlacement} installationAngle={installationAngle} intensityThreshold={heatmapThreshold} roomShellPoints={roomShellPoints} />
               ) : null;
 
               // Define colors for each target (up to 3 targets)
@@ -2187,18 +2192,22 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         <input
                           type="checkbox"
                           checked={heatmapEnabled}
+                          aria-describedby="live-heatmap-enabled-help"
                           onChange={(e) => setHeatmapEnabled(e.target.checked)}
                           className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-red-500 focus:ring-red-500 focus:ring-offset-0"
                         />
                         <span className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded-full bg-gradient-to-r from-blue-500 via-yellow-500 to-red-500"></span>
                           Show Heatmap {heatmapLoading && '(loading...)'}
+                          <HelpTooltip id="live-heatmap-enabled-help">Shows where presence has been detected most often during the selected time period.</HelpTooltip>
                         </span>
                       </label>
                       {heatmapEnabled && (
                         <div className="mt-2 ml-6 space-y-2">
                           <div className="flex gap-2">
                             <select
+                              aria-label="Heatmap time period"
+                              aria-describedby="live-heatmap-period-help"
                               value={heatmapHours}
                               onChange={(e) => setHeatmapHours(Number(e.target.value))}
                               className="flex-1 rounded-lg border border-slate-700 bg-slate-800/70 px-2 py-1 text-xs text-slate-100 focus:border-red-500 focus:ring-1 focus:ring-red-500/50 focus:outline-none"
@@ -2209,6 +2218,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                               <option value={72}>Last 3 days</option>
                               <option value={168}>Last 7 days</option>
                             </select>
+                            <HelpTooltip id="live-heatmap-period-help">Chooses how much recent activity is included in the heatmap.</HelpTooltip>
                             <button
                               onClick={() => refreshHeatmap()}
                               disabled={heatmapLoading}
@@ -2220,10 +2230,11 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                           </div>
                           <div>
                             <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                              <span>Threshold</span>
+                              <span className="inline-flex items-center gap-1">Threshold<HelpTooltip id="live-heatmap-threshold-help">Filters low-activity cells. Increase it to reduce background noise or decrease it to reveal more detail.</HelpTooltip></span>
                               <span>{Math.round(heatmapThreshold * 100)}%</span>
                             </div>
                             <input
+                              aria-describedby="live-heatmap-threshold-help"
                               type="range"
                               min="0"
                               max="50"
@@ -2304,7 +2315,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                         />
                         <span className="flex items-center gap-1.5">
                           <span className="w-3 h-3 rounded-full bg-green-500"></span>
-                          Device Icon
+                          Device marker
                         </span>
                       </label>
                       <label className="flex items-center gap-2 cursor-pointer text-sm text-slate-200 hover:text-white transition-colors">
@@ -2325,6 +2336,10 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                   <div className="mt-3 border-t border-slate-700/50 pt-3">
                     <DisplaySettingsControls
                       appearance={{
+                        showDeviceMarker: showDeviceIcon,
+                        deviceMarkerStyle, setDeviceMarkerStyle,
+                        deviceMarkerScale, setDeviceMarkerScale,
+                        deviceMarkerOpacity, setDeviceMarkerOpacity,
                         targetMarkerScale,
                         setTargetMarkerScale,
                         showZoneLabels,
@@ -2838,10 +2853,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             { label: 'Furniture', checked: showFurniture, onChange: setShowFurniture },
             { label: 'Doors', checked: showDoors, onChange: setShowDoors },
             ...(!isEP1 ? [{ label: 'Zones', checked: showZones, onChange: setShowZones }] : []),
-            { label: 'Device icon', checked: showDeviceIcon, onChange: setShowDeviceIcon },
+            { label: 'Device marker', checked: showDeviceIcon, onChange: setShowDeviceIcon },
             { label: 'Targets', checked: showTargets, onChange: setShowTargets },
           ]}
           appearance={{
+            showDeviceMarker: showDeviceIcon,
+            deviceMarkerStyle, setDeviceMarkerStyle,
+            deviceMarkerScale, setDeviceMarkerScale,
+            deviceMarkerOpacity, setDeviceMarkerOpacity,
             targetMarkerScale,
             setTargetMarkerScale,
             showZoneLabels,
@@ -2916,4 +2935,3 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     </div>
   );
 };
-

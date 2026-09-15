@@ -89,9 +89,42 @@ body {
   }
 }
 
+/*
+ * Room Builder floor-plan rotation.
+ *
+ * The geometry is committed before this plays, so the canvas starts back at the
+ * orientation it had (`--room-rotate-from`, set inline as the negated angle) and
+ * swings into its new one. Keep the duration in step with
+ * ROOM_ROTATION_SPIN_MS in RoomBuilderPage.tsx.
+ *
+ * Under `prefers-reduced-motion` the page skips the spin entirely rather than
+ * relying on the rule below, because with no animation `animationend` never
+ * fires and the wrapper would hold on to `pointer-events-none`.
+ */
+.room-rotate-spin {
+  animation: room-rotate-spin 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+@keyframes room-rotate-spin {
+  from {
+    transform: rotate(var(--room-rotate-from, -90deg)) scale(0.92);
+  }
+
+  70% {
+    transform: rotate(calc(var(--room-rotate-from, -90deg) * 0.06)) scale(1.01);
+  }
+
+  to {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mobile-sheet-backdrop,
-  .mobile-sheet-panel {
+  .mobile-sheet-panel,
+  .room-rotate-spin {
     animation: none;
   }
 }
@@ -493,6 +526,11 @@ body {
   color: #7c3aed !important;
 }
 
+.light .text-sky-100,
+.light .text-sky-200 {
+  color: #0369a1 !important;
+}
+
 /* Light mode for colored button backgrounds/borders */
 .light .bg-emerald-600\/10 {
   background-color: rgba(5, 150, 105, 0.15) !important;
@@ -514,6 +552,14 @@ body {
   background-color: rgba(147, 51, 234, 0.15) !important;
 }
 
+.light .bg-sky-600\/10 {
+  background-color: rgba(2, 132, 199, 0.12) !important;
+}
+
+.light .bg-sky-600\/20 {
+  background-color: rgba(2, 132, 199, 0.18) !important;
+}
+
 .light .border-emerald-600\/50 {
   border-color: rgba(5, 150, 105, 0.5) !important;
 }
@@ -528,6 +574,11 @@ body {
 
 .light .border-purple-600\/50 {
   border-color: rgba(147, 51, 234, 0.5) !important;
+}
+
+.light .border-sky-600\/50,
+.light .border-sky-600\/60 {
+  border-color: rgba(2, 132, 199, 0.5) !important;
 }
 
 /* Light mode hover states for colored buttons */
@@ -545,4 +596,8 @@ body {
 
 .light .hover\:bg-purple-600\/30:hover {
   background-color: rgba(147, 51, 234, 0.25) !important;
+}
+
+.light .hover\:bg-sky-600\/20:hover {
+  background-color: rgba(2, 132, 199, 0.22) !important;
 }

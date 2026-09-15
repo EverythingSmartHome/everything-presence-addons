@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { fetchDevices, fetchProfiles, fetchSettings, updateSettings, ingressAware } from './api/client';
 import { createRoom, fetchRooms } from './api/rooms';
-import { DiscoveredDevice, RoomConfig, LiveState, EntityMappings } from './api/types';
+import { DiscoveredDevice, DeviceProfile, RoomConfig, LiveState, EntityMappings } from './api/types';
+import { roomSupportsZoneEditing } from './utils/zoneCapabilities';
 import { ZoneEditorPage } from './pages/ZoneEditorPage';
 import { RoomBuilderPage } from './pages/RoomBuilderPage';
 import { WizardPage } from './pages/WizardPage';
@@ -18,7 +19,7 @@ const Card = ({ title, children }: { title: string; children: React.ReactNode })
 
 function App() {
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
-  const [profiles, setProfiles] = useState<{ id: string; label: string }[]>([]);
+  const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
   const [rooms, setRooms] = useState<RoomConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +30,8 @@ function App() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [wizardCompleted, setWizardCompleted] = useState<boolean>(false);
   const [wizardStep, setWizardStep] = useState<string>('device');
+  const [wizardDeviceId, setWizardDeviceId] = useState<string | null>(null);
+  const [wizardProfileId, setWizardProfileId] = useState<string | null>(null);
   const [wizardOutlineDone, setWizardOutlineDone] = useState<boolean>(false);
   const [wizardPlacementDone, setWizardPlacementDone] = useState<boolean>(false);
   const [wizardZonesReady, setWizardZonesReady] = useState<boolean>(false);
@@ -50,6 +53,8 @@ function App() {
         setRooms(roomsRes.rooms);
         setWizardCompleted(settingsRes.settings.wizardCompleted);
         setWizardStep(settingsRes.settings.wizardStep ?? 'device');
+        setWizardDeviceId(settingsRes.settings.wizardDeviceId ?? null);
+        setWizardProfileId(settingsRes.settings.wizardProfileId ?? null);
         setWizardOutlineDone(Boolean(settingsRes.settings.outlineDone));
         setWizardPlacementDone(Boolean(settingsRes.settings.placementDone));
         setWizardZonesReady(Boolean(settingsRes.settings.zonesReady));
@@ -97,6 +102,24 @@ function App() {
     () => profiles.find((p) => p.id === selectedProfileId),
     [profiles, selectedProfileId]
   );
+
+  // The Zone Editor is gated on the *room's* device, not on the profile picker:
+  // a room whose sensor cannot detect zones (the Everything Presence One) has
+  // nothing to configure there. Guarding the view itself rather than each menu
+  // item means no entry point - dashboard, Room Builder, wizard or a stale
+  // view - can slip past the restriction. It is judged on the room's own
+  // profile only, so a room not yet bound to a device profile is never blocked
+  // by whatever the profile picker happens to be showing.
+  const zoneEditingSupported = useMemo(
+    () => roomSupportsZoneEditing(selectedRoom, profiles),
+    [profiles, selectedRoom]
+  );
+
+  useEffect(() => {
+    if (view === 'zoneEditor' && !zoneEditingSupported) {
+      setView('dashboard');
+    }
+  }, [view, zoneEditingSupported]);
 
   const refreshLiveState = React.useCallback(async () => {
     if (!selectedRoom || !selectedRoom.deviceId || !selectedProfile) {
@@ -503,8 +526,6 @@ function App() {
   // Transform device-relative coordinates to room coordinates
   const installationAngle =
     typeof liveState?.config?.installationAngle === 'number' ? liveState.config.installationAngle : 0;
-  const upsideDownMounting = liveState?.config?.upsideDownMounting === true;
-
   const deviceToRoom = React.useCallback((deviceX: number, deviceY: number) => {
     if (!selectedRoom?.devicePlacement) {
       return { x: deviceX, y: deviceY };
@@ -515,7 +536,9 @@ function App() {
     const angleRad = (effectiveRotationDeg * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
-    const localX = upsideDownMounting ? -deviceX : deviceX;
+    // Orientation (upside-down mounting) is normalised on-device by the firmware,
+    // so Target X is already in the correct frame here — do not re-flip it.
+    const localX = deviceX;
 
     const rotatedX = localX * cos - deviceY * sin;
     const rotatedY = localX * sin + deviceY * cos;
@@ -524,7 +547,7 @@ function App() {
       x: rotatedX + x,
       y: rotatedY + y,
     };
-  }, [selectedRoom, installationAngle, upsideDownMounting]);
+  }, [selectedRoom, installationAngle]);
 
   // Compute target positions in room coordinates
   const targetPositions = useMemo(() => {
@@ -586,7 +609,7 @@ function App() {
         // Reset wizard step when navigating to Add Device
         if (view === 'wizard') {
           setWizardStep('device');
-          updateSettings({ wizardStep: 'device' }).catch(() => null);
+          updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
         }
         setView(view);
       }}
@@ -611,12 +634,14 @@ function App() {
             devices={devices}
             profiles={profiles}
             rooms={rooms}
-            selectedDeviceId={newRoomDeviceId}
-            selectedProfileId={selectedProfileId}
+            selectedDeviceId={wizardDeviceId ?? newRoomDeviceId}
+            selectedProfileId={wizardProfileId ?? selectedProfileId}
             onBack={() => {
               // Reset wizard when going back
               setWizardStep('device');
-              updateSettings({ wizardStep: 'device' }).catch(() => null);
+              setWizardDeviceId(null);
+              setWizardProfileId(null);
+              updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               setView('dashboard');
             }}
             onCreateRoom={async (name, deviceId, profileId, entityMappings) => {
@@ -638,19 +663,38 @@ function App() {
               setSelectedRoomId(roomId);
               if (profileId) setSelectedProfileId(profileId);
             }}
+            onGoRoomBuilder={(roomId, profileId) => {
+              setSelectedRoomId(roomId);
+              if (profileId) setSelectedProfileId(profileId);
+              setView('roomBuilder');
+            }}
+            onGoZoneEditor={(roomId, profileId) => {
+              setSelectedRoomId(roomId);
+              if (profileId) setSelectedProfileId(profileId);
+              // The guard above still has the final say; sending an unsupported
+              // room here simply lands on the dashboard.
+              setView('zoneEditor');
+            }}
             onRoomUpdate={(updatedRoom) => {
               setRooms((prev) => prev.map((r) => (r.id === updatedRoom.id ? updatedRoom : r)));
             }}
             onComplete={() => {
-              updateSettings({ wizardCompleted: true }).catch(() => null);
+              updateSettings({ wizardCompleted: true, wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               setWizardCompleted(true);
               setWizardStep('finish');
+              setWizardDeviceId(null);
+              setWizardProfileId(null);
               setView('dashboard');
             }}
             initialStep={wizardStep}
             onStepChange={(key) => {
               setWizardStep(key);
               updateSettings({ wizardStep: key }).catch(() => null);
+            }}
+            onSelectionChange={(deviceId, profileId) => {
+              setWizardDeviceId(deviceId);
+              setWizardProfileId(profileId);
+              updateSettings({ wizardDeviceId: deviceId, wizardProfileId: profileId }).catch(() => null);
             }}
             outlineDone={wizardOutlineDone}
             placementDone={wizardPlacementDone}
@@ -671,12 +715,13 @@ function App() {
             targetPositions={targetPositions}
           />
         )}
-        {view === 'zoneEditor' && (
+        {view === 'zoneEditor' && !zoneEditingSupported && dashboard}
+        {view === 'zoneEditor' && zoneEditingSupported && (
           <ZoneEditorPage
             onNavigate={(targetView) => {
               if (targetView === 'wizard') {
                 setWizardStep('device');
-                updateSettings({ wizardStep: 'device' }).catch(() => null);
+                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               }
               // Map 'liveDashboard' to 'dashboard' for the main live tracking view
               const mappedView = targetView === 'liveDashboard' ? 'dashboard' : targetView;
@@ -702,7 +747,7 @@ function App() {
             onNavigate={(targetView) => {
               if (targetView === 'wizard') {
                 setWizardStep('device');
-                updateSettings({ wizardStep: 'device' }).catch(() => null);
+                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               }
               // Map 'liveDashboard' to 'dashboard' for the main live tracking view
               const mappedView = targetView === 'liveDashboard' ? 'dashboard' : targetView;
@@ -710,6 +755,10 @@ function App() {
             }}
             initialRoomId={selectedRoomId}
             initialProfileId={selectedProfileId}
+            onRoomChange={(roomId, profileId) => {
+              setSelectedRoomId(roomId);
+              setSelectedProfileId(profileId);
+            }}
             onWizardProgress={(p) => {
               if (p.outlineDone) {
                 setWizardOutlineDone(true);
@@ -732,7 +781,7 @@ function App() {
               // Reset wizard step when navigating to Add Device
               if (view === 'wizard') {
                 setWizardStep('device');
-                updateSettings({ wizardStep: 'device' }).catch(() => null);
+                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
               }
               setView(view);
             }}

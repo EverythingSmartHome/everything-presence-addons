@@ -40,6 +40,7 @@ import { DeviceMapping, discoverAndSaveMapping } from '../api/deviceMappings';
 import { fetchPolygonZonesFromDevice } from '../api/zones';
 import { compareVersions, getZoneMigrationThreshold, requiresZoneMigration } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { resolveZoneLimits } from '../utils/zoneCapabilities';
 import polygonMigrationGraphic from '../assets/polygon-migration.png';
 
 interface FirmwareUpdateSectionProps {
@@ -1032,10 +1033,10 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const isBackupPolygon = (zone: Zone): zone is ZonePolygon =>
     typeof zone === 'object' && zone !== null && 'vertices' in zone;
 
-  const buildExpectedPolygons = (backup: ZoneBackup, limits: DeviceProfile['limits'] | undefined): ZonePolygon[] => {
-    const maxZones = limits?.maxZones ?? 4;
-    const maxExclusion = limits?.maxExclusionZones ?? 2;
-    const maxEntry = limits?.maxEntryZones ?? 2;
+  const buildExpectedPolygons = (backup: ZoneBackup, profile: DeviceProfile | null | undefined): ZonePolygon[] => {
+    // Slot counts come from the profile's capabilities as well as its limits, so
+    // a device that cannot hold entry zones never expects any back.
+    const { maxZones, maxExclusionZones: maxExclusion, maxEntryZones: maxEntry } = resolveZoneLimits(profile);
 
     const regularPolygonZones = sortZonesByIndex(
       backup.zones.filter((zone): zone is ZonePolygon => zone.type === 'regular' && isBackupPolygon(zone))
@@ -1113,7 +1114,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
 
     const profile = profiles.find((item) => item.id === context.profileId) ?? null;
-    const expectedPolygons = buildExpectedPolygons(backup, profile?.limits);
+    const expectedPolygons = buildExpectedPolygons(backup, profile);
     if (expectedPolygons.length === 0) {
       return { status: 'success', message: 'No zones to verify.' };
     }
@@ -1963,7 +1964,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         const backupId = migrationBackupId ?? lastBackupId ?? latestBackup?.id ?? null;
         const backup = backupId ? zoneBackups.find((item) => item.id === backupId) ?? null : null;
         const profile = profiles.find((item) => item.id === profileId) ?? null;
-        const expected = backup ? buildExpectedPolygons(backup, profile?.limits) : [];
+        const expected = backup ? buildExpectedPolygons(backup, profile) : [];
         const regularCount = expected.filter((zone) => zone.type === 'regular').length;
         const exclusionCount = expected.filter((zone) => zone.type === 'exclusion').length;
         const entryCount = expected.filter((zone) => zone.type === 'entry').length;

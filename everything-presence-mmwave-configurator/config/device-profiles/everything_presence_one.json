@@ -22,6 +22,8 @@
   },
   "limits": {
     "maxZones": 0,
+    "maxExclusionZones": 0,
+    "maxEntryZones": 0,
     "maxRangeMeters": 25,
     "fieldOfViewDegrees": 120
   },

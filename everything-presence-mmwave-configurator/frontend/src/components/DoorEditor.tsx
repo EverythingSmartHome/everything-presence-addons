@@ -1,11 +1,14 @@
 import React from 'react';
 import { Door } from '../api/types';
+import { DoorStyleIcon } from './DoorStyleIcon';
 
 interface DoorEditorProps {
   door: Door;
   onChange: (door: Door) => void;
   onDelete: () => void;
   onClose?: () => void;
+  /** Pins this door so it can no longer be selected or dragged on the canvas. */
+  onToggleLock?: () => void;
   maxSegmentIndex: number; // Number of wall segments - 1
   validation?: {
     overlaps: boolean;
@@ -20,14 +23,23 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
   onChange,
   onDelete,
   onClose,
+  onToggleLock,
   maxSegmentIndex,
   validation,
 }) => {
+  const isLocked = !!door.locked;
   const handleChange = (updates: Partial<Door>) => {
     onChange({ ...door, ...updates });
   };
 
   const hasWarnings = validation && (validation.overlaps || validation.nearCorner || validation.tooWide);
+  const style = door.style ?? 'single';
+  const styleOptions: Array<{ value: Door['style']; label: string }> = [
+    { value: 'single', label: 'Single' },
+    { value: 'sliding', label: 'Sliding' },
+    { value: 'opening', label: 'Opening' },
+    { value: 'double', label: 'Double' },
+  ];
   const swingDirectionOptions: Array<{
     value: Door['swingDirection'];
     label: string;
@@ -60,6 +72,23 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
       description: 'Hinge is on the right side of the doorway',
     },
   ];
+  // Sliding doors reuse swingSide for the side the panel stows on when open.
+  const slideSideOptions: Array<{
+    value: Door['swingSide'];
+    label: string;
+    description: string;
+  }> = [
+    {
+      value: 'left',
+      label: 'Left',
+      description: 'Panel slides to the left half of the opening to open',
+    },
+    {
+      value: 'right',
+      label: 'Right',
+      description: 'Panel slides to the right half of the opening to open',
+    },
+  ];
 
   return (
     <div className="fixed inset-y-0 right-0 z-50 w-80 bg-slate-900/95 backdrop-blur border-l border-slate-700 shadow-2xl flex flex-col">
@@ -71,22 +100,51 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
           </div>
           <h2 className="text-lg font-semibold text-white">Door</h2>
         </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors"
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onToggleLock && (
+            <button
+              onClick={onToggleLock}
+              className={`transition-colors ${isLocked ? 'text-amber-400 hover:text-amber-300' : 'text-slate-400 hover:text-amber-300'}`}
+              aria-label={isLocked ? 'Unlock door' : 'Lock door'}
+              aria-pressed={isLocked}
+              title={isLocked ? 'Unlock this door' : 'Lock this door so it cannot be selected or moved'}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d={isLocked
+                    ? 'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75M6.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 18.75v-6a2.25 2.25 0 012.25-2.25z'
+                    : 'M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 10.5h10.5a2.25 2.25 0 012.25 2.25v6a2.25 2.25 0 01-2.25 2.25H3.75A2.25 2.25 0 011.5 18.75v-6a2.25 2.25 0 012.25-2.25z'}
+                />
+              </svg>
+            </button>
+          )}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Content */}
+      {isLocked && (
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-2 text-xs text-amber-200">
+          <span className="font-semibold">Locked.</span> This door is pinned in place, so it cannot be
+          moved, resized or deleted. Use the padlock above to unlock it first.
+        </div>
+      )}
+
+      {/* Content - inert while locked, so the padlock above is the only way forward */}
       <div
-        className="flex-1 overflow-y-auto px-6 py-4 space-y-6"
+        className={`flex-1 overflow-y-auto px-6 py-4 space-y-6 ${isLocked ? 'pointer-events-none opacity-50' : ''}`}
+        aria-disabled={isLocked || undefined}
         onWheelCapture={(e) => e.stopPropagation()}
       >
         {/* Validation Warnings */}
@@ -133,6 +191,26 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
             )}
           </div>
         )}
+
+        <fieldset>
+          <legend className="block text-sm font-semibold text-slate-300 mb-3">Door Style</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {styleOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleChange({ style: option.value })}
+                aria-pressed={style === option.value}
+                className={`rounded-lg border p-3 text-center transition-all ${style === option.value
+                  ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                  : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'}`}
+              >
+                <DoorStyleIcon style={option.value} className="mx-auto mb-1 h-8 w-12" />
+                <span className="text-sm font-medium">{option.label}</span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
 
         {/* Wall Segment */}
         <div>
@@ -184,15 +262,17 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
               onChange={(e) => handleChange({ widthMm: parseFloat(e.target.value) })}
               step="10"
               min="600"
-              max="1200"
+              max={style === 'sliding' || style === 'double' ? 3000 : 1200}
               className="w-full px-3 py-2 bg-slate-800/70 border border-slate-700 rounded-lg text-white focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
             />
           </div>
-          <p className="text-xs text-slate-400 mt-1">Standard door: 800-900mm</p>
+          <p className="text-xs text-slate-400 mt-1">
+            {style === 'sliding' || style === 'double' ? 'Wide openings may be up to 3000mm' : 'Standard door: 800-900mm'}
+          </p>
         </div>
 
         {/* Swing Direction */}
-        <div>
+        {(style === 'single' || style === 'double') && <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Swing Direction</label>
           <div className="grid grid-cols-2 gap-3">
             {swingDirectionOptions.map((option) => {
@@ -234,10 +314,62 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
             })}
           </div>
           <p className="text-xs text-slate-400 mt-1">Shaded side is the room. Door swing matches the canvas.</p>
-        </div>
+        </div>}
+
+        {/* Slide Direction */}
+        {style === 'sliding' && <div>
+          <label className="block text-sm font-semibold text-slate-300 mb-3">Slides Toward</label>
+          <div className="grid grid-cols-2 gap-3">
+            {slideSideOptions.map((option) => {
+              const isLeft = option.value === 'left';
+              // Half-width leaf shown slid across its half of the opening (18-30).
+              const leafStart = isLeft ? 18 : 24;
+              const leafEnd = isLeft ? 24 : 30;
+              const leadingEdgeX = isLeft ? leafEnd : leafStart;
+              const farJambX = isLeft ? 30 : 18;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleChange({ swingSide: option.value })}
+                  className={`rounded-lg border p-3 transition-all ${
+                    door.swingSide === option.value
+                      ? 'border-aqua-500 bg-aqua-500/20 text-aqua-100'
+                      : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                  }`}
+                  aria-label={option.description}
+                  title={option.description}
+                >
+                  <div className="flex flex-col items-center gap-2">
+                    <svg className="h-12 w-12" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                      <rect x="3" y="21" width="42" height="24" fill="currentColor" opacity="0.1" rx="2" />
+                      <line x1="3" y1="20" x2="18" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <line x1="30" y1="20" x2="45" y2="20" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
+                      <line
+                        x1={leadingEdgeX}
+                        y1="26"
+                        x2={farJambX}
+                        y2="26"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeOpacity="0.6"
+                        strokeDasharray="3 2"
+                        strokeLinecap="round"
+                      />
+                      <line x1={leafStart} y1="26" x2={leafEnd} y2="26" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                      <circle cx={farJambX} cy="26" r="2" fill="currentColor" />
+                    </svg>
+                    <span className="text-sm font-medium">{option.label}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-400 mt-1">The panel slides to this side of the opening; the other half is where it travels.</p>
+        </div>}
 
         {/* Hinge Side */}
-        <div>
+        {style === 'single' && <div>
           <label className="block text-sm font-semibold text-slate-300 mb-3">Hinge Side</label>
           <div className="grid grid-cols-2 gap-3">
             {hingeSideOptions.map((option) => {
@@ -280,16 +412,18 @@ export const DoorEditor: React.FC<DoorEditorProps> = ({
             })}
           </div>
           <p className="text-xs text-slate-400 mt-1">Dot marks the hinge; the panel and arc swing from that side.</p>
-        </div>
+        </div>}
       </div>
 
       {/* Footer */}
       <div className="px-6 py-4 border-t border-slate-700">
         <button
           onClick={onDelete}
-          className="w-full px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-600/50 rounded-lg text-red-200 font-semibold transition-colors"
+          disabled={isLocked}
+          title={isLocked ? 'Unlock this door before deleting it' : 'Delete this door (Del)'}
+          className="w-full px-4 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-600/50 rounded-lg text-red-200 font-semibold transition-colors disabled:opacity-40 disabled:hover:bg-red-600/20"
         >
-          Delete Door
+          Delete Door <span className="font-normal text-red-200/70">(Del)</span>
         </button>
       </div>
     </div>

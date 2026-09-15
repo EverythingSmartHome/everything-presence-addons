@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../config/storage';
+import { roomSnapshotStorage } from '../config/roomSnapshotStorage';
+import { logger } from '../logger';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { DevicePlacement, Door, EntityMappings, FurnitureInstance, RoomConfig, RoomShell, ZoneRect, ZoneEntitySet, TargetEntitySet } from '../domain/types';
 
@@ -26,7 +28,23 @@ export const createRoomsRouter = (): Router => {
         y: Number(p?.y ?? 0),
       }))
       .filter((p: any) => Number.isFinite(p.x) && Number.isFinite(p.y));
-    return points.length ? { points } : undefined;
+    if (!points.length) return undefined;
+    // Locked wall segments are stored by index, so anything out of range for the
+    // stored outline is dropped rather than resurrected later against a different wall.
+    const lockedSegments = Array.isArray(shell.lockedSegments)
+      ? (Array.from(
+        new Set(
+          shell.lockedSegments
+            .map((value: any) => Number(value))
+            .filter((value: number) => Number.isInteger(value) && value >= 0 && value < points.length),
+        ),
+      ) as number[]).sort((a, b) => a - b)
+      : undefined;
+    return {
+      points,
+      locked: shell.locked !== undefined ? Boolean(shell.locked) : undefined,
+      lockedSegments: lockedSegments?.length ? lockedSegments : undefined,
+    };
   };
 
   const parseDevicePlacement = (placement: any): DevicePlacement | undefined => {
@@ -53,6 +71,7 @@ export const createRoomsRouter = (): Router => {
       coveragePresetId,
       horizontalFovDeg: Number.isFinite(horizontalFovDeg) ? horizontalFovDeg : undefined,
       verticalFovDeg: Number.isFinite(verticalFovDeg) ? verticalFovDeg : undefined,
+      locked: placement?.locked !== undefined ? Boolean(placement.locked) : undefined,
     };
   };
 
@@ -82,6 +101,7 @@ export const createRoomsRouter = (): Router => {
       height,
       rotationDeg,
       aspectRatioLocked,
+      locked: furniture?.locked !== undefined ? Boolean(furniture.locked) : undefined,
     };
   };
 
@@ -89,23 +109,30 @@ export const createRoomsRouter = (): Router => {
     if (!door || typeof door.id !== 'string') {
       return null;
     }
-    const segmentIndex = Number(door?.segmentIndex ?? 0);
-    const positionOnSegment = Number(door?.positionOnSegment ?? 0.5);
-    const widthMm = Number(door?.widthMm ?? 800);
+    const rawSegmentIndex = Number(door?.segmentIndex ?? 0);
+    const rawPositionOnSegment = Number(door?.positionOnSegment ?? 0.5);
+    const rawWidthMm = Number(door?.widthMm ?? 800);
+    const supportedStyles = ['single', 'sliding', 'opening', 'double'] as const;
+    const style = supportedStyles.includes(door?.style) ? door.style as Door['style'] : 'single';
     const swingDirection = door?.swingDirection === 'out' ? 'out' : 'in';
     const swingSide = door?.swingSide === 'right' ? 'right' : 'left';
 
-    if (!Number.isFinite(segmentIndex) || !Number.isFinite(positionOnSegment) || !Number.isFinite(widthMm)) {
+    if (!Number.isFinite(rawSegmentIndex) || !Number.isFinite(rawPositionOnSegment) || !Number.isFinite(rawWidthMm)) {
       return null;
     }
+    const segmentIndex = Math.max(0, Math.trunc(rawSegmentIndex));
+    const positionOnSegment = Math.min(1, Math.max(0, rawPositionOnSegment));
+    const widthMm = rawWidthMm > 0 ? rawWidthMm : 800;
 
     return {
       id: door.id,
+      style,
       segmentIndex,
       positionOnSegment,
       widthMm,
       swingDirection,
       swingSide,
+      locked: door?.locked !== undefined ? Boolean(door.locked) : undefined,
     };
   };
 
@@ -290,7 +317,42 @@ export const createRoomsRouter = (): Router => {
     if (!existing) {
       return res.status(404).json({ message: 'Room not found' });
     }
-    const room = applyDeviceMappingPrefix(normalizeRoom({ ...existing, ...req.body }, existing.id));
+    const body = req.body ?? {};
+    const merged: any = { ...existing, ...body };
+
+    // A room outline is expensive to redraw and impossible to recover from a
+    // shallow merge, so it is only ever removed on an explicit request: send
+    // `roomShell: null` to clear it. An absent key, an empty `points` array, or
+    // anything else that does not parse to a usable shell keeps what is stored.
+    const shellProvided = Object.prototype.hasOwnProperty.call(body, 'roomShell');
+    const explicitClear = shellProvided && body.roomShell === null;
+    if (existing.roomShell && !explicitClear && !parseRoomShell(merged.roomShell)) {
+      if (shellProvided) {
+        logger.warn(
+          { roomId: existing.id },
+          'Ignoring room update that would erase the stored room outline; send roomShell: null to clear it explicitly',
+        );
+      }
+      merged.roomShell = existing.roomShell;
+    }
+
+    const room = applyDeviceMappingPrefix(normalizeRoom(merged, existing.id));
+    storage.saveRoom(room);
+    return res.json({ room });
+  });
+
+  router.get('/:id/snapshots', (req, res) => {
+    const snapshots = roomSnapshotStorage.listSnapshots(req.params.id);
+    return res.json({ snapshots });
+  });
+
+  router.post('/:id/snapshots/:snapshotId/restore', (req, res) => {
+    const snapshot = roomSnapshotStorage.getSnapshot(req.params.snapshotId);
+    if (!snapshot || snapshot.roomId !== req.params.id) {
+      return res.status(404).json({ message: 'Snapshot not found' });
+    }
+    // saveRoom snapshots the current state first, so a restore is itself undoable.
+    const room = applyDeviceMappingPrefix(normalizeRoom(snapshot.room, req.params.id));
     storage.saveRoom(room);
     return res.json({ room });
   });

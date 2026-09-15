@@ -35,6 +35,10 @@ Use this installation method **ONLY** if you have a [Home Assistant OS Installat
 
 ## Configuration
 
+### Zone label synchronization
+
+Saving a custom label in the Zone Editor also updates the Home Assistant display names of mapped entities for that zone, including rectangular coordinates and timeouts, occupancy and target-count sensors, and polygon regular, exclusion, and entry entities. Entity IDs are intentionally left unchanged so dashboards, automations, and stored mappings continue to work. Registry display-name updates require the WebSocket transport; with the REST fallback the label is still stored and the editor shows a warning that Home Assistant names could not be synchronized.
+
 ### Options
 
 - **port:** This is the port used to reach the web interface.

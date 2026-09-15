@@ -249,6 +249,18 @@ export class WsReadTransport implements IHaReadTransport {
     }
   }
 
+  async updateEntityRegistryName(entityId: string, name: string | null): Promise<void> {
+    const response = await this.call({
+      type: 'config/entity_registry/update',
+      entity_id: entityId,
+      name,
+    }) as HaWsMessage;
+    if (response.type !== 'result' || !response.success) {
+      const message = (response as any).error?.message ?? 'Home Assistant rejected the registry update';
+      throw new Error(message);
+    }
+  }
+
   async listAreaRegistry(): Promise<AreaRegistryEntry[]> {
     try {
       const response = (await this.call({

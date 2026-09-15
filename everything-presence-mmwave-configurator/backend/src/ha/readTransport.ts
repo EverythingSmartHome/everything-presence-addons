@@ -90,6 +90,9 @@ export interface IHaReadTransport {
    */
   listEntityRegistry(): Promise<EntityRegistryEntry[]>;
 
+  /** Update the user-facing registry name without changing the entity ID. */
+  updateEntityRegistryName(entityId: string, name: string | null): Promise<void>;
+
   /**
    * List all areas from the area registry
    */

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { MARKER_SCALE_MAX, MARKER_SCALE_MIN, normalizeDeviceMarkerSettings } from '../utils/deviceMarkerSettings';
 
 export interface DisplaySettings {
   showWalls: boolean;
@@ -7,6 +8,9 @@ export interface DisplaySettings {
   showZones: boolean;
   showDeviceIcon: boolean;
   showDeviceRadar: boolean;
+  deviceMarkerStyle: 'icon' | 'node';
+  deviceMarkerScale: number;
+  deviceMarkerOpacity: number;
   showMaxDistanceOverlay: boolean;
   showTriggerDistanceOverlay: boolean;
   showTargets: boolean;
@@ -15,6 +19,7 @@ export interface DisplaySettings {
   zoneLabelScale: number;
   showAlignedDirection: boolean;
   clipRadarToWalls: boolean;
+  units: 'metric' | 'imperial';
   // Heatmap settings
   heatmapEnabled: boolean;
   heatmapHours: number;
@@ -30,6 +35,9 @@ const defaultSettings: DisplaySettings = {
   showZones: true,
   showDeviceIcon: true,
   showDeviceRadar: false,
+  deviceMarkerStyle: 'icon',
+  deviceMarkerScale: 0.5,
+  deviceMarkerOpacity: 1,
   showMaxDistanceOverlay: true,
   showTriggerDistanceOverlay: false,
   showTargets: true,
@@ -38,10 +46,20 @@ const defaultSettings: DisplaySettings = {
   zoneLabelScale: 1,
   showAlignedDirection: false,
   clipRadarToWalls: true,
+  units: 'metric',
   // Heatmap defaults
   heatmapEnabled: false,
   heatmapHours: 24,
   heatmapThreshold: 0.15,
+};
+
+export const normalizeDisplaySettings = (value: unknown): DisplaySettings => {
+  const parsed = value && typeof value === 'object' ? value as Partial<DisplaySettings> : {};
+  return {
+    ...defaultSettings,
+    ...parsed,
+    ...normalizeDeviceMarkerSettings(parsed),
+  };
 };
 
 const loadSettings = (): DisplaySettings => {
@@ -50,7 +68,7 @@ const loadSettings = (): DisplaySettings => {
     if (stored) {
       const parsed = JSON.parse(stored);
       // Merge with defaults to handle any new settings added in future
-      return { ...defaultSettings, ...parsed };
+      return normalizeDisplaySettings(parsed);
     }
   } catch (e) {
     console.warn('Failed to load display settings from localStorage:', e);
@@ -99,6 +117,21 @@ export const useDisplaySettings = () => {
     setSettings((prev) => ({ ...prev, showDeviceRadar: value }));
   }, []);
 
+  const setDeviceMarkerStyle = useCallback((value: 'icon' | 'node') => {
+    if (value !== 'icon' && value !== 'node') return;
+    setSettings((prev) => ({ ...prev, deviceMarkerStyle: value }));
+  }, []);
+
+  const setDeviceMarkerScale = useCallback((value: number) => {
+    if (!Number.isFinite(value)) return;
+    setSettings((prev) => ({ ...prev, deviceMarkerScale: Math.min(MARKER_SCALE_MAX, Math.max(MARKER_SCALE_MIN, value)) }));
+  }, []);
+
+  const setDeviceMarkerOpacity = useCallback((value: number) => {
+    if (!Number.isFinite(value)) return;
+    setSettings((prev) => ({ ...prev, deviceMarkerOpacity: Math.round(Math.min(1, Math.max(0.1, value)) * 10) / 10 }));
+  }, []);
+
   const setShowMaxDistanceOverlay = useCallback((value: boolean) => {
     setSettings((prev) => ({ ...prev, showMaxDistanceOverlay: value }));
   }, []);
@@ -112,7 +145,7 @@ export const useDisplaySettings = () => {
   }, []);
 
   const setTargetMarkerScale = useCallback((value: number) => {
-    setSettings((prev) => ({ ...prev, targetMarkerScale: Math.min(1.75, Math.max(0.5, value)) }));
+    setSettings((prev) => ({ ...prev, targetMarkerScale: Math.min(MARKER_SCALE_MAX, Math.max(MARKER_SCALE_MIN, value)) }));
   }, []);
 
   const setShowZoneLabels = useCallback((value: boolean) => {
@@ -120,7 +153,7 @@ export const useDisplaySettings = () => {
   }, []);
 
   const setZoneLabelScale = useCallback((value: number) => {
-    setSettings((prev) => ({ ...prev, zoneLabelScale: Math.min(1.75, Math.max(0.5, value)) }));
+    setSettings((prev) => ({ ...prev, zoneLabelScale: Math.min(MARKER_SCALE_MAX, Math.max(MARKER_SCALE_MIN, value)) }));
   }, []);
 
   const setShowAlignedDirection = useCallback((value: boolean) => {
@@ -129,6 +162,10 @@ export const useDisplaySettings = () => {
 
   const setClipRadarToWalls = useCallback((value: boolean) => {
     setSettings((prev) => ({ ...prev, clipRadarToWalls: value }));
+  }, []);
+
+  const setUnits = useCallback((value: 'metric' | 'imperial') => {
+    setSettings((prev) => ({ ...prev, units: value }));
   }, []);
 
   const setHeatmapEnabled = useCallback((value: boolean) => {
@@ -151,6 +188,9 @@ export const useDisplaySettings = () => {
     showZones: settings.showZones,
     showDeviceIcon: settings.showDeviceIcon,
     showDeviceRadar: settings.showDeviceRadar,
+    deviceMarkerStyle: settings.deviceMarkerStyle,
+    deviceMarkerScale: settings.deviceMarkerScale,
+    deviceMarkerOpacity: settings.deviceMarkerOpacity,
     showMaxDistanceOverlay: settings.showMaxDistanceOverlay,
     showTriggerDistanceOverlay: settings.showTriggerDistanceOverlay,
     showTargets: settings.showTargets,
@@ -159,6 +199,7 @@ export const useDisplaySettings = () => {
     zoneLabelScale: settings.zoneLabelScale,
     showAlignedDirection: settings.showAlignedDirection,
     clipRadarToWalls: settings.clipRadarToWalls,
+    units: settings.units,
     heatmapEnabled: settings.heatmapEnabled,
     heatmapHours: settings.heatmapHours,
     heatmapThreshold: settings.heatmapThreshold,
@@ -169,6 +210,9 @@ export const useDisplaySettings = () => {
     setShowZones,
     setShowDeviceIcon,
     setShowDeviceRadar,
+    setDeviceMarkerStyle,
+    setDeviceMarkerScale,
+    setDeviceMarkerOpacity,
     setShowMaxDistanceOverlay,
     setShowTriggerDistanceOverlay,
     setShowTargets,
@@ -177,6 +221,7 @@ export const useDisplaySettings = () => {
     setZoneLabelScale,
     setShowAlignedDirection,
     setClipRadarToWalls,
+    setUnits,
     setHeatmapEnabled,
     setHeatmapHours,
     setHeatmapThreshold,
