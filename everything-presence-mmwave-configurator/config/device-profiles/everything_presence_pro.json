@@ -879,6 +879,27 @@
       "property": "active",
       "required": false
     },
+    "entry1Presence": {
+      "template": "binary_sensor.${name}_entry_1_presence",
+      "category": "sensor",
+      "subcategory": "entryOccupancy",
+      "label": "Entry 1 Presence",
+      "required": false
+    },
+    "entry2Presence": {
+      "template": "binary_sensor.${name}_entry_2_presence",
+      "category": "sensor",
+      "subcategory": "entryOccupancy",
+      "label": "Entry 2 Presence",
+      "required": false
+    },
+    "entryExitEvent": {
+      "template": "event.${name}_entry_exit_event",
+      "category": "sensor",
+      "subcategory": "entryExit",
+      "label": "Entry Exit Event",
+      "required": false
+    },
     "zone1Occupancy": {
       "template": "binary_sensor.${name}_zone_1_presence",
       "category": "sensor",
