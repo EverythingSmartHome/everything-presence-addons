@@ -1,6 +1,6 @@
 {
   "id": "everything_presence_pro",
-  "schemaVersion": "1.3",
+  "schemaVersion": "1.4",
   "label": "Everything Presence Pro",
   "model": "Everything Presence Pro",
   "manufacturer": "EverythingSmartTechnology",
@@ -20,7 +20,7 @@
     "tracking": true,
     "zones": true,
     "exclusionZones": true,
-    "entryZones": false,
+    "entryZones": true,
     "polygonZones": true,
     "distanceOnlyTracking": false,
     "sensors": {
@@ -33,7 +33,7 @@
   "limits": {
     "maxZones": 4,
     "maxExclusionZones": 2,
-    "maxEntryZones": 0,
+    "maxEntryZones": 2,
     "maxTargets": 3,
     "maxRangeMeters": 6,
     "fieldOfViewDegrees": 120
@@ -146,9 +146,49 @@
     "assumedPresenceEnabled": {
       "template": "switch.${name}_enable_assumed_presence",
       "category": "setting",
-      "group": "Tracking Radar",
+      "group": "Entry/Exit Detection",
       "label": "Enable Assumed Presence",
       "controlType": "switch",
+      "required": false
+    },
+    "assumePresentTimeout": {
+      "template": "number.${name}_assume_present_timeout",
+      "category": "setting",
+      "group": "Entry/Exit Detection",
+      "label": "Assume Present Timeout",
+      "controlType": "number",
+      "min": 0,
+      "max": 43200,
+      "step": 1,
+      "unit": "s",
+      "required": false
+    },
+    "assumedPresent": {
+      "template": "binary_sensor.${name}_assumed_present",
+      "category": "sensor",
+      "subcategory": "entryExit",
+      "label": "Assumed Present",
+      "required": false
+    },
+    "assumedPresentRemaining": {
+      "template": "sensor.${name}_assumed_present_remaining",
+      "category": "sensor",
+      "subcategory": "entryExit",
+      "label": "Assumed Present Remaining",
+      "required": false
+    },
+    "polygonEntry1": {
+      "template": "text.${name}_polygon_entry_1",
+      "category": "zone",
+      "zoneType": "polygonEntry",
+      "zoneIndex": 1,
+      "required": false
+    },
+    "polygonEntry2": {
+      "template": "text.${name}_polygon_entry_2",
+      "category": "zone",
+      "zoneType": "polygonEntry",
+      "zoneIndex": 2,
       "required": false
     },
     "ld2450Bluetooth": {
@@ -839,6 +879,27 @@
       "property": "active",
       "required": false
     },
+    "entry1Presence": {
+      "template": "binary_sensor.${name}_entry_1_presence",
+      "category": "sensor",
+      "subcategory": "entryOccupancy",
+      "label": "Entry 1 Presence",
+      "required": false
+    },
+    "entry2Presence": {
+      "template": "binary_sensor.${name}_entry_2_presence",
+      "category": "sensor",
+      "subcategory": "entryOccupancy",
+      "label": "Entry 2 Presence",
+      "required": false
+    },
+    "entryExitEvent": {
+      "template": "event.${name}_entry_exit_event",
+      "category": "sensor",
+      "subcategory": "entryExit",
+      "label": "Entry Exit Event",
+      "required": false
+    },
     "zone1Occupancy": {
       "template": "binary_sensor.${name}_zone_1_presence",
       "category": "sensor",
@@ -950,7 +1011,10 @@
       "exclusion1": "text.${name}_polygon_exclusion_1",
       "exclusion2": "text.${name}_polygon_exclusion_2"
     },
-    "polygonEntryEntities": null,
+    "polygonEntryEntities": {
+      "entry1": "text.${name}_polygon_entry_1",
+      "entry2": "text.${name}_polygon_entry_2"
+    },
     "zoneConfigEntities": {
       "zone1": {
         "beginX": "number.${name}_zone_1_start_x",
@@ -1010,6 +1074,7 @@
       "installationAngle": "number.${name}_tracking_sensor_angle",
       "upsideDownMounting": "switch.${name}_upside_down_mounting",
       "assumedPresenceEnabled": "switch.${name}_enable_assumed_presence",
+      "assumePresentTimeout": "number.${name}_assume_present_timeout",
       "ld2450Bluetooth": "switch.${name}_ld2450_bluetooth",
       "staleTargetReset": "switch.${name}_auto_clear_stuck_targets",
       "staleTargetResetTimeout": "number.${name}_stuck_target_timeout",
