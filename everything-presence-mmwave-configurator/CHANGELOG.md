@@ -1,3 +1,29 @@
+## 2.2.5
+* Avoid eager entity prefix discovery during startup by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/371
+* Use device mappings as the runtime source of truth by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/372
+* Fix upside down mounting issue by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/374
+* Fix rectangle zone labels rendering upside down when rotated by @rancur in https://github.com/EverythingSmartHome/everything-presence-addons/pull/388
+* Persist the metric/imperial unit preference by @rancur in https://github.com/EverythingSmartHome/everything-presence-addons/pull/389
+* Fixed bug where a reload on certain steps it would not load the page by @thibaultmol in https://github.com/EverythingSmartHome/everything-presence-addons/pull/391
+* [BUG] - Walls deleted without save by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/392
+* [FEATURE] Easy room shapes by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/393
+* Feature Request: Delete Nodes by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/394
+* Bug: undo deletes more things by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/395
+* Bug: Cannot change rooms in the room builder by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/396
+* v2 Feature Request: Lock walls, rooms, furniture, etc by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/397
+* Feature Request: Ability to rotate floor plan by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/398
+* Feature Request: Sliding doors by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/399
+* Improve sliding door look by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/400
+* [Feature] Automatic renaming of zone entites in HomeAssistant by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/401
+* Bug: hitting delete when selecting furnature deletes a wall by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/402
+* Bug: Wall nodes behind furniture by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/403
+* Feature Request: Tool Tips by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/407
+* Investigate EP1 zone editor access and invalid zone types by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/408
+* Feature Request: Reduce Device Icon to Node by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/409
+* Add "org.opencontainers.image.version" label to docker container by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/410
+* Feature Request: Ability To Centre Room by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/411
+* Add entry zones and Entry/Exit Detection settings for Everything Presence Pro by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/412
+
 ## 2.2.4
 * Reduce startup load from device discovery by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/363
 * Fix polygon zone editing failing after polygon only firmware updates by @EverythingSmartHome in https://github.com/EverythingSmartHome/everything-presence-addons/pull/364
