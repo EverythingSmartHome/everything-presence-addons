@@ -9,10 +9,11 @@ import {
   groupMatchResultsByCategory,
   getTemplateKeyLabel,
 } from '../api/entityDiscovery';
-import { saveDeviceMapping, DeviceMapping } from '../api/deviceMappings';
+import { saveDeviceMapping, getDeviceMapping, DeviceMapping } from '../api/deviceMappings';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { ServiceMappingSelector } from './ServiceMappingSelector';
 import { validateMappings } from '../api/entityDiscovery';
+import { seedManualOverrides } from '../utils/manualOverrides';
 
 interface EntityDiscoveryProps {
   deviceId: string;
@@ -48,7 +49,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     return new Map(allEntities.map((entity) => [entity.entity_id, entity]));
   }, [allEntities]);
 
-  // Load existing device mapping to preserve user overrides during re-sync
+  // Keep existingMapping in sync with the mappings cache (e.g. after service mapping updates)
   useEffect(() => {
     const loadExistingMapping = async () => {
       try {
@@ -69,7 +70,12 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     setDiscoveredServices({});
 
     try {
-      const result = await discoverEntities(deviceId, profileId);
+      // Fetch the saved mapping here; existingMapping in this closure is from the first render.
+      // getDeviceMapping resolves to null on 404/failure, so it can't fail discovery.
+      const [result, existing] = await Promise.all([
+        discoverEntities(deviceId, profileId),
+        getDeviceMapping(deviceId),
+      ]);
       setDiscoveryResult(result);
       setAllEntities(result.deviceEntities);
       setDiscoveredServices(result.serviceMappings ?? {});
@@ -92,20 +98,10 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
       }
 
       // Seed manual overrides from existing mapping so user-set values persist on re-sync
-      if (existingMapping) {
-        const overrides: Record<string, string> = {};
-        for (const match of result.results) {
-          const key = match.templateKey;
-          const m = existingMapping.mappings;
-          const direct = m[key];
-          const withEntitySuffix = m[`${key}Entity`];
-          const withoutEntitySuffix = key.endsWith('Entity') ? m[key.replace(/Entity$/, '')] : undefined;
-          const chosen = direct || withEntitySuffix || withoutEntitySuffix;
-          if (chosen) {
-            overrides[key] = chosen;
-          }
-        }
-        setManualOverrides(overrides);
+      if (existing) {
+        setExistingMapping(existing);
+        const deviceEntityIds = new Set(result.deviceEntities.map((entity) => entity.entity_id));
+        setManualOverrides(seedManualOverrides(result.results, existing.mappings, deviceEntityIds));
       }
     } catch (err) {
       setError((err as Error).message);
