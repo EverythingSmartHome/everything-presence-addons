@@ -33,6 +33,7 @@ import {
   getCeilingSliceLineDepth,
   getCeilingSlicePosition,
   normalizeCeilingSliceConfig,
+  usesCeilingSlices,
 } from '../utils/ceilingSlices';
 import { resolveLoadedRoomSelection } from '../utils/roomSelection';
 import {
@@ -398,9 +399,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
 
   const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
-  const isCeilingSliceMode =
-    selectedProfile?.id === 'everything_presence_pro' &&
-    selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  const isCeilingSliceMode = usesCeilingSlices(selectedProfile?.id, selectedRoom?.devicePlacement?.mountType);
   const trackingMaxRangeMm = (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000;
   const ceilingSliceConfig = useMemo(
     () => normalizeCeilingSliceConfig(selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm, true),

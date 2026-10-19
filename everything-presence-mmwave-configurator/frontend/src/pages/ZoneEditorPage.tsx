@@ -49,12 +49,14 @@ import { resolveEntityPrefix } from '../utils/entityUtils';
 import { MIN_POLYGON_VERTICES, canDeleteVertex, deleteVertex } from '../utils/polygonVertices';
 import {
   buildCeilingExclusionZones,
+  buildCeilingEntryZones,
   buildCeilingSliceZones,
   CeilingSliceConfig,
   getCeilingSliceBands,
   getCeilingSliceLineDepth,
   getCeilingSlicePosition,
   normalizeCeilingSliceConfig,
+  usesCeilingSlices,
 } from '../utils/ceilingSlices';
 
 interface ZoneEditorPageProps {
@@ -189,9 +191,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const trackingMaxRangeMeters = trackingCoverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
   const trackingFieldOfViewDeg = trackingCoverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees;
   const trackingMaxRangeMm = (trackingMaxRangeMeters ?? 6) * 1000;
-  const isCeilingSliceMode =
-    selectedProfile?.id === 'everything_presence_pro' &&
-    selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  const isCeilingSliceMode = usesCeilingSlices(selectedProfile?.id, selectedRoom?.devicePlacement?.mountType);
   const heightCoverageConfig = useMemo(() => {
     if (!selectedRoom?.devicePlacement || !isCeilingSliceMode) return null;
     if (!coverageFov) return null;
@@ -210,8 +210,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
   }, [coverageFov, selectedRoom?.devicePlacement, isCeilingSliceMode]);
   const ceilingSliceConfig = useMemo(
-    () => normalizeCeilingSliceConfig(selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm, true),
-    [selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm],
+    () => normalizeCeilingSliceConfig(selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm, true, polygonZones),
+    [selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm, polygonZones],
   );
   const ceilingSliceDisplayZones = useMemo(
     () => buildCeilingSliceZones(
@@ -243,7 +243,16 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     () => buildCeilingExclusionZones(ceilingSliceConfig, deviceZoneLabels, 'device'),
     [ceilingSliceConfig, deviceZoneLabels],
   );
-  const activePolygonZones = isCeilingSliceMode ? [...ceilingSliceDisplayZones, ...ceilingExclusionDisplayZones] : polygonZones;
+  const ceilingEntryDisplayZones = useMemo(
+    () => buildCeilingEntryZones(ceilingSliceConfig, deviceZoneLabels, 'display', true, heightCoverageConfig, trackingMaxRangeMm),
+    [ceilingSliceConfig, deviceZoneLabels, heightCoverageConfig, trackingMaxRangeMm],
+  );
+  const ceilingEntryDeviceZones = useMemo(
+    () => buildCeilingEntryZones(ceilingSliceConfig, deviceZoneLabels, 'device'),
+    [ceilingSliceConfig, deviceZoneLabels],
+  );
+  const activePolygonZones = isCeilingSliceMode
+    ? [...ceilingSliceDisplayZones, ...ceilingExclusionDisplayZones, ...ceilingEntryDisplayZones] : polygonZones;
   const savedRectangularZones = useMemo(
     () => (selectedRoom?.zones ?? []).filter((zone) => zone.enabled !== false),
     [selectedRoom?.zones],
@@ -718,8 +727,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     }
 
     const { x, y, rotationDeg } = selectedRoom.devicePlacement;
-    // Use device rotation as-is (device coordinates have 0° = right)
-    const angleRad = ((rotationDeg ?? 0) * Math.PI) / 180;
+    // Match the other views and ZoneCanvas, including firmware compensation.
+    const angleRad = (((rotationDeg ?? 0) + installationAngle) * Math.PI) / 180;
     const cos = Math.cos(angleRad);
     const sin = Math.sin(angleRad);
 
@@ -789,12 +798,21 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         }
       }
 
+      const entryRangesMm = [...(ceilingSliceConfig.entryRangesMm ?? [])];
+      for (const zone of nextZones.filter(zone => zone.type === 'entry')) {
+        const slot = Number(zone.id.match(/(\d+)$/)?.[1]);
+        const range = getPolygonLateralRange(zone);
+        const index = entryRangesMm.findIndex(entry => entry.slot === slot);
+        if (index >= 0 && range) entryRangesMm[index] = { slot, ...range };
+      }
+
       updateCeilingSliceConfig({
         lateralMinMm: Math.min(...lateralRangesMm.map((range) => range.min)),
         lateralMaxMm: Math.max(...lateralRangesMm.map((range) => range.max)),
         lateralBreakpointsMm: undefined,
         lateralRangesMm,
         exclusionRangesMm: exclusionRangesMm.slice(0, zoneLimits.maxExclusionZones),
+        entryRangesMm,
       }, { persist: false });
       return;
     }
@@ -1255,7 +1273,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     const maxRangeMm = maxRangeMeters * 1000;
 
     const rectZones = (selectedRoom.zones ?? []).filter(zone => isZoneAvailable(zone));
-    const zonesToWrite = isCeilingSliceMode ? [...ceilingSliceDeviceZones, ...ceilingExclusionDeviceZones] : polygonZones;
+    const zonesToWrite = isCeilingSliceMode
+      ? [...ceilingSliceDeviceZones, ...ceilingExclusionDeviceZones, ...ceilingEntryDeviceZones] : polygonZones;
     const outOfRangeZones = isCeilingSliceMode
       ? []
       : getOutOfRangeZones(
@@ -2284,6 +2303,21 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                       >
                         + Exclusion ({ceilingSliceConfig.exclusionRangesMm?.length ?? 0}/{zoneLimits.maxExclusionZones})
                       </button>
+                      {zoneLimits.maxEntryZones > 0 && <button
+                        type="button"
+                        onClick={() => {
+                          const existing = ceilingSliceConfig.entryRangesMm ?? [];
+                          const slot = Array.from({ length: zoneLimits.maxEntryZones }, (_, i) => i + 1)
+                            .find(candidate => !existing.some(entry => entry.slot === candidate));
+                          if (slot === undefined) return;
+                          const width = Math.max(300, (ceilingSliceConfig.lateralMaxMm - ceilingSliceConfig.lateralMinMm) / 8);
+                          void updateCeilingSliceConfig({ entryRangesMm: [...existing, { slot, min: -width / 2, max: width / 2 }] });
+                        }}
+                        disabled={(ceilingSliceConfig.entryRangesMm?.length ?? 0) >= zoneLimits.maxEntryZones}
+                        className="mt-3 w-full rounded-md border border-emerald-500/50 bg-emerald-600/20 px-3 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-600/30 disabled:opacity-40"
+                      >
+                        + Entry ({ceilingSliceConfig.entryRangesMm?.length ?? 0}/{zoneLimits.maxEntryZones})
+                      </button>}
                     </div>
                   )}
                   {/* Add Zone Buttons */}
@@ -2410,6 +2444,14 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                                   setSelectedZoneId(activePolygonZones[0]?.id ?? null);
                                   return;
                                 }
+                                if (isCeilingSliceMode && polygon.type === 'entry') {
+                                  const slot = Number(polygon.id.match(/(\d+)$/)?.[1]);
+                                  void updateCeilingSliceConfig({
+                                    entryRangesMm: (ceilingSliceConfig.entryRangesMm ?? []).filter(entry => entry.slot !== slot),
+                                  });
+                                  setSelectedZoneId(null);
+                                  return;
+                                }
                                 const newZones = polygonZones.filter(z => z.id !== polygon.id);
                                 // Renumber zones of the same type
                                 let regularIdx = 1, exclusionIdx = 1, entryIdx = 1;
@@ -2424,7 +2466,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                                 }
                               }}
                               className="rounded-lg border border-slate-600 bg-slate-700/50 px-2 py-1 text-xs text-slate-300 transition-all hover:bg-rose-600/30 hover:border-rose-500 hover:text-rose-200"
-                              style={{ display: isCeilingSliceMode && polygon.type !== 'exclusion' ? 'none' : undefined }}
+                              style={{ display: isCeilingSliceMode && polygon.type === 'regular' ? 'none' : undefined }}
                             >
                               Delete
                             </button>
@@ -2451,8 +2493,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                               onChange={(e) => {
                                 const newLabel = e.target.value || undefined;
                                 // Update both local polygon state and deviceZoneLabels
-                                const updated = { ...polygon, label: newLabel };
-                                setPolygonZones(polygonZones.map(z => z.id === polygon.id ? updated : z));
+                                // A generated slice is in display space; update only the label.
+                                setPolygonZones(polygonZones.map(z => z.id === polygon.id ? { ...z, label: newLabel } : z));
                                 setDeviceZoneLabels(prev => {
                                   const next = { ...prev };
                                   if (newLabel) {

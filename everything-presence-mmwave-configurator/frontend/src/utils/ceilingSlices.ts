@@ -2,6 +2,10 @@ import type { ZonePolygon } from '../api/types';
 
 export type CeilingSliceAxis = 'x' | 'y';
 
+export const usesCeilingSlices = (profileId: string | undefined, mountType: string | undefined): boolean =>
+  mountType === 'ceiling' &&
+  (profileId === 'everything_presence_lite' || profileId === 'everything_presence_pro');
+
 export interface CeilingSliceConfig {
   enabled: boolean;
   axis: CeilingSliceAxis;
@@ -12,6 +16,7 @@ export interface CeilingSliceConfig {
   lateralBreakpointsMm?: number[];
   lateralRangesMm?: Array<{ min: number; max: number }>;
   exclusionRangesMm?: Array<{ min: number; max: number }>;
+  entryRangesMm?: Array<{ slot: number; min: number; max: number }>;
   depthMinMm: number;
   depthMaxMm: number;
 }
@@ -47,8 +52,17 @@ export const normalizeCeilingSliceConfig = (
   value: unknown,
   maxRangeMm: number,
   forceMirrorLateralAxis = false,
+  deviceZones: ZonePolygon[] = [],
 ): CeilingSliceConfig => {
   const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const axis = raw.axis === 'y' ? 'y' : 'x';
+  const mirrorLateralAxis = forceMirrorLateralAxis
+    ? true
+    : raw.mirrorLateralAxis !== undefined
+      ? Boolean(raw.mirrorLateralAxis)
+      : raw.inverted !== undefined
+        ? Boolean(raw.inverted)
+        : DEFAULT_CEILING_SLICE_CONFIG.mirrorLateralAxis;
   const sliceCountRaw = Number(raw.sliceCount ?? DEFAULT_CEILING_SLICE_CONFIG.sliceCount);
   const lateralMinRaw = Number(raw.lateralMinMm ?? DEFAULT_CEILING_SLICE_CONFIG.lateralMinMm);
   const lateralMaxRaw = Number(raw.lateralMaxMm ?? DEFAULT_CEILING_SLICE_CONFIG.lateralMaxMm);
@@ -102,16 +116,28 @@ export const normalizeCeilingSliceConfig = (
         .slice(0, 2)
     : undefined;
 
+  // Import existing entry slots only until the user has saved slice settings.
+  // Explicit [] means deleted; preserve slot numbers (e.g. an Entry 2-only setup).
+  const entrySource = Array.isArray(raw.entryRangesMm) ? raw.entryRangesMm : deviceZones
+    .filter(zone => zone.type === 'entry' && zone.enabled !== false && zone.vertices.length >= 3)
+    .map(zone => {
+      const lateral = zone.vertices.map(vertex => mirrorLateralAxis ? -vertex[axis] : vertex[axis]);
+      return { slot: Number(zone.id.match(/\d+$/)?.[0]), min: Math.min(...lateral), max: Math.max(...lateral) };
+    });
+  const entryRangesMm = entrySource.map((range: unknown) => {
+    const candidate = range && typeof range === 'object' ? range as Record<string, unknown> : {};
+    const slot = Number(candidate.slot);
+    const min = Number(candidate.min);
+    const max = Number(candidate.max);
+    if (!Number.isInteger(slot) || slot < 1 || slot > 2 || !Number.isFinite(min) || !Number.isFinite(max)) return null;
+    return { slot, min: Math.min(min, max - 100), max: Math.max(max, min + 100) };
+  }).filter((range): range is { slot: number; min: number; max: number } => range !== null)
+    .filter((range, index, ranges) => ranges.findIndex(other => other.slot === range.slot) === index);
+
   return {
     enabled: raw.enabled !== false,
-    axis: raw.axis === 'y' ? 'y' : 'x',
-    mirrorLateralAxis: forceMirrorLateralAxis
-      ? true
-      : raw.mirrorLateralAxis !== undefined
-        ? Boolean(raw.mirrorLateralAxis)
-        : raw.inverted !== undefined
-          ? Boolean(raw.inverted)
-          : DEFAULT_CEILING_SLICE_CONFIG.mirrorLateralAxis,
+    axis,
+    mirrorLateralAxis,
     sliceCount,
     lateralMinMm: normalizedMin,
     lateralMaxMm: normalizedMax,
@@ -122,6 +148,7 @@ export const normalizeCeilingSliceConfig = (
       ? lateralRangesMm
       : undefined,
     exclusionRangesMm,
+    entryRangesMm,
     depthMinMm: Math.min(depthMinMm, depthMaxMm - 100),
     depthMaxMm: Math.max(depthMaxMm, depthMinMm + 100),
   };
@@ -247,16 +274,35 @@ export const buildCeilingExclusionZones = (
   );
 };
 
+export const buildCeilingEntryZones = (
+  config: CeilingSliceConfig,
+  existingLabels: Record<string, string> = {},
+  coordinateSpace: CeilingSliceCoordinateSpace = 'device',
+  useExistingLabels = true,
+  coverage?: CeilingSliceCoverage | null,
+  fallbackMaxRangeMm = Math.max(Math.abs(config.depthMinMm), Math.abs(config.depthMaxMm)),
+): ZonePolygon[] => buildCeilingRangeZones(
+  config,
+  (config.entryRangesMm ?? []).map(range => ({
+    id: `Entry ${range.slot}`, label: `Entry ${range.slot}`, min: range.min, max: range.max, type: 'entry' as const,
+  })),
+  existingLabels,
+  coordinateSpace,
+  useExistingLabels,
+  coverage,
+  fallbackMaxRangeMm,
+);
+
 const buildCeilingRangeZones = (
   config: CeilingSliceConfig,
-  bands: Array<CeilingSliceBand & { type: 'regular' | 'exclusion' }>,
+  bands: Array<CeilingSliceBand & { type: 'regular' | 'exclusion' | 'entry' }>,
   existingLabels: Record<string, string>,
   coordinateSpace: CeilingSliceCoordinateSpace,
   useExistingLabels: boolean,
   coverage: CeilingSliceCoverage | null | undefined,
   fallbackMaxRangeMm: number,
 ): ZonePolygon[] => {
-  return bands.map((band) => {
+  return bands.map((band): ZonePolygon | null => {
     const lateralA = coordinateSpace === 'device' ? toDeviceLateral(band.min, config) : band.min;
     const lateralB = coordinateSpace === 'device' ? toDeviceLateral(band.max, config) : band.max;
     let displayLateralA = lateralA;
