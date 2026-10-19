@@ -34,10 +34,12 @@ import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
 import {
   buildCeilingExclusionZones,
+  buildCeilingEntryZones,
   buildCeilingSliceZones,
   getCeilingSliceLineDepth,
   getCeilingSlicePosition,
   normalizeCeilingSliceConfig,
+  usesCeilingSlices,
 } from '../utils/ceilingSlices';
 
 // Recording mode trail point
@@ -169,9 +171,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
 
   const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
-  const isCeilingSliceMode =
-    selectedProfile?.id === 'everything_presence_pro' &&
-    selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  const isCeilingSliceMode = usesCeilingSlices(selectedProfile?.id, selectedRoom?.devicePlacement?.mountType);
   const isEP1 = selectedRoom?.profileId === 'everything_presence_one';
   const hasLiveStateForRoom = Boolean(
     liveState && selectedRoom?.deviceId && liveState.deviceId === selectedRoom.deviceId
@@ -204,8 +204,9 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       selectedRoom?.metadata?.ceilingSliceConfig,
       (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000,
       true,
+      polygonZones,
     ),
-    [selectedProfile?.limits?.maxRangeMeters, selectedRoom?.metadata?.ceilingSliceConfig],
+    [selectedProfile?.limits?.maxRangeMeters, selectedRoom?.metadata?.ceilingSliceConfig, polygonZones],
   );
   const deviceLocalToRoom = useCallback((deviceX: number, deviceY: number) => {
     if (!selectedRoom?.devicePlacement) {
@@ -238,26 +239,32 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const ceilingSliceDisplayZones = useMemo(
     () => buildCeilingSliceZones(
       ceilingSliceConfig,
-      {},
+      deviceMapping?.zoneLabels,
       'display',
-      false,
+      true,
       heightCoverageConfig,
       (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000,
     ),
-    [ceilingSliceConfig, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
+    [ceilingSliceConfig, deviceMapping?.zoneLabels, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
   );
   const ceilingExclusionDisplayZones = useMemo(
     () => buildCeilingExclusionZones(
       ceilingSliceConfig,
-      {},
+      deviceMapping?.zoneLabels,
       'display',
-      false,
+      true,
       heightCoverageConfig,
       (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000,
     ),
-    [ceilingSliceConfig, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
+    [ceilingSliceConfig, deviceMapping?.zoneLabels, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
   );
-  const displayPolygonZones = isCeilingSliceMode ? [...ceilingSliceDisplayZones, ...ceilingExclusionDisplayZones] : polygonZones;
+  const ceilingEntryDisplayZones = useMemo(
+    () => buildCeilingEntryZones(ceilingSliceConfig, deviceMapping?.zoneLabels, 'display', true,
+      heightCoverageConfig, (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000),
+    [ceilingSliceConfig, deviceMapping?.zoneLabels, heightCoverageConfig, selectedProfile?.limits?.maxRangeMeters],
+  );
+  const displayPolygonZones = isCeilingSliceMode
+    ? [...ceilingSliceDisplayZones, ...ceilingExclusionDisplayZones, ...ceilingEntryDisplayZones] : polygonZones;
   const polygonOnlyZones = useMemo(() => (
     usesPolygonOnlyZones(
       selectedDevice?.firmwareVersion ?? deviceMapping?.firmwareVersion ?? null,
@@ -1235,7 +1242,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 </g>
               ) : null;
 
-              const ceilingTargetElements = showTargets && isCeilingMount && liveState?.targets && liveState.targets.length > 0 ? (
+              const ceilingTargetElements = showTargets && isCeilingSliceMode && liveState?.targets && liveState.targets.length > 0 ? (
                 <g>
                   {liveState.targets.map((target) => {
                     if (target.x === null || target.y === null) return null;
