@@ -514,23 +514,35 @@ export class EntityDiscoveryService {
     const isExclusionZoneTemplate = options?.zoneType === 'exclusion';
 
     const computeScore = (entity: EntityRegistryEntry): { score: number; confidence: MatchConfidence } => {
-      const entityIdLower = entity.entity_id.toLowerCase();
+      // The registry original_object_id is assigned by the integration and survives
+      // user renames of the entity_id, so prefer it for structural (zone-type) checks.
+      const originalObjectId = entity.original_object_id || null;
+      const uniqueId = entity.unique_id || null;
+      const structuralId = (originalObjectId ?? entity.entity_id).toLowerCase();
 
       // Filter by zone type to avoid cross-matching entry/regular/exclusion
       // EPL uses occupancy_mask_ for exclusion zones, EPP uses exclusion_zone_
-      if (isRegularZoneTemplate && (entityIdLower.includes('entry_zone_') || entityIdLower.includes('occupancy_mask_') || entityIdLower.includes('exclusion_zone_'))) {
+      if (isRegularZoneTemplate && (structuralId.includes('entry_zone_') || structuralId.includes('occupancy_mask_') || structuralId.includes('exclusion_zone_'))) {
         return { score: -1, confidence: 'none' };
       }
-      if (isEntryZoneTemplate && !entityIdLower.includes('entry_zone_')) {
+      if (isEntryZoneTemplate && !structuralId.includes('entry_zone_')) {
         return { score: -1, confidence: 'none' };
       }
-      if (isExclusionZoneTemplate && !(entityIdLower.includes('occupancy_mask_') || entityIdLower.includes('exclusion_zone_'))) {
+      if (isExclusionZoneTemplate && !(structuralId.includes('occupancy_mask_') || structuralId.includes('exclusion_zone_'))) {
         return { score: -1, confidence: 'none' };
       }
 
       // Exclude zone-like entities for base presence-style templates
-      if (basePresenceTemplate && this.isZoneLikeEntity(entity.entity_id)) {
+      if (basePresenceTemplate && this.isZoneLikeEntity(structuralId)) {
         return { score: -1, confidence: 'none' };
+      }
+
+      // Highest priority: registry identifiers that are not affected by user renames.
+      if (originalObjectId && originalObjectId.endsWith(suffix)) {
+        return { score: 4, confidence: 'exact' };
+      }
+      if (!originalObjectId && uniqueId && uniqueId.endsWith(suffix)) {
+        return { score: 4, confidence: 'exact' };
       }
 
       if (entity.entity_id.endsWith(suffix)) {
