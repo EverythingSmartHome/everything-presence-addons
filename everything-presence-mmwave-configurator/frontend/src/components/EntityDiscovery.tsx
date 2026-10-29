@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { EntityMappings } from '../api/types';
 import {
   discoverEntities,
@@ -9,10 +9,12 @@ import {
   groupMatchResultsByCategory,
   getTemplateKeyLabel,
 } from '../api/entityDiscovery';
-import { saveDeviceMapping, DeviceMapping } from '../api/deviceMappings';
+import { saveDeviceMapping, getDeviceMapping, DeviceMapping } from '../api/deviceMappings';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { ServiceMappingSelector } from './ServiceMappingSelector';
 import { validateMappings } from '../api/entityDiscovery';
+import { buildResyncOverrides, countManualOverrides } from '../utils/seedManualOverrides';
+import { applyOverridesToFlatMappings, applyOverridesToNestedMappings } from '../utils/manualOverrideMapping';
 
 interface EntityDiscoveryProps {
   deviceId: string;
@@ -42,6 +44,10 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string | null>(null);
   const [manualOverrides, setManualOverrides] = useState<Record<string, string>>({});
+  // Mirror of manualOverrides so runDiscovery can keep in-session choices without a stale closure
+  const manualOverridesRef = useRef<Record<string, string>>({});
+  manualOverridesRef.current = manualOverrides;
+  const [showClearManualConfirm, setShowClearManualConfirm] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [allEntities, setAllEntities] = useState<EntityRegistryEntry[]>([]);
   const entityById = useMemo(() => {
@@ -61,15 +67,29 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
     loadExistingMapping();
   }, [deviceId, getMapping]);
 
-  const runDiscovery = useCallback(async () => {
+  const runDiscovery = useCallback(async (options?: { clearManual?: boolean }) => {
+    const clearManual = options?.clearManual === true;
+    // Snapshot in-session selections before re-syncing so a re-sync never discards them.
+    // Only the explicit "clear manual mappings" action resets them.
+    const sessionOverrides = clearManual ? {} : { ...manualOverridesRef.current };
+
     setStatus('loading');
     setError(null);
     setValidationErrors(null);
-    setManualOverrides({});
+    if (clearManual) {
+      setManualOverrides({});
+    }
     setDiscoveredServices({});
+
+    // Fetch the stored mapping directly (bypassing the context cache, whose getMapping identity
+    // changes on every cache update and would re-trigger discovery if used as a dependency).
+    const existingPromise: Promise<DeviceMapping | null> = getDeviceMapping(deviceId).catch(() => null);
 
     try {
       const result = await discoverEntities(deviceId, profileId);
+      // Awaited here (not read from state) so the first run after mount sees the stored mapping.
+      const existing = await existingPromise;
+      setExistingMapping(existing);
       setDiscoveryResult(result);
       setAllEntities(result.deviceEntities);
       setDiscoveredServices(result.serviceMappings ?? {});
@@ -91,22 +111,17 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         setExpandedGroups(groupsWithUnmatched);
       }
 
-      // Seed manual overrides from existing mapping so user-set values persist on re-sync
-      if (existingMapping) {
-        const overrides: Record<string, string> = {};
-        for (const match of result.results) {
-          const key = match.templateKey;
-          const m = existingMapping.mappings;
-          const direct = m[key];
-          const withEntitySuffix = m[`${key}Entity`];
-          const withoutEntitySuffix = key.endsWith('Entity') ? m[key.replace(/Entity$/, '')] : undefined;
-          const chosen = direct || withEntitySuffix || withoutEntitySuffix;
-          if (chosen) {
-            overrides[key] = chosen;
-          }
-        }
-        setManualOverrides(overrides);
-      }
+      // Keep manual mappings across re-sync: saved choices from the stored mapping plus any
+      // selections made in this dialog session. Clearing them is an explicit, confirmed action.
+      setManualOverrides(
+        buildResyncOverrides(
+          result.results,
+          existing?.mappings,
+          sessionOverrides,
+          result.deviceEntities.map((entity) => entity.entity_id),
+          clearManual,
+        ),
+      );
     } catch (err) {
       setError((err as Error).message);
       setStatus('error');
@@ -124,6 +139,13 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
   useEffect(() => {
     runDiscovery();
   }, [runDiscovery]);
+
+  const handleConfirmClearManual = () => {
+    setShowClearManualConfirm(false);
+    runDiscovery({ clearManual: true });
+  };
+
+  const manualOverrideCount = countManualOverrides(manualOverrides);
 
   const handleOverride = (templateKey: string, entityId: string) => {
     setValidationErrors(null);
@@ -150,39 +172,12 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
       manuallyMappedCount: Object.keys(manualOverrides).length,
     };
 
-    // Apply manual overrides
-    for (const [key, entityId] of Object.entries(manualOverrides)) {
-      // Skip empty values (user cleared the selection)
-      if (!entityId) continue;
-
-      // Handle nested keys like "zoneConfigEntities.zone1.beginX" or "polygonZoneEntities.zone1"
-      const parts = key.split('.');
-      if (parts.length === 1) {
-        // Flat key like "distanceMinEntity"
-        (mappings as Record<string, unknown>)[key] = entityId;
-      } else if (parts.length === 2) {
-        // 2-part key like "polygonZoneEntities.zone1" or "trackingTargets.target1"
-        const [group, subKey] = parts;
-        if (!(mappings as Record<string, unknown>)[group]) {
-          (mappings as Record<string, unknown>)[group] = {};
-        }
-        const groupObj = (mappings as Record<string, unknown>)[group] as Record<string, unknown>;
-        groupObj[subKey] = entityId;
-      } else if (parts.length === 3) {
-        // 3-part key like "zoneConfigEntities.zone1.beginX" or "trackingTargets.target1.x"
-        const [group, zoneKey, prop] = parts;
-        if (!(mappings as Record<string, unknown>)[group]) {
-          (mappings as Record<string, unknown>)[group] = {};
-        }
-        const groupObj = (mappings as Record<string, unknown>)[group] as Record<string, unknown>;
-        if (!groupObj[zoneKey]) {
-          groupObj[zoneKey] = {};
-        }
-        (groupObj[zoneKey] as Record<string, unknown>)[prop] = entityId;
-      }
-    }
-
-    return mappings;
+    // Apply manual overrides. Every representation of an overridden field is replaced
+    // (e.g. "presence" and "presenceEntity", or "zone1BeginX" and zoneConfigEntities.zone1.beginX),
+    // so the auto-matched entity cannot win over the user's choice later on.
+    // Deep-copy the suggestions first so the discovery result itself is never mutated.
+    const withSuggestions = JSON.parse(JSON.stringify(mappings)) as EntityMappings;
+    return applyOverridesToNestedMappings(withSuggestions, manualOverrides);
   };
 
   const handleContinue = async () => {
@@ -333,6 +328,10 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         }
       }
 
+      // Manual choices are applied last so none of the conversions above can revert one
+      // to the auto-matched entity, and alias keys (e.g. presence/presenceEntity) stay in sync.
+      const finalFlatMappings = applyOverridesToFlatMappings(flatMappings, manualOverrides);
+
       // Build device mapping for storage
       const existingServiceMappings = existingMapping?.serviceMappings;
       const serviceConfirmedByUser = existingMapping?.serviceConfirmedByUser ?? false;
@@ -353,7 +352,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
         confirmedByUser: true, // User confirmed by clicking Continue
         autoMatchedCount: mappings.autoMatchedCount || 0,
         manuallyMappedCount: mappings.manuallyMappedCount || 0,
-        mappings: flatMappings,
+        mappings: finalFlatMappings,
         unmappedEntities: discoveryResult?.results
           .filter(r => !r.matchedEntityId && !manualOverrides[r.templateKey])
           .map(r => r.templateKey) || [],
@@ -650,7 +649,7 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
             <p className="text-red-400 font-medium mb-2">Discovery Failed</p>
             <p className="text-sm text-slate-400 text-center max-w-md">{error}</p>
             <button
-              onClick={runDiscovery}
+              onClick={() => runDiscovery()}
               className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors"
             >
               Try Again
@@ -721,10 +720,11 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
             {/* Entity groups */}
             {renderGroupedResults()}
 
-            {/* Re-discover button */}
-            <div className="mt-4 flex justify-center">
+            {/* Re-discover buttons */}
+            <div className="mt-4 flex flex-col items-center gap-2">
               <button
-                onClick={runDiscovery}
+                type="button"
+                onClick={() => runDiscovery()}
                 className="text-sm text-slate-400 hover:text-slate-200 flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -732,6 +732,20 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
                 </svg>
                 Re-discover entities
               </button>
+              {manualOverrideCount > 0 && (
+                <>
+                  <p className="text-xs text-slate-500">
+                    {manualOverrideCount} manually mapped entit{manualOverrideCount === 1 ? 'y is' : 'ies are'} kept when re-discovering.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowClearManualConfirm(true)}
+                    className="text-sm text-red-400 hover:text-red-300"
+                  >
+                    Clear manual mappings &amp; re-sync
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Service Mapping Selector - for firmware service mapping */}
@@ -795,6 +809,45 @@ export const EntityDiscovery: React.FC<EntityDiscoveryProps> = ({
           {saving ? 'Saving...' : 'Continue'}
         </button>
       </div>
+
+      {/* Confirm: clear manual mappings and re-sync */}
+      {showClearManualConfirm && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" />
+          <div className="relative z-10 w-full max-w-md mx-4 rounded-2xl border border-amber-500/40 bg-slate-900/95 shadow-2xl p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center">
+                <span className="text-xl text-amber-400">!</span>
+              </div>
+              <h3 className="text-lg font-semibold text-white">Clear manual mappings?</h3>
+            </div>
+            <p className="text-sm text-slate-300">
+              This discards {manualOverrideCount} manually mapped entit{manualOverrideCount === 1 ? 'y' : 'ies'}, including
+              choices saved previously, and re-runs discovery using automatic matching only. Entities that cannot be
+              matched automatically will be left unmapped.
+            </p>
+            <p className="mt-2 text-sm text-slate-400">
+              Your saved mapping is only replaced when you press Continue afterwards.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowClearManualConfirm(false)}
+                className="px-4 py-2 text-slate-300 hover:text-slate-100 hover:bg-slate-800 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClearManual}
+                className="px-4 py-2 rounded-lg font-medium bg-red-500 hover:bg-red-400 text-white transition-colors"
+              >
+                Clear &amp; re-sync
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
