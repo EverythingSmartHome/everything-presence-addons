@@ -6,7 +6,6 @@ url: https://github.com/everythingsmarthome/everything-presence-addons
 arch:
   - aarch64
   - amd64
-  - armv7
 startup: services
 boot: auto
 ingress: true
@@ -31,7 +30,9 @@ environment:
   PORT: "42069"
   FIRMWARE_LAN_PORT: "38080"
 map:
-  - config:rw
+  - type: homeassistant_config
+    read_only: false
+    path: /config
   - share:rw
 options:
   port: 42069
