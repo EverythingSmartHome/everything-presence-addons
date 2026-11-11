@@ -79,10 +79,11 @@ interface TargetEntityInfo {
   targetIndex: number;
   xEntity: string | null;
   yEntity: string | null;
+  activeEntity?: string | null;
 }
 
 interface HaHistoryState {
-  entity_id: string;
+  entity_id?: string;
   state: string;
   last_changed: string;
 }
@@ -126,7 +127,7 @@ export class HeatmapService {
     // Fetch history from HA
     const history = await this.fetchHistory(entities, clampedHours);
 
-    // Correlate X/Y pairs by timestamp using resolved entity mappings
+    // Reconstruct chronological target state using resolved entity mappings
     const points = this.correlateCoordinates(history, targetInfo);
 
     if (points.length === 0) {
@@ -182,6 +183,7 @@ export class HeatmapService {
     for (let i = 1; i <= 3; i++) {
       let xEntity: string | null = null;
       let yEntity: string | null = null;
+      let activeEntity: string | null = null;
 
       // Try device-level mapping first (preferred)
       if (hasDeviceMapping && deviceId) {
@@ -189,6 +191,7 @@ export class HeatmapService {
         if (targetSet) {
           xEntity = targetSet.x || null;
           yEntity = targetSet.y || null;
+          activeEntity = targetSet.active || null;
         }
       }
 
@@ -200,12 +203,16 @@ export class HeatmapService {
         yEntity = EntityResolver.resolveTargetEntity(entityMappings, entityNamePrefix, i, 'y');
       }
 
+      if (!activeEntity) {
+        activeEntity = EntityResolver.resolveTargetEntity(entityMappings, entityNamePrefix, i, 'active');
+      }
+      if (activeEntity) entities.push(activeEntity);
       if (xEntity) entities.push(xEntity);
       if (yEntity) entities.push(yEntity);
 
       // Track the mapping for correlation
       if (xEntity || yEntity) {
-        targetInfo.push({ targetIndex: i, xEntity, yEntity });
+        targetInfo.push({ targetIndex: i, xEntity, yEntity, activeEntity });
       }
     }
     return { entities, targetInfo };
@@ -245,65 +252,79 @@ export class HeatmapService {
   }
 
   /**
-   * Correlate X/Y coordinates by timestamp.
-   * X and Y are stored as separate entities, so we match by timestamp within 1s tolerance.
-   * Uses resolved entity mappings to find x/y history arrays.
+   * State-change sampling, not time-weighted occupancy: emit at most one point per
+   * target/timestamp after applying simultaneous updates. Never look ahead.
+   * HA minimal_response omits entity_id after the first entry in each series.
+   * Initial history states seed the axes like subsequent state changes. Activation
+   * can emit a newly valid state when coordinates arrived before activity.
+   * Distinct timestamps remain distinct samples: history has no physical frame ID
+   * with which to safely merge asynchronous axis updates or reset transitions.
    */
   private correlateCoordinates(history: HaHistoryState[][], targetInfo: TargetEntityInfo[]): HistoryPoint[] {
     const points: HistoryPoint[] = [];
-
     for (const target of targetInfo) {
-      // Find history arrays by exact entity ID match
-      const xHistory = target.xEntity
-        ? history.find(h => h[0]?.entity_id === target.xEntity)
-        : undefined;
-      const yHistory = target.yEntity
-        ? history.find(h => h[0]?.entity_id === target.yEntity)
-        : undefined;
-
+      const find = (id: string | null | undefined) => id
+        ? history.find(series => series[0]?.entity_id === id) : undefined;
+      const xHistory = find(target.xEntity);
+      const yHistory = find(target.yEntity);
+      const activeHistory = find(target.activeEntity);
       if (!xHistory || !yHistory) continue;
-
-      // Create time-indexed map for Y values
-      const yMap = new Map<number, number>();
-      for (const yState of yHistory) {
-        const yTime = new Date(yState.last_changed).getTime();
-        const yVal = parseFloat(yState.state);
-        if (!isNaN(yVal)) {
-          // Round to nearest second for matching
-          const roundedTime = Math.round(yTime / 1000) * 1000;
-          yMap.set(roundedTime, yVal);
+      type Update = { axis: 'x' | 'y' | 'active'; state: string };
+      const events = new Map<number, Update[]>();
+      const add = (states: HaHistoryState[], axis: Update['axis']) => {
+        for (const state of states) {
+          const timestamp = Date.parse(state.last_changed);
+          if (!Number.isFinite(timestamp)) continue;
+          const updates = events.get(timestamp) || [];
+          updates.push({ axis, state: state.state });
+          events.set(timestamp, updates);
         }
-      }
-
-      // Match X values to Y values
-      for (const xState of xHistory) {
-        const xVal = parseFloat(xState.state);
-        if (isNaN(xVal)) continue;
-
-        const xTime = new Date(xState.last_changed).getTime();
-        const roundedTime = Math.round(xTime / 1000) * 1000;
-
-        // Look for Y within 1 second tolerance
-        let yVal = yMap.get(roundedTime);
-        if (yVal === undefined) {
-          yVal = yMap.get(roundedTime - 1000);
+      };
+      add(xHistory, 'x');
+      add(yHistory, 'y');
+      if (activeHistory) add(activeHistory, 'active');
+      let x: number | undefined;
+      let y: number | undefined;
+      // Initial coordinate states can precede the first activity state.
+      let activity: 'pending' | 'on' | 'off' | 'unknown' = activeHistory?.length ? 'pending' : 'on';
+      for (const [timestamp, updates] of [...events].sort(([a], [b]) => a - b)) {
+        // Last entry wins for duplicate updates to an entity at one timestamp.
+        const state = new Map(updates.map(update => [update.axis, update.state]));
+        const previousActivity = activity;
+        if (state.has('active')) {
+          const value = state.get('active');
+          activity = value === 'on' || value === 'off' ? value : 'unknown';
+          if (activity === 'off' && previousActivity !== 'off') {
+            // Discard pre-disappearance positions, but preserve known zero axes:
+            // change-only firmware need not publish them again on return.
+            if (x !== 0) x = undefined;
+            if (y !== 0) y = undefined;
+          }
         }
-        if (yVal === undefined) {
-          yVal = yMap.get(roundedTime + 1000);
+        const numeric = (value: string) => value.trim() === '' ? NaN : Number(value);
+        const invalid = (['x', 'y'] as const).some(axis =>
+          state.has(axis) && !Number.isFinite(numeric(state.get(axis)!)));
+        if (activity === 'unknown' || invalid) {
+          // Unknown/unavailable is not a numeric reset. Break both axes' continuity.
+          x = y = undefined;
+          continue;
         }
-
-        if (yVal !== undefined) {
-          points.push({
-            x: xVal,
-            y: yVal,
-            timestamp: new Date(xState.last_changed),
-            targetIndex: target.targetIndex,
-          });
+        const previousX = x;
+        const previousY = y;
+        if (state.has('x')) x = numeric(state.get('x')!);
+        if (state.has('y')) y = numeric(state.get('y')!);
+        // Keep numeric inactive/reset state for change-only recovery, but never
+        // sample it while inactive or at the LD2450 origin sentinel. Activation
+        // may sample coordinates published before activity, without looking ahead.
+        if (activity !== 'on' || (x === 0 && y === 0)) continue;
+        if (x !== undefined && y !== undefined &&
+            (x !== previousX || y !== previousY || previousActivity !== 'on')) {
+          points.push({ x, y, timestamp: new Date(timestamp), targetIndex: target.targetIndex });
         }
       }
     }
-
-    logger.debug({ pointCount: points.length }, 'Correlated coordinate pairs');
+    points.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime() || a.targetIndex - b.targetIndex);
+    logger.debug({ pointCount: points.length }, 'Reconstructed coordinate pairs');
     return points;
   }
 
