@@ -8,7 +8,7 @@ interface HeatmapOverlayProps {
   devicePlacement?: DevicePlacement | null;
   installationAngle?: number;
   intensityThreshold?: number; // 0-1, cells below this won't be shown
-  roomShellPoints?: Array<{ x: number; y: number }> | null; // Canvas coordinates for room boundary
+  roomShellPoints?: Array<{ x: number; y: number }> | null; // Room coordinates for room boundary
   clipToRoom?: boolean;
   showAveragePosition?: boolean;
 }
@@ -106,7 +106,7 @@ export const HeatmapOverlay: React.FC<HeatmapOverlayProps> = ({ data, visible, t
   const clipPathId = 'heatmap-room-clip';
   const shouldClip = clipToRoom && roomShellPoints && roomShellPoints.length >= 3;
   const clipPathD = shouldClip
-    ? `M ${roomShellPoints.map(p => `${p.x},${p.y}`).join(' L ')} Z`
+    ? `M ${roomShellPoints.map(p => toCanvas(p)).map(p => `${p.x},${p.y}`).join(' L ')} Z`
     : '';
 
   return (
