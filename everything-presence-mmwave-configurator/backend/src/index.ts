@@ -5,6 +5,7 @@ import { logger } from './logger';
 import { createServer, TransportStatus } from './server';
 import { HaWriteClient } from './ha/writeClient';
 import { createReadTransport, TransportFactoryResult } from './ha/transportFactory';
+import { isSslVerificationDisabled } from './ha/haHttp';
 import { DeviceProfileLoader } from './domain/deviceProfiles';
 import { createLiveWebSocketServer } from './routes/liveWs';
 import { createLanFirmwareServer } from './lanFirmwareServer';
@@ -12,6 +13,12 @@ import { createLanFirmwareServer } from './lanFirmwareServer';
 const start = async () => {
   try {
     const config = loadConfig();
+
+    if (isSslVerificationDisabled()) {
+      logger.warn(
+        'VERIFY_SSL=false: TLS certificate verification is disabled for all requests to Home Assistant'
+      );
+    }
 
     logger.info('Initializing Home Assistant clients...');
 

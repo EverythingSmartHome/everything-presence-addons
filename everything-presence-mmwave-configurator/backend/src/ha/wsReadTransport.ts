@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../logger';
 import { EntityRegistryEntry, HaWsMessage } from './types';
 import { RestReadTransport } from './restReadTransport';
+import { isSslVerificationDisabled } from './haHttp';
 import {
   IHaReadTransport,
   ReadTransportConfig,
@@ -85,7 +86,7 @@ export class WsReadTransport implements IHaReadTransport {
       logger.info({ url }, 'WsReadTransport: Connecting to HA WebSocket');
 
       this.socket = new WebSocket(url, ...(
-        process.env.VERIFY_SSL?.toLowerCase() === 'false'
+        isSslVerificationDisabled()
           ? [{ rejectUnauthorized: false }]
           : []
       ));

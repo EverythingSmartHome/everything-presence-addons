@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "node --test -r ts-node/register src/domain/zoneEntityNaming.test.ts src/domain/deviceProfiles.test.ts src/domain/entityDiscovery.test.ts src/domain/heatmapService.test.ts",
+    "test": "node --test -r ts-node/register src/domain/zoneEntityNaming.test.ts src/domain/deviceProfiles.test.ts src/domain/entityDiscovery.test.ts src/domain/heatmapService.test.ts src/ha/haHttp.test.ts",
     "start": "node dist/index.js",
     "lint": "echo \"(no lint configured yet)\""
   },
@@ -15,6 +15,7 @@
     "express": "^4.19.2",
     "pino": "^8.21.0",
     "pino-http": "^8.6.0",
+    "undici": "^6.29.1",
     "uuid": "^9.0.1",
     "ws": "^8.18.0"
   },
@@ -22,8 +23,8 @@
     "@types/express": "^4.17.21",
     "@types/node": "^20.11.30",
     "@types/uuid": "^9.0.7",
-    "pino-pretty": "^11.2.2",
     "@types/ws": "^8.5.12",
+    "pino-pretty": "^11.2.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
   }

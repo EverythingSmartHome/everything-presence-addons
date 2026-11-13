@@ -2,6 +2,7 @@ import { logger } from '../logger';
 import { IHaReadTransport, ReadTransportConfig, TransportFactoryOptions } from './readTransport';
 import { WsReadTransport } from './wsReadTransport';
 import { RestReadTransport } from './restReadTransport';
+import { haFetch } from './haHttp';
 
 /**
  * Result of creating a read transport
@@ -121,7 +122,7 @@ async function testRestConnection(config: ReadTransportConfig): Promise<boolean>
       baseUrl = baseUrl + '/api';
     }
 
-    const res = await fetch(`${baseUrl}/`, {
+    const res = await haFetch(`${baseUrl}/`, {
       headers: {
         Authorization: `Bearer ${config.token}`,
       },

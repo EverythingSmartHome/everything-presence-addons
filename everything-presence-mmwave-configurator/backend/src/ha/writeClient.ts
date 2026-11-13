@@ -1,5 +1,6 @@
 import { logger } from '../logger';
 import { HaAuthConfig } from './types';
+import { haFetch } from './haHttp';
 
 /**
  * REST client for write operations (service calls, entity updates).
@@ -90,7 +91,7 @@ export class HaWriteClient implements IHaWriteClient {
 
     logger.debug({ domain, service, entityId: data.entity_id }, 'Calling HA service');
 
-    const res = await fetch(url, {
+    const res = await haFetch(url, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(data),
