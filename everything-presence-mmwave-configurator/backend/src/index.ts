@@ -9,10 +9,14 @@ import { isSslVerificationDisabled } from './ha/haHttp';
 import { DeviceProfileLoader } from './domain/deviceProfiles';
 import { createLiveWebSocketServer } from './routes/liveWs';
 import { createLanFirmwareServer } from './lanFirmwareServer';
+import { debugSession } from './debug/debugSession';
 
 const start = async () => {
   try {
     const config = loadConfig();
+
+    // Resume (or close out) a debug session that was recording before a restart.
+    debugSession.init();
 
     if (isSslVerificationDisabled()) {
       logger.warn(
