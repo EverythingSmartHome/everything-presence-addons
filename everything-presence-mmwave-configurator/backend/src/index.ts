@@ -8,10 +8,14 @@ import { createReadTransport, TransportFactoryResult } from './ha/transportFacto
 import { DeviceProfileLoader } from './domain/deviceProfiles';
 import { createLiveWebSocketServer } from './routes/liveWs';
 import { createLanFirmwareServer } from './lanFirmwareServer';
+import { debugSession } from './debug/debugSession';
 
 const start = async () => {
   try {
     const config = loadConfig();
+
+    // Resume (or close out) a debug session that was recording before a restart.
+    debugSession.init();
 
     logger.info('Initializing Home Assistant clients...');
 

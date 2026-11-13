@@ -9,6 +9,13 @@ import { WizardPage } from './pages/WizardPage';
 import { LiveTrackingPage } from './pages/LiveTrackingPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { DeviceMappingsProvider } from './contexts/DeviceMappingsContext';
+import { DebugRecordingPill } from './components/DebugRecordingPill';
+import {
+  installDebugCapture,
+  recordNavigation,
+  recordWebSocketEvent,
+  resumeDebugCaptureIfActive,
+} from './debug/debugCapture';
 
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="glass-card p-6">
@@ -37,6 +44,17 @@ function App() {
   const [wizardZonesReady, setWizardZonesReady] = useState<boolean>(false);
   const [view, setView] = useState<'dashboard' | 'wizard' | 'zoneEditor' | 'roomBuilder' | 'liveTracking' | 'settings'>('dashboard');
   const [liveState, setLiveState] = useState<LiveState | null>(null);
+
+  // Debug capture hooks are inert until a debug session is active; resume one
+  // that was started before this page load.
+  useEffect(() => {
+    installDebugCapture();
+    void resumeDebugCaptureIfActive();
+  }, []);
+
+  useEffect(() => {
+    recordNavigation(view);
+  }, [view]);
 
   useEffect(() => {
     const load = async () => {
@@ -185,6 +203,7 @@ function App() {
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
+          recordWebSocketEvent('open');
           setError(null);
           // Subscribe to device state changes
           ws?.send(
@@ -489,13 +508,16 @@ function App() {
         };
 
         ws.onerror = (error) => {
+          recordWebSocketEvent('error');
           console.error('WebSocket error:', error);
           setError('WebSocket connection error. Falling back to REST polling...');
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
+          recordWebSocketEvent('close', `code ${event.code}${event.reason ? ` ${event.reason}` : ''}`);
           ws = null;
           if (shouldReconnect) {
+            recordWebSocketEvent('reconnect', 'retrying in 3s');
             reconnectTimeout = setTimeout(connect, 3000);
           }
         };
@@ -504,6 +526,7 @@ function App() {
         setError('Failed to establish WebSocket connection');
         // Fallback to REST polling
         if (shouldReconnect) {
+          recordWebSocketEvent('reconnect', 'retrying in 3s after connection failure');
           reconnectTimeout = setTimeout(connect, 3000);
         }
       }
@@ -810,6 +833,7 @@ function App() {
           />
         )}
         </main>
+        <DebugRecordingPill />
       </div>
     </DeviceMappingsProvider>
   );

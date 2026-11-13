@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { AppConfig, redactedHaConfig } from '../config';
 import type { TransportStatus } from '../server';
 
-const readAppVersion = (): string => {
+export const readAppVersion = (): string => {
   const candidates = [
     path.resolve(process.cwd(), 'config.yaml'),
     path.resolve(process.cwd(), '../config.yaml'),
