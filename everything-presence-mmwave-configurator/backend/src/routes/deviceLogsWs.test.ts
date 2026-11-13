@@ -10,7 +10,9 @@ import { WebSocket } from 'ws';
 import { DeviceApiStorage } from '../config/deviceApiStorage';
 import { EsphomeApiClient, MessageType } from '../esphome/apiClient';
 import { startFakeDevice } from '../esphome/fakeDevice.testutil';
-import { createDeviceLogsWebSocketServer, DEVICE_LOGS_WS_PATH } from './deviceLogsWs';
+import type { DeviceLogSessionDeps } from '../domain/deviceLogSession';
+import type { HostLookupResult } from '../domain/deviceHostResolver';
+import { createDeviceLogsWebSocketServer, DEVICE_LOGS_WS_PATH, parseClientMessage } from './deviceLogsWs';
 import { attachWebSocketRoutes } from './wsUpgrade';
 
 /**
@@ -78,5 +80,105 @@ test('viewer receives device logs; closing the viewer disconnects the device', a
     server.closeAllConnections();
     server.close();
     await device.close();
+  }
+});
+
+test('parseClientMessage accepts only JSON objects', () => {
+  for (const bad of ['null', '[]', '[1]', '5', '"start"', 'true', 'not json', '']) {
+    assert.equal(parseClientMessage(bad), null, bad);
+  }
+  assert.deepEqual(parseClientMessage('{"type":"stop"}'), { type: 'stop' });
+});
+
+/** One HTTP server with the logs route; `lookupHost` is supplied by the test. */
+const startLogsServer = async (lookupHost: DeviceLogSessionDeps['lookupHost']) => {
+  const storage = new DeviceApiStorage(fs.mkdtempSync(path.join(os.tmpdir(), 'device-logs-ws-')));
+  const server = http.createServer();
+  const wss = createDeviceLogsWebSocketServer({
+    storage,
+    lookupHost,
+    expectedNodeName: () => undefined,
+    createClient: ({ host, noisePsk }) => new EsphomeApiClient({ host, noisePsk, connectTimeoutMs: 200 }),
+  });
+  attachWebSocketRoutes(server, { [DEVICE_LOGS_WS_PATH]: wss });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as AddressInfo;
+  const open = async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${DEVICE_LOGS_WS_PATH}`);
+    const received: Array<Record<string, unknown>> = [];
+    ws.on('message', (d) => received.push(JSON.parse(d.toString())));
+    await new Promise((r) => ws.once('open', r));
+    return { ws, received };
+  };
+  const close = () => {
+    for (const client of wss.clients) client.terminate();
+    wss.close();
+    server.closeAllConnections();
+    server.close();
+  };
+  return { open, close };
+};
+
+const waitUntil = async (check: () => boolean, ms = 2000) => {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error('timed out waiting');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+};
+
+test('malformed messages are ignored and do not affect this or other connections', async () => {
+  // A throw inside the 'message' listener is an uncaught exception that would
+  // take down the whole add-on; record any so the test fails on them.
+  const uncaught: Error[] = [];
+  const onUncaught = (e: Error) => uncaught.push(e);
+  process.on('uncaughtException', onUncaught);
+  const srv = await startLogsServer(async () => ({ ok: false, reason: 'no_esphome_entry' }));
+  try {
+    const a = await srv.open();
+    const b = await srv.open();
+    for (const bad of ['null', '[]', '42', '"x"', 'true', '{bad json', '{"type":null}', '{"type":"start"}']) {
+      a.ws.send(bad);
+    }
+    // Both connections still work afterwards.
+    a.ws.send(JSON.stringify({ type: 'start', deviceId: 'devA' }));
+    b.ws.send(JSON.stringify({ type: 'start', deviceId: 'devB' }));
+    await waitUntil(() => a.received.some((m) => m.code === 'no_host') && b.received.some((m) => m.code === 'no_host'));
+    // The only error before that was the missing deviceId on '{"type":"start"}'.
+    assert.deepEqual(
+      a.received.filter((m) => m.type === 'error').map((m) => m.code),
+      ['protocol_error', 'no_host'],
+    );
+    assert.equal(a.ws.readyState, WebSocket.OPEN);
+    assert.equal(b.ws.readyState, WebSocket.OPEN);
+    assert.deepEqual(uncaught.map((e) => e.message), []);
+  } finally {
+    process.off('uncaughtException', onUncaught);
+    srv.close();
+  }
+});
+
+test('restarting during the HA lookup: the replaced session sends nothing more', async () => {
+  const lookups: Array<(r: HostLookupResult) => void> = [];
+  const srv = await startLogsServer(
+    () => new Promise<HostLookupResult>((resolve) => lookups.push(resolve)),
+  );
+  try {
+    const { ws, received } = await srv.open();
+    ws.send(JSON.stringify({ type: 'start', deviceId: 'first' }));
+    await waitUntil(() => lookups.length === 1);
+    ws.send(JSON.stringify({ type: 'start', deviceId: 'second' }));
+    await waitUntil(() => lookups.length === 2);
+
+    lookups[0]({ ok: false, reason: 'device_not_found' }); // late reply for the replaced session
+    lookups[1]({ ok: false, reason: 'no_esphome_entry' });
+    await waitUntil(() => received.some((m) => m.type === 'error'));
+    await new Promise((r) => setTimeout(r, 50));
+
+    const errors = received.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 1);
+    assert.match(String(errors[0].message), /no_esphome_entry/);
+  } finally {
+    srv.close();
   }
 });

@@ -216,11 +216,13 @@ export class DeviceLogSession {
     // level is lowered, so they cannot switch STATE lines off again.
     const seenEntities = new Set<string>();
     client.on('log', (log) => {
+      if (this.stopped) return;
       if (log.level >= VERBOSE_LEVEL && this.level >= VERBOSE_LEVEL) this.firmwareLogsStates = true;
       const parsed = parseLogLine(log.level, log.message);
       this.emit({ type: 'log', ts: new Date().toISOString(), ...parsed });
     });
     client.on('state', (state) => {
+      if (this.stopped) return;
       if (!seenEntities.has(state.id)) {
         seenEntities.add(state.id);
         return;

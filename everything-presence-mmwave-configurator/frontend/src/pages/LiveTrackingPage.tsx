@@ -2538,6 +2538,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               )}
               {selectedRoom?.deviceId && (
                 <button
+                  type="button"
                   className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-1.5 text-xs font-semibold text-slate-100 transition-all hover:border-slate-600 hover:bg-slate-700 active:scale-95"
                   onClick={() => setShowDeviceLogs(true)}
                   title="Live device logs"

@@ -202,6 +202,12 @@ export const DeviceLogsModal: React.FC<DeviceLogsModalProps> = ({ isOpen, onClos
     }
   };
 
+  // Also drop lines queued while paused, or they would reappear on Resume.
+  const clear = () => {
+    pendingRef.current = [];
+    setLines([]);
+  };
+
   const reconnect = () => setSession((s) => s + 1);
 
   const visible = useMemo(() => {
@@ -332,7 +338,7 @@ export const DeviceLogsModal: React.FC<DeviceLogsModalProps> = ({ isOpen, onClos
           <ToolbarButton onClick={() => setPaused((p) => !p)} active={paused}>
             {paused ? `Resume${pendingRef.current.length ? ` (${pendingRef.current.length})` : ''}` : 'Pause'}
           </ToolbarButton>
-          <ToolbarButton onClick={() => setLines([])}>Clear</ToolbarButton>
+          <ToolbarButton onClick={clear}>Clear</ToolbarButton>
           <ToolbarButton onClick={copy} disabled={visible.length === 0}>
             Copy
           </ToolbarButton>

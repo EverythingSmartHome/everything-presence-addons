@@ -294,3 +294,100 @@ test('hidden states are not sent; showing them again shows changes from then on'
   client.emit('state', { kind: 'sensor', id: 'sensor:0:1', text: 'visible' });
   assert.deepEqual(logLevels(t.messages), ['STATE:visible']);
 });
+
+// ───────────── stop during setup ─────────────
+
+const deferred = <T>() => {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+};
+
+/** Client whose connect() waits until the test releases it. */
+class GatedClient extends FakeClient {
+  readonly gate = deferred<void>();
+  /** The real client rejects connect() once closed; false simulates a reply racing the close. */
+  failIfClosed = true;
+  closeCalls = 0;
+  close() {
+    this.closeCalls += 1;
+    super.close();
+  }
+  async connect(): Promise<DeviceIdentity> {
+    await this.gate.promise;
+    if (this.failIfClosed && this.closed) throw new EsphomeApiError('closed', 'Connection closed');
+    return EPL;
+  }
+}
+
+test('stop during the HA lookup: no connection is made and nothing more is emitted', async () => {
+  const lookup = deferred<HostLookupResult>();
+  const messages: SessionMessage[] = [];
+  let connects = 0;
+  const session = new DeviceLogSession(
+    'dev1',
+    {
+      storage: { get: () => ({}), saveResolvedHost: () => undefined },
+      lookupHost: () => lookup.promise,
+      expectedNodeName: () => undefined,
+      createClient: ({ host }) => {
+        connects += 1;
+        return new FakeClient(host, EPL);
+      },
+    },
+    (m) => messages.push(m),
+  );
+  const running = session.start();
+  session.stop();
+  lookup.resolve({ ok: true, host: '10.0.0.5' });
+  await running;
+  assert.equal(connects, 0);
+  assert.deepEqual(messages, [{ type: 'status', state: 'resolving' }]);
+});
+
+for (const outcome of ['connect succeeds', 'connect fails'] as const) {
+  test(`stop while connecting (${outcome}): client closed, no further messages`, async () => {
+    const messages: SessionMessage[] = [];
+    let client: GatedClient | null = null;
+    const session = new DeviceLogSession(
+      'dev1',
+      {
+        storage: { get: () => ({ host: '10.0.0.5', hostSource: 'ha' }), saveResolvedHost: () => undefined },
+        lookupHost: async () => ({ ok: true, host: '10.0.0.9' }),
+        expectedNodeName: () => undefined,
+        createClient: ({ host }) => {
+          client = new GatedClient(host, EPL);
+          return client;
+        },
+      },
+      (m) => messages.push(m),
+    );
+    const running = session.start();
+    session.stop();
+    const c = client as unknown as GatedClient;
+    c.failIfClosed = outcome === 'connect fails';
+    c.gate.resolve();
+    await running;
+    assert.equal(c.closed, true);
+    assert.equal(c.closeCalls, outcome === 'connect fails' ? 1 : 2);
+    assert.equal(c.subscribed.length, 0);
+    assert.deepEqual(
+      messages.map((m) => (m.type === 'status' ? m.state : m.type)),
+      ['connecting'],
+    );
+  });
+}
+
+test('log and state events after stop are not emitted', async () => {
+  const t = setup({ saved: { host: '10.0.0.5', hostSource: 'ha' }, hosts: { '10.0.0.5': EPL } });
+  await t.session.start();
+  const client = t.clients[0];
+  client.emit('state', { kind: 'sensor', id: 'sensor:0:1', text: 'replay' });
+  t.session.stop();
+  const before = t.messages.length;
+  client.emit('log', { level: 5, message: '[D][x]: late' });
+  client.emit('state', { kind: 'sensor', id: 'sensor:0:1', text: 'late' });
+  assert.equal(t.messages.length, before);
+});

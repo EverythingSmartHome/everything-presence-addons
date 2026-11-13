@@ -24,6 +24,15 @@ import {
 
 export const ESPHOME_API_PORT = 6053;
 
+/**
+ * Largest plaintext message accepted. Encrypted frames are limited to 64 KiB
+ * by their 16-bit length; plaintext lengths are varints, so a bad or hostile
+ * length could otherwise make us buffer without limit.
+ */
+export const MAX_FRAME_PAYLOAD = 128 * 1024;
+/** Most incomplete data kept between reads (one frame plus its header). */
+const MAX_PENDING_BYTES = MAX_FRAME_PAYLOAD + 16;
+
 /** Message type IDs from ESPHome's api.proto. */
 export const MessageType = {
   HelloRequest: 1,
@@ -294,8 +303,9 @@ export class EsphomeApiClient extends EventEmitter {
   }
 
   private onData(chunk: Buffer): void {
+    // After close the socket may still deliver data until it is destroyed.
+    if (this.closed) return;
     this.receivedAnyData = true;
-    this.lastRx = Date.now();
     this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
     try {
       for (;;) {
@@ -303,6 +313,9 @@ export class EsphomeApiClient extends EventEmitter {
         if (!frame) break;
         this.dispatch(frame);
         if (this.closed) break;
+      }
+      if (!this.closed && this.buffer.length > MAX_PENDING_BYTES) {
+        throw new EsphomeApiError('protocol_error', `Incomplete frame larger than ${MAX_PENDING_BYTES} bytes`);
       }
     } catch (error) {
       this.fail(error instanceof EsphomeApiError ? error : new EsphomeApiError('protocol_error', (error as Error).message));
@@ -320,6 +333,9 @@ export class EsphomeApiClient extends EventEmitter {
     }
     const len = decodeVarint(this.buffer, 1);
     if (!len) return null;
+    if (len.value > MAX_FRAME_PAYLOAD) {
+      throw new EsphomeApiError('protocol_error', `Frame of ${len.value} bytes exceeds the ${MAX_FRAME_PAYLOAD}-byte limit`);
+    }
     const type = decodeVarint(this.buffer, 1 + len.length);
     if (!type) return null;
     const start = 1 + len.length + type.length;
@@ -382,6 +398,9 @@ export class EsphomeApiClient extends EventEmitter {
   }
 
   private dispatch(frame: Frame): void {
+    // Only complete frames count as activity, so a trickle of partial data
+    // cannot hold off the idle timeout.
+    this.lastRx = Date.now();
     switch (frame.type) {
       case MessageType.PingRequest:
         this.send(MessageType.PingResponse, Buffer.alloc(0));

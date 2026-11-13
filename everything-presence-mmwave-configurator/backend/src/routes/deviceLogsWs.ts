@@ -18,6 +18,20 @@ const MAX_SESSIONS = 8;
 /** Drop log lines for a slow browser rather than buffering without bound. */
 const MAX_BUFFERED_BYTES = 2 * 1024 * 1024;
 
+type ClientMessage = { type?: unknown; deviceId?: unknown; level?: unknown; states?: unknown; show?: unknown };
+
+/** Parse a browser message; anything that is not a JSON object is ignored. */
+export const parseClientMessage = (text: string): ClientMessage | null => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  return parsed as ClientMessage;
+};
+
 export const createDeviceLogsWebSocketServer = (deps: DeviceLogSessionDeps): WebSocketServer => {
   const wss = new WebSocketServer({ noServer: true });
   const sessions = new Set<DeviceLogSession>();
@@ -47,12 +61,8 @@ export const createDeviceLogsWebSocketServer = (deps: DeviceLogSessionDeps): Web
     };
 
     ws.on('message', (data) => {
-      let message: { type?: unknown; deviceId?: unknown; level?: unknown; states?: unknown; show?: unknown };
-      try {
-        message = JSON.parse(data.toString());
-      } catch {
-        return;
-      }
+      const message = parseClientMessage(data.toString());
+      if (!message) return;
       switch (message.type) {
         case 'start': {
           stopSession();
@@ -65,13 +75,23 @@ export const createDeviceLogsWebSocketServer = (deps: DeviceLogSessionDeps): Web
             return;
           }
           const level = typeof message.level === 'string' ? message.level : 'DEBUG';
-          const current = new DeviceLogSession(message.deviceId, deps, send, level, message.states !== false);
+          // Only the current session may talk to the browser: a session that was
+          // replaced or stopped mid-setup must not deliver late messages.
+          const current: DeviceLogSession = new DeviceLogSession(
+            message.deviceId,
+            deps,
+            (m) => {
+              if (session === current) send(m);
+            },
+            level,
+            message.states !== false,
+          );
           session = current;
           sessions.add(current);
           logger.info({ deviceId: message.deviceId }, 'Device log viewer opened');
           current.start().catch((error) => {
             logger.warn({ error, deviceId: message.deviceId }, 'Device log session failed');
-            send({ type: 'error', code: 'protocol_error', message: (error as Error).message });
+            if (session === current) send({ type: 'error', code: 'protocol_error', message: (error as Error).message });
           });
           return;
         }
