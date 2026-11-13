@@ -3,8 +3,10 @@ import path from 'path';
 import express, { NextFunction, Request, Response } from 'express';
 import pinoHttp from 'pino-http';
 import { AppConfig } from './config';
-import { logger } from './logger';
+import { logger, logLevelController } from './logger';
 import { createMetaRouter } from './routes/meta';
+import { createDebugRouter } from './routes/debug';
+import { debugSession } from './debug/debugSession';
 import { createDevicesRouter, DevicesRouterDependencies } from './routes/devices';
 import { createEntityDiscoveryRouter } from './routes/entityDiscovery';
 import { createRoomsRouter } from './routes/rooms';
@@ -36,19 +38,40 @@ export interface ServerDependencies {
   transportStatus: TransportStatus;
 }
 
+const DEBUG_STATUS_PATH = '/api/debug/status';
+const DEBUG_CLIENT_LOGS_PATH = '/api/debug/client-logs';
+
 export const createServer = (config: AppConfig, deps?: ServerDependencies): express.Express => {
   const app = express();
 
-  app.use(
-    pinoHttp({
-      logger,
-      redact: ['req.headers.authorization', 'req.headers.cookie'],
-    }),
-  );
+  const httpLogger = pinoHttp({
+    logger,
+    redact: ['req.headers.authorization', 'req.headers.cookie'],
+    autoLogging: {
+      // Debug polling and client log uploads would otherwise flood the captured logs.
+      ignore: (req) => {
+        const url = req.url ?? '';
+        return url.startsWith(DEBUG_STATUS_PATH) || url.startsWith(DEBUG_CLIENT_LOGS_PATH);
+      },
+    },
+  });
+  // pino-http logs through a child logger; keep it at the debug session level.
+  logLevelController.register(httpLogger.logger);
+  app.use(httpLogger);
 
+  // Client log batches may exceed the global 100 KB body limit. Registered first,
+  // so the global parser below skips bodies that are already parsed.
+  app.use(DEBUG_CLIENT_LOGS_PATH, express.json({ limit: '1mb' }));
   app.use(express.json());
 
   app.use('/api/meta', createMetaRouter(config, deps?.transportStatus));
+  app.use('/api/debug', createDebugRouter({
+    config,
+    session: debugSession,
+    transportStatus: deps?.transportStatus,
+    readTransport: deps?.readTransport,
+    profileLoader: deps?.profileLoader,
+  }));
   app.use('/api/rooms', createRoomsRouter());
   app.use('/api/zones', createZonesRouter());
   app.use('/api/settings', createSettingsRouter());

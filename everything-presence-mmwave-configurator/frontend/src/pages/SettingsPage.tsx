@@ -31,6 +31,7 @@ import {
 } from '../api/types';
 import { EntityDiscovery } from '../components/EntityDiscovery';
 import { FirmwareUpdateSection } from '../components/FirmwareUpdateSection';
+import { TroubleshootingCard } from '../components/TroubleshootingCard';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceMapping, DeviceMapping } from '../api/deviceMappings';
 
@@ -40,13 +41,14 @@ interface SettingsPageProps {
   onRoomUpdated?: (room: RoomConfig) => void;
 }
 
-type SettingsTab = 'rooms' | 'backups' | 'assets' | 'firmware';
+type SettingsTab = 'rooms' | 'backups' | 'assets' | 'firmware' | 'troubleshooting';
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'rooms', label: 'Rooms' },
   { id: 'backups', label: 'Backups' },
   { id: 'assets', label: 'Assets' },
   { id: 'firmware', label: 'Firmware' },
+  { id: 'troubleshooting', label: 'Troubleshooting' },
 ];
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDeleted, onRoomUpdated }) => {
@@ -1475,6 +1477,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                     }}
                   />
                 </div>
+              </div>
+            )}
+
+            {/* Troubleshooting Tab */}
+            {activeTab === 'troubleshooting' && (
+              <div className="space-y-6">
+                <TroubleshootingCard />
               </div>
             )}
           </>
