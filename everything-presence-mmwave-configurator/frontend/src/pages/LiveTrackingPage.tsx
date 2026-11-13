@@ -12,6 +12,7 @@ import {
   EP1StatsPanel,
 } from '../components/ep1';
 import { DeviceSettingsModal } from '../components/DeviceSettingsModal';
+import { DeviceLogsModal } from '../components/DeviceLogsModal';
 import { HeatmapOverlay } from '../components/HeatmapOverlay';
 import { ZoneStatsPanel } from '../components/ZoneStatsPanel';
 import { HourlyActivityChart } from '../components/HourlyActivityChart';
@@ -106,6 +107,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const [recordedTrail, setRecordedTrail] = useState<RecordedPoint[]>([]);
   const [showDetailedTracking, setShowDetailedTracking] = useState(false);
   const [showDeviceSettings, setShowDeviceSettings] = useState(false);
+  const [showDeviceLogs, setShowDeviceLogs] = useState(false);
   const [showRecommendations, setShowRecommendations] = useState(false);
   const [activeMobileSheet, setActiveMobileSheet] = useState<MobileLiveSheet>(null);
   // Polygon mode state
@@ -2534,6 +2536,16 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                   🔧 Device
                 </button>
               )}
+              {selectedRoom?.deviceId && (
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-1.5 text-xs font-semibold text-slate-100 transition-all hover:border-slate-600 hover:bg-slate-700 active:scale-95"
+                  onClick={() => setShowDeviceLogs(true)}
+                  title="Live device logs"
+                >
+                  📜 Logs
+                </button>
+              )}
               {isEP1 && selectedRoom && (
                 <button
                   className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
@@ -2654,6 +2666,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 label="Device"
                 onClick={() => setShowDeviceSettings(true)}
               />
+              {selectedRoom?.deviceId && (
+                <CanvasToolbarButton
+                  label="Logs"
+                  onClick={() => setShowDeviceLogs(true)}
+                />
+              )}
             </CanvasBottomToolbar>
           </div>
         </div>
@@ -2930,6 +2948,16 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
           room={selectedRoom}
           liveState={liveState ?? null}
           deviceTypeLabel={selectedProfile?.label ?? selectedRoom.profileId ?? 'Device'}
+        />
+      )}
+
+      {/* Live device logs: the device connection only exists while this is open */}
+      {selectedRoom?.deviceId && (
+        <DeviceLogsModal
+          isOpen={showDeviceLogs}
+          onClose={() => setShowDeviceLogs(false)}
+          deviceId={selectedRoom.deviceId}
+          deviceLabel={`${selectedRoom.name} • ${selectedProfile?.label ?? selectedRoom.profileId ?? 'Device'}`}
         />
       )}
     </div>
