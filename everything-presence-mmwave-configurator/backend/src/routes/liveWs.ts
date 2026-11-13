@@ -1,5 +1,4 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { Server } from 'http';
 import { logger } from '../logger';
 import type { IHaReadTransport, EntityState } from '../ha/readTransport';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
@@ -17,12 +16,14 @@ interface LiveClientSubscription {
   subscriptionId: string;
 }
 
+export const LIVE_WS_PATH = '/api/live/ws';
+
+/** Created with noServer; upgrades are routed by attachWebSocketRoutes (see wsUpgrade.ts). */
 export function createLiveWebSocketServer(
-  httpServer: Server,
   readTransport: IHaReadTransport,
   profileLoader: DeviceProfileLoader,
 ): WebSocketServer {
-  const wss = new WebSocketServer({ server: httpServer, path: '/api/live/ws' });
+  const wss = new WebSocketServer({ noServer: true });
   const clients: Map<WebSocket, LiveClientSubscription> = new Map();
 
   wss.on('connection', (ws: WebSocket) => {

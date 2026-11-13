@@ -18,6 +18,8 @@ import { createHeatmapRouter } from './routes/heatmap';
 import { createDeviceMappingsRouter } from './routes/deviceMappings';
 import { createFirmwareRouter } from './routes/firmware';
 import { createZoneBackupsRouter } from './routes/zoneBackups';
+import { createDeviceApiConnectionRouter } from './routes/deviceApiConnection';
+import { deviceApiStorage } from './config/deviceApiStorage';
 import type { IHaReadTransport } from './ha/readTransport';
 import type { IHaWriteClient } from './ha/writeClient';
 import type { DeviceProfileLoader } from './domain/deviceProfiles';
@@ -102,6 +104,7 @@ export const createServer = (config: AppConfig, deps?: ServerDependencies): expr
       readTransport: deps.readTransport,
       profileLoader: deps.profileLoader,
     }));
+    app.use('/api/devices', createDeviceApiConnectionRouter(deviceApiStorage));
     app.use('/api/live', createLiveRouter(deps.readTransport, deps.writeClient, deps.profileLoader));
 
     // Firmware update routes

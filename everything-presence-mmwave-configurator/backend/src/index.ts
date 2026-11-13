@@ -7,7 +7,13 @@ import { HaWriteClient } from './ha/writeClient';
 import { createReadTransport, TransportFactoryResult } from './ha/transportFactory';
 import { isSslVerificationDisabled } from './ha/haHttp';
 import { DeviceProfileLoader } from './domain/deviceProfiles';
-import { createLiveWebSocketServer } from './routes/liveWs';
+import { createLiveWebSocketServer, LIVE_WS_PATH } from './routes/liveWs';
+import { createDeviceLogsWebSocketServer, DEVICE_LOGS_WS_PATH } from './routes/deviceLogsWs';
+import { attachWebSocketRoutes } from './routes/wsUpgrade';
+import { DeviceHostResolver } from './domain/deviceHostResolver';
+import { EsphomeApiClient } from './esphome/apiClient';
+import { deviceApiStorage } from './config/deviceApiStorage';
+import { deviceMappingStorage } from './config/deviceMappingStorage';
 import { createLanFirmwareServer } from './lanFirmwareServer';
 import { debugSession } from './debug/debugSession';
 
@@ -90,8 +96,21 @@ const start = async () => {
     // 5. Create HTTP server
     const httpServer = http.createServer(app);
 
-    // 6. Attach WebSocket server for live tracking (frontend connections)
-    createLiveWebSocketServer(httpServer, readTransport, profileLoader);
+    // 6. Attach WebSocket servers (frontend connections), routed by path
+    const hostResolver = new DeviceHostResolver({
+      baseUrl: config.ha.baseUrl,
+      token: config.ha.token,
+      listDevices: () => readTransport.listDevices(),
+    });
+    attachWebSocketRoutes(httpServer, {
+      [LIVE_WS_PATH]: createLiveWebSocketServer(readTransport, profileLoader),
+      [DEVICE_LOGS_WS_PATH]: createDeviceLogsWebSocketServer({
+        storage: deviceApiStorage,
+        lookupHost: (deviceId) => hostResolver.lookup(deviceId),
+        expectedNodeName: (deviceId) => deviceMappingStorage.getMapping(deviceId)?.esphomeNodeName,
+        createClient: ({ host, noisePsk }) => new EsphomeApiClient({ host, noisePsk }),
+      }),
+    });
 
     // 7. Start LAN Firmware Server (separate port for device firmware downloads)
     createLanFirmwareServer(config.firmware.lanPort);

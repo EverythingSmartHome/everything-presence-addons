@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "node --test -r ts-node/register src/domain/zoneEntityNaming.test.ts src/domain/deviceProfiles.test.ts src/domain/entityDiscovery.test.ts src/domain/heatmapService.test.ts src/logger.test.ts src/debug/logBuffer.test.ts src/debug/redact.test.ts src/debug/mappingDiagnostics.test.ts src/debug/debugSession.test.ts src/debug/bundleBuilder.test.ts src/routes/debug.test.ts src/ha/haHttp.test.ts",
+    "test": "node --test -r ts-node/register src/domain/zoneEntityNaming.test.ts src/domain/deviceProfiles.test.ts src/domain/entityDiscovery.test.ts src/domain/heatmapService.test.ts src/logger.test.ts src/debug/logBuffer.test.ts src/debug/redact.test.ts src/debug/mappingDiagnostics.test.ts src/debug/debugSession.test.ts src/debug/bundleBuilder.test.ts src/routes/debug.test.ts src/ha/haHttp.test.ts src/esphome/codec.test.ts src/esphome/apiClient.test.ts src/esphome/entityStates.test.ts src/domain/deviceLogSession.test.ts src/domain/deviceHostResolver.test.ts src/config/deviceApiStorage.test.ts src/routes/wsUpgrade.test.ts src/routes/deviceLogsWs.test.ts",
     "start": "node dist/index.js",
     "lint": "echo \"(no lint configured yet)\""
   },
