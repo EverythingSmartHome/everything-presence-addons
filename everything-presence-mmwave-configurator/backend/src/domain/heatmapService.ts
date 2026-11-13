@@ -1,4 +1,5 @@
 import { HaAuthConfig } from '../ha/types';
+import { haFetch } from '../ha/haHttp';
 import { logger } from '../logger';
 import { Point, Zone, isZonePolygon, EntityMappings } from './types';
 import { EntityResolver } from './entityResolver';
@@ -233,7 +234,7 @@ export class HeatmapService {
 
     logger.debug({ url: url.toString(), entityCount: entityIds.length }, 'Fetching HA history');
 
-    const response = await fetch(url.toString(), {
+    const response = await haFetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${this.token}`,
         'Content-Type': 'application/json',

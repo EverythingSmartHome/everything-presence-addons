@@ -5,6 +5,7 @@ import { deviceMappingStorage } from '../config/deviceMappingStorage';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import type { DeviceProfileLoader } from '../domain/deviceProfiles';
 import type { IHaReadTransport } from '../ha/readTransport';
+import { haFetch } from '../ha/haHttp';
 import type { TransportStatus } from '../server';
 import { logger } from '../logger';
 import { buildDebugBundle, collectMappingDiagnostics, BundleError, DebugBundleSources } from '../debug/bundleBuilder';
@@ -27,7 +28,7 @@ const HA_VERSION_TIMEOUT_MS = 3000;
  * version string is returned; the token is used for the request and nothing else.
  */
 const fetchHaVersion = async (ha: HaConfig): Promise<string | undefined> => {
-  const res = await fetch(`${ha.baseUrl}/config`, {
+  const res = await haFetch(`${ha.baseUrl}/config`, {
     headers: { Authorization: `Bearer ${ha.token}` },
     signal: AbortSignal.timeout(HA_VERSION_TIMEOUT_MS),
   });

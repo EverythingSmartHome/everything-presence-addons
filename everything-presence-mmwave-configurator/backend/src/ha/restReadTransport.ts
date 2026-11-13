@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../logger';
 import { EntityRegistryEntry } from './types';
+import { haFetch } from './haHttp';
 import {
   IHaReadTransport,
   ReadTransportConfig,
@@ -69,7 +70,7 @@ export class RestReadTransport implements IHaReadTransport {
   private async renderTemplate(template: string): Promise<string | null> {
     try {
       const url = this.buildUrl('/template');
-      const res = await fetch(url, {
+      const res = await haFetch(url, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({ template }),
@@ -106,7 +107,7 @@ export class RestReadTransport implements IHaReadTransport {
     try {
       // Test connection by fetching API status
       const url = this.buildUrl('/');
-      const res = await fetch(url, { headers: this.headers });
+      const res = await haFetch(url, { headers: this.headers });
 
       if (!res.ok) {
         const text = await res.text();
@@ -141,7 +142,7 @@ export class RestReadTransport implements IHaReadTransport {
     try {
       // Try the direct device registry endpoint (Supervisor proxy)
       const url = this.buildUrl('/config/device_registry');
-      const res = await fetch(url, { headers: this.headers });
+      const res = await haFetch(url, { headers: this.headers });
 
       if (res.ok) {
         return (await res.json()) as DeviceRegistryEntry[];
@@ -210,7 +211,7 @@ export class RestReadTransport implements IHaReadTransport {
   async listEntityRegistry(): Promise<EntityRegistryEntry[]> {
     try {
       const url = this.buildUrl('/config/entity_registry');
-      const res = await fetch(url, { headers: this.headers });
+      const res = await haFetch(url, { headers: this.headers });
 
       if (res.ok) {
         return (await res.json()) as EntityRegistryEntry[];
@@ -291,7 +292,7 @@ export class RestReadTransport implements IHaReadTransport {
   async listAreaRegistry(): Promise<AreaRegistryEntry[]> {
     try {
       const url = this.buildUrl('/config/area_registry');
-      const res = await fetch(url, { headers: this.headers });
+      const res = await haFetch(url, { headers: this.headers });
 
       if (res.ok) {
         return (await res.json()) as AreaRegistryEntry[];
@@ -356,7 +357,7 @@ export class RestReadTransport implements IHaReadTransport {
   async getState(entityId: string): Promise<EntityState | null> {
     try {
       const url = this.buildUrl(`/states/${entityId}`);
-      const res = await fetch(url, { headers: this.headers });
+      const res = await haFetch(url, { headers: this.headers });
 
       if (!res.ok) {
         if (res.status === 404) {
@@ -392,7 +393,7 @@ export class RestReadTransport implements IHaReadTransport {
   async getAllStates(): Promise<EntityState[]> {
     try {
       const url = this.buildUrl('/states');
-      const res = await fetch(url, { headers: this.headers });
+      const res = await haFetch(url, { headers: this.headers });
 
       if (!res.ok) {
         const text = await res.text();
