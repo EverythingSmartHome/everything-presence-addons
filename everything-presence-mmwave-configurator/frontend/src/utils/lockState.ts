@@ -63,6 +63,24 @@ export const isSegmentLocked = (
 };
 
 /**
+ * Whether a new door may be placed on wall `index`.
+ *
+ * Only a wall the user has locked refuses a door. A canvas whose outline
+ * geometry is read-only (the wizard's Add Doors step, or the Room Builder while
+ * a basic shape drives the outline) still accepts doors: adding a door never
+ * moves a wall, so that read-only flag is deliberately not an input here.
+ */
+export const canPlaceDoorOnSegment = (
+  lockedSegments: ReadonlySet<number> | readonly number[] | null | undefined,
+  index: number,
+): boolean => {
+  if (!lockedSegments) return true;
+  return Array.isArray(lockedSegments)
+    ? !lockedSegments.includes(index)
+    : !(lockedSegments as ReadonlySet<number>).has(index);
+};
+
+/**
  * A corner belongs to two walls; dragging it moves both, so it is locked as
  * soon as either neighbour is.
  */
