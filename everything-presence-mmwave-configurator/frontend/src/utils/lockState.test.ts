@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   applyDevicePlacementUpdate,
+  canPlaceDoorOnSegment,
   areAllItemsLocked,
   areAllSegmentsLocked,
   countLockedObjects,
@@ -226,4 +227,17 @@ test('counts every pinned object in a room', () => {
   };
   assert.equal(countLockedObjects(room), 4);
   assert.equal(countLockedObjects(null), 0);
+});
+
+test('a door can be placed on any wall the user has not locked', () => {
+  // A geometry-only lock (the wizard's lockShell) contributes no locked walls.
+  assert.equal(canPlaceDoorOnSegment(new Set(), 0), true);
+  assert.equal(canPlaceDoorOnSegment(undefined, 3), true);
+  assert.equal(canPlaceDoorOnSegment([], 1), true);
+});
+
+test('a door cannot be placed on a wall the user has locked', () => {
+  assert.equal(canPlaceDoorOnSegment(new Set([1, 2]), 2), false);
+  assert.equal(canPlaceDoorOnSegment(new Set([1, 2]), 0), true);
+  assert.equal(canPlaceDoorOnSegment([1], 1), false);
 });

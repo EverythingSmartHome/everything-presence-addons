@@ -9,6 +9,7 @@ import { formatLengthLabel } from '../utils/lengthLabels';
 import { getDoorGeometry } from '../utils/doorGeometry';
 import { canvasLayerProps } from '../utils/canvasLayers';
 import { MARKER_SCALE_MAX, MARKER_SCALE_MIN } from '../utils/deviceMarkerSettings';
+import { canPlaceDoorOnSegment } from '../utils/lockState';
 
 export interface Point {
   x: number;
@@ -1466,8 +1467,12 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
             {/* Clickable wall segments for door placement */}
             {isDoorPlacementMode &&
               safePoints.map((p, idx) => {
-                // No new doors on a locked wall.
-                if (isSegmentPinned(idx)) return null;
+                // No new doors on a wall the user has locked. `lockShell` is
+                // deliberately ignored here: it only makes the outline geometry
+                // read-only (the wizard's Add Doors step always sets it), and
+                // adding a door never moves a wall. Gating on it hid every hit
+                // target, so wall clicks fell through and nothing was placed.
+                if (!canPlaceDoorOnSegment(lockedSegmentSet, idx)) return null;
                 const next = safePoints[(idx + 1) % safePoints.length];
                 const { x: x1, y: y1 } = toCanvasCoord(p);
                 const { x: x2, y: y2 } = toCanvasCoord(next);
