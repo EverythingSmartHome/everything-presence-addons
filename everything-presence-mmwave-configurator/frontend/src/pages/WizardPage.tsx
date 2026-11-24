@@ -41,6 +41,7 @@ import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverag
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { describePolygonSaveFailure } from '../utils/polygonSaveResult';
 import { resolveZoneLimits, supportsZoneEditing } from '../utils/zoneCapabilities';
 
 interface WizardPageProps {
@@ -1471,7 +1472,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom?.entityMappings;
       if (polygonModeStatus.enabled) {
         // Push polygon zones to device
-        await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, entityMappingsToUse);
+        const result = await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, entityMappingsToUse);
+        if (!result.ok) {
+          throw new Error(describePolygonSaveFailure(result.warnings));
+        }
       } else {
         // Push rectangular zones to device (device is source of truth)
         await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix, entityMappingsToUse);

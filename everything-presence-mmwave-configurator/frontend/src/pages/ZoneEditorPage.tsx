@@ -47,6 +47,7 @@ import { resolveZoneLimits, roomSupportsZoneEditing } from '../utils/zoneCapabil
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
 import { MIN_POLYGON_VERTICES, canDeleteVertex, deleteVertex } from '../utils/polygonVertices';
+import { describePolygonSaveFailure } from '../utils/polygonSaveResult';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -957,8 +958,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       );
 
       if (!result.ok) {
-        const sample = result.warnings?.[0];
-        throw new Error(sample ? `Recovery partially failed: ${sample.error}` : 'Failed to recover polygon zones');
+        throw new Error(
+          result.warnings && result.warnings.length > 0
+            ? `Recovery partially failed. ${describePolygonSaveFailure(result.warnings)}`
+            : 'Failed to recover polygon zones'
+        );
       }
 
       setPolygonZones(convertedZones);
@@ -1275,6 +1279,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
     setSaving(true);
     setWarning(null);
+    let polygonSaveError: string | null = null;
     try {
       const effectiveProfile = selectedRoom.profileId ?? selectedProfileId;
 
@@ -1298,7 +1303,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             entityMappingsToUse
           );
           const warningMessages: string[] = [];
-          if (result.warnings && result.warnings.length > 0) {
+          if (!result.ok) {
+            // Some zones were not written (unmapped slot, invalid shape or failed write).
+            // Applied after the rest of the save, because the success path clears the error.
+            polygonSaveError = describePolygonSaveFailure(result.warnings);
+          } else if (result.warnings && result.warnings.length > 0) {
             const sample = result.warnings
               .map((warning) => warning.entityId ?? warning.description)
               .filter(Boolean)
@@ -1405,8 +1414,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         }
       }
 
-      onWizardZonesReady?.();
-      setError(null);
+      if (polygonSaveError) {
+        setError(polygonSaveError);
+      } else {
+        onWizardZonesReady?.();
+        setError(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save zones');
     } finally {
@@ -1509,7 +1522,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     <div className="fixed inset-0 bg-slate-950 overflow-hidden">
       {/* Error Toast */}
       {error && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[60] max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
           {error}
         </div>
       )}

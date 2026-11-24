@@ -1065,12 +1065,14 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       const polygonExclusionMap = entityMap?.polygonExclusionEntities as Record<string, string> | undefined;
       const polygonEntryMap = entityMap?.polygonEntryEntities as Record<string, string> | undefined;
 
+      // Slot index = 1-based position within the zone's type, matching
+      // zoneWriter.applyPolygonZones (not the digit in zone.id).
+      const positionByType: Record<string, number> = {};
       const resolvedEntities = writableZones.map((zone) => {
         let key = '';
         let template: string | undefined;
         let type: 'polygon' | 'polygonExclusion' | 'polygonEntry' = 'polygon';
-        const indexMatch = zone.id.match(/(\d+)/);
-        const index = indexMatch ? parseInt(indexMatch[1], 10) : 1;
+        const index = (positionByType[zone.type] = (positionByType[zone.type] ?? 0) + 1);
 
         if (zone.type === 'exclusion') {
           key = `exclusion${index}`;
@@ -1110,13 +1112,8 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         }
 
         for (const entry of resolvedEntities) {
-          if (!entry.entityId) {
-            warnings.push({
-              description: `${entry.zoneId} entity could not be resolved`,
-              error: 'Entity not resolved',
-            });
-            continue;
-          }
+          // Unresolved zones are reported by applyPolygonZones as ENTITY_NOT_MAPPED failures.
+          if (!entry.entityId) continue;
 
           const registryEntry = registryById.get(entry.entityId);
           if (registryEntry?.disabled_by) {
