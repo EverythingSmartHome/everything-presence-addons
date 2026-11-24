@@ -1,3 +1,4 @@
+import { wifiPowerProfile } from './firmwarePower';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -528,6 +529,8 @@ export class FirmwareService {
           board_revision: String(configData.board_revision || ''),
           sensor_variant: String(configData.sensor_variant || ''),
           firmware_channel: (configData.firmware_channel as DeviceConfig['firmware_channel']) || 'stable',
+          wifi_power_profile: (configData.wifi_power_profile as DeviceConfig['wifi_power_profile']) ??
+            (configData.firmware_channel === 'stable-wifi11' ? 'wifi11' : 'standard'),
           configSource: 'entities',
         };
 
@@ -720,6 +723,7 @@ export class FirmwareService {
     const matchingVariant = latestFirmware.variants.find((variant) => {
       const req = variant.requirements;
       return (
+        wifiPowerProfile(req) === wifiPowerProfile(deviceConfig) &&
         req.model === deviceConfig.model &&
         req.ethernet_enabled === deviceConfig.ethernet_enabled &&
         req.co2_enabled === deviceConfig.co2_enabled &&
@@ -799,6 +803,12 @@ export class FirmwareService {
     const hardBlocks: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
     const req = firmwareVariant.requirements;
+
+    if (wifiPowerProfile(req) !== wifiPowerProfile(deviceConfig)) {
+      hardBlocks.push({ field: 'wifi_power_profile', deviceValue: wifiPowerProfile(deviceConfig),
+        firmwareValue: wifiPowerProfile(req), severity: 'hard_block',
+        message: 'Wi-Fi power differs. Use the explicit support option to change power profiles.' });
+    }
 
     // Hard blocks - will break the device
     if (req.model !== deviceConfig.model) {
@@ -907,6 +917,7 @@ export class FirmwareService {
       const variant = firmware.variants.find((v) => {
         const req = v.requirements;
         return (
+          wifiPowerProfile(req) === wifiPowerProfile(deviceConfig) &&
           req.model === deviceConfig.model &&
           req.ethernet_enabled === deviceConfig.ethernet_enabled &&
           req.co2_enabled === deviceConfig.co2_enabled &&

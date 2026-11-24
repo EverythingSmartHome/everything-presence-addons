@@ -448,12 +448,13 @@ export const validateFirmware = async (
 export const autoPrepare = async (
   deviceModel: string,
   currentVersion: string,
-  deviceId: string
+  deviceId: string,
+  wifiPowerProfile?: 'standard' | 'wifi11'
 ): Promise<AutoPrepareResponse> => {
   const res = await fetch(ingressAware('api/firmware/auto-prepare'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ deviceModel, currentVersion, deviceId }),
+    body: JSON.stringify({ deviceModel, currentVersion, deviceId, wifiPowerProfile }),
   });
   return handle<AutoPrepareResponse>(res);
 };

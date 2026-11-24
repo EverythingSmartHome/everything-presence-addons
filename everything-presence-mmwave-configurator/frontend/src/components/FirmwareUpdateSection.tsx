@@ -149,6 +149,12 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   const [lanPort, setLanPort] = useState(38080);
   const [cacheKeepCount, setCacheKeepCount] = useState(3);
 
+  // Support gate is deliberately ephemeral; enabling it never changes firmware.
+  const [supportCode, setSupportCode] = useState('');
+  const [wifiPowerSupport, setWifiPowerSupport] = useState(() =>
+    new URLSearchParams(window.location.search).get('wifi_power') === '11');
+  const expectedWifiPower = useRef<'standard' | 'wifi11' | null>(null);
+
   // Auto-detection state
   const [deviceConfig, setDeviceConfig] = useState<DeviceConfig | null>(null);
   const [availableUpdates, setAvailableUpdates] = useState<AvailableUpdate[]>([]);
@@ -350,6 +356,9 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
   // Reset state when device changes
   const handleDeviceChange = (deviceId: string) => {
+    expectedWifiPower.current = null;
+    setSupportCode('');
+    setWifiPowerSupport(false);
     debugMigration('handleDeviceChange', { deviceId });
     setSelectedDeviceId(deviceId);
     setDeviceConfig(null);
@@ -559,6 +568,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleManualPrepare = async () => {
+    expectedWifiPower.current = null;
     resetMigrationFlow();
     if (!selectedDeviceId) {
       onError('Please select a device');
@@ -713,7 +723,12 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
   };
 
-  const handleAutoInstall = async () => {
+  const handleAutoInstall = async (powerProfile?: 'standard' | 'wifi11') => {
+    if (powerProfile) {
+      const label = powerProfile === 'wifi11' ? 'reduced Wi-Fi power (11 dBm)' : 'standard Wi-Fi power';
+      if (!window.confirm(`Install stable EP1 firmware with ${label}? The device will reboot. Reduced power may reduce Wi-Fi range. Your board, sensor, Bluetooth and CO2 configuration will be preserved.`)) return;
+    }
+    expectedWifiPower.current = powerProfile ?? null;
     resetMigrationFlow();
     const device = devices.find((d) => d.id === selectedDeviceId);
     const resolved = resolveDeviceInfo(device);
@@ -739,7 +754,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       const res = await autoPrepare(
         resolved.model,
         resolved.firmwareVersion,
-        device.id
+        device.id,
+        powerProfile
       );
 
       setPreparedToken(res.prepared.token);
@@ -770,6 +786,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleTriggerUpdate = async () => {
+    expectedWifiPower.current = null;
     resetMigrationFlow();
     if (!preparedToken) {
       onError('No prepared firmware available');
@@ -790,6 +807,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleInstallCachedEntry = async (entry: CachedFirmwareEntry) => {
+    expectedWifiPower.current = null;
     resetMigrationFlow();
     if (!selectedDeviceId || selectedDeviceId !== entry.deviceId) {
       onError('Select the matching device before installing cached firmware.');
@@ -1732,6 +1750,16 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
           : null;
         const installedVersionMatches =
           !!preparedVersion && !!installedVersion && installedVersion === preparedVersion;
+        let powerVerified = expectedWifiPower.current === null;
+        if (expectedWifiPower.current && !inProgress) {
+          const result = await getDeviceConfig('everything-presence-one', installedVersion || preparedVersion || 'unknown', selectedDeviceId);
+          if (cancelled) return;
+          const expected = expectedWifiPower.current;
+          powerVerified = result.config.configSource === 'entities' &&
+            result.config.firmware_channel === (expected === 'wifi11' ? 'stable-wifi11' : 'stable') &&
+            (result.config.wifi_power_profile ?? 'standard') === expected;
+          if (powerVerified) setDeviceConfig(result.config);
+        }
         const hasStartSignal =
           inProgress || (progress !== null && progress > 0) || installedVersionMatches;
 
@@ -1783,7 +1811,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
         const hasRebooted = updateMonitorRef.current.seenRebootDown && updateMonitorRef.current.seenRebootUp;
 
-        if (updateMonitorRef.current.seenStart) {
+        if (updateMonitorRef.current.seenStart && powerVerified) {
           if (availabilityEntityId) {
             if (hasRebooted && installCompleteSignal) {
               if (preparedVersion && installedVersion && installedVersion !== preparedVersion) {
@@ -2591,7 +2619,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                                 v{update.newVersion}
                               </span>
                               <span className="ml-2 text-xs text-slate-400">
-                                ({update.channel})
+                                ({update.channel === 'stable-wifi11' ? 'stable � Wi-Fi 11 dBm' : update.channel})
                               </span>
                             </div>
                             <span className="text-xs text-slate-500">
@@ -2622,7 +2650,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                       ))}
 
                       <button
-                        onClick={handleAutoInstall}
+                        onClick={() => handleAutoInstall()}
                         disabled={
                           updateStatus === 'preparing' ||
                           updateStatus === 'downloading' ||
@@ -2641,7 +2669,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                       <div className="text-sm text-slate-300">Your device is running the latest firmware.</div>
                       <div className="mt-3">
                         <button
-                          onClick={handleAutoInstall}
+                          onClick={() => handleAutoInstall()}
                           disabled={
                             updateStatus === 'preparing' ||
                             updateStatus === 'downloading' ||
@@ -2826,7 +2854,11 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-500">Channel:</span>{' '}
-                    <span className="text-slate-300">{deviceConfig.firmware_channel}</span>
+                    <span className="text-slate-300">{deviceConfig.firmware_channel === 'stable-wifi11' ? 'stable' : deviceConfig.firmware_channel}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Wi-Fi power:</span>{' '}
+                    <span className="text-slate-300">{deviceConfig.wifi_power_profile === 'wifi11' || deviceConfig.firmware_channel === 'stable-wifi11' ? '11 dBm' : 'Standard'}</span>
                   </div>
                   <div>
                     <span className="text-slate-500">Features:</span>{' '}
@@ -2860,6 +2892,36 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         </div>
 
         <div className="mt-4 divide-y divide-slate-700/60">
+          {deviceConfig?.model === 'everything-presence-one' && (
+            <details className="py-4">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-200">Support options</summary>
+              {!wifiPowerSupport && deviceConfig.firmware_channel !== 'stable-wifi11' ? (
+                <div className="mt-3 flex gap-2">
+                  <input aria-label="Support code" placeholder="Code supplied by support" value={supportCode}
+                    onChange={(e) => setSupportCode(e.target.value)}
+                    className="rounded border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white" />
+                  <button type="button" disabled={supportCode.trim() !== 'wifi11'}
+                    onClick={() => { setWifiPowerSupport(true); setSupportCode(''); }}
+                    className="rounded bg-slate-600 px-3 py-2 text-sm disabled:opacity-50">Unlock</button>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3 text-xs text-slate-300">
+                  <p>Wi-Fi power troubleshooting. Install only when advised by support. 11 dBm may reduce Wi-Fi range. Installation preserves the reported board, sensor, Bluetooth and CO2 configuration.</p>
+                  {deviceConfig.configSource !== 'entities' ? (
+                    <p>This firmware cannot report its hardware configuration. Use the <a className="underline" href="https://docs.everythingsmart.io/flash/everything-presence-one.html?wifi_power=11" target="_blank" rel="noreferrer">USB installer</a> and select your board and sensor.</p>
+                  ) : !['stable', 'stable-wifi11'].includes(deviceConfig.firmware_channel) ? (
+                    <p>Power switching is available for stable EP1 firmware only.</p>
+                  ) : (
+                    <button type="button" disabled={monitoringUpdate || ['preparing', 'downloading', 'updating'].includes(updateStatus)}
+                      onClick={() => handleAutoInstall(deviceConfig.firmware_channel === 'stable-wifi11' ? 'standard' : 'wifi11')}
+                      className="rounded-lg bg-slate-600 px-4 py-2 font-semibold disabled:opacity-50">
+                      {deviceConfig.firmware_channel === 'stable-wifi11' ? 'Restore standard Wi-Fi power' : 'Install 11 dBm Wi-Fi firmware'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </details>
+          )}
           <div className="py-4">
             <button
               onClick={() => setShowManualMode(!showManualMode)}

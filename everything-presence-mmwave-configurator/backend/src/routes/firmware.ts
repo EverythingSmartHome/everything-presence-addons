@@ -1,3 +1,4 @@
+import { withWifiPowerProfile } from '../domain/firmwarePower';
 import { Router } from 'express';
 import { FirmwareService } from '../domain/firmwareService';
 import { firmwareStorage } from '../config/firmwareStorage';
@@ -591,7 +592,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
    */
   router.post('/auto-prepare', async (req, res) => {
     try {
-      const { deviceModel, currentVersion, deviceId } = req.body;
+      const { deviceModel, currentVersion, deviceId, wifiPowerProfile } = req.body;
 
       if (!deviceModel || typeof deviceModel !== 'string') {
         return res.status(400).json({ error: 'deviceModel is required' });
@@ -615,9 +616,18 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         });
       }
 
+      let targetConfig = deviceConfig;
+      if (wifiPowerProfile !== undefined) {
+        try {
+          targetConfig = withWifiPowerProfile(deviceConfig, wifiPowerProfile);
+        } catch (error) {
+          return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid Wi-Fi power profile' });
+        }
+      }
+
       // Fetch indexes and find matching firmware
       const indexes = await firmwareService.fetchAllFirmwareIndexes();
-      const matchingVariant = firmwareService.findMatchingFirmware(deviceConfig, indexes);
+      const matchingVariant = firmwareService.findMatchingFirmware(targetConfig, indexes);
 
       if (!matchingVariant) {
         return res.status(404).json({
@@ -645,7 +655,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
       const fullManifestUrl = `${baseUrl}/${matchingVariant.manifestUrl}`;
 
       // Validate compatibility
-      const validation = firmwareService.validateFirmwareCompatibility(deviceConfig, matchingVariant);
+      const validation = firmwareService.validateFirmwareCompatibility(targetConfig, matchingVariant);
 
       if (!validation.valid) {
         return res.status(400).json({
@@ -671,7 +681,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         matchingVariant,
         validation,
         prepared,
-        newVersion: productIndex.product.latestVersion,
+        newVersion: prepared.version,
         migration,
       });
     } catch (error) {
