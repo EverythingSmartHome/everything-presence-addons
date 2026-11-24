@@ -46,6 +46,17 @@ import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverag
 import { resolveZoneLimits, roomSupportsZoneEditing } from '../utils/zoneCapabilities';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { isPlannedRoom, plannedModelLabel, roomOptionLabel } from '../utils/plannedRoom';
+import { resolveCoverageOverlays } from '../utils/plannedPlacement';
+import {
+  clearPendingZonePushMetadata,
+  describeZonePushProblems,
+  hasPendingZonePush,
+  plannedZonesForDevice,
+  shouldClearPendingAfterPush,
+  shouldSkipDeviceZoneOverwrite,
+  type ZonePushResult,
+} from '../utils/pendingZonePush';
 import { MIN_POLYGON_VERTICES, canDeleteVertex, deleteVertex } from '../utils/polygonVertices';
 import {
   buildCeilingExclusionZones,
@@ -189,11 +200,21 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   const trackingMaxRangeMeters = trackingCoverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
   const trackingFieldOfViewDeg = trackingCoverageFov?.horizontalFovDeg ?? selectedProfile?.limits?.fieldOfViewDegrees;
   const trackingMaxRangeMm = (trackingMaxRangeMeters ?? 6) * 1000;
+  // A planned room (model, no device) edits its zones locally; nothing is sent.
+  const isPlanned = isPlannedRoom(selectedRoom);
+  // Ceiling slices are generated for and written to a real EPP, so they stay
+  // off until a device is linked; a planned ceiling EPP edits plain zones.
   const isCeilingSliceMode =
+    Boolean(selectedRoom?.deviceId) &&
     selectedProfile?.id === 'everything_presence_pro' &&
     selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  // The coverage drawn on the canvas follows the mount alone, as in the Room
+  // Builder: a ceiling sensor (planned or linked) shows its floor footprint
+  // and no wall cone. Slice editing above still needs a linked device.
+  const coverageOverlays = resolveCoverageOverlays(selectedRoom, showDeviceRadar);
+  const isCeilingMount = coverageOverlays.footprint;
   const heightCoverageConfig = useMemo(() => {
-    if (!selectedRoom?.devicePlacement || !isCeilingSliceMode) return null;
+    if (!selectedRoom?.devicePlacement || !isCeilingMount) return null;
     if (!coverageFov) return null;
     const heightMm = selectedRoom.devicePlacement.heightMm;
     const pitchDeg = Number.isFinite(selectedRoom.devicePlacement.pitchDeg)
@@ -208,7 +229,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       verticalFovDeg: coverageFov.verticalFovDeg,
       maxRangeMeters: coverageFov.maxRangeMeters,
     };
-  }, [coverageFov, selectedRoom?.devicePlacement, isCeilingSliceMode]);
+  }, [coverageFov, selectedRoom?.devicePlacement, isCeilingMount]);
   const ceilingSliceConfig = useMemo(
     () => normalizeCeilingSliceConfig(selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm, true),
     [selectedRoom?.metadata?.ceilingSliceConfig, trackingMaxRangeMm],
@@ -512,9 +533,16 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
   }, [selectedRoom?.deviceId]);
 
   // Fetch existing zones from device when room is loaded
+  const pendingZonePush = hasPendingZonePush(selectedRoom);
   useEffect(() => {
     const loadZonesFromDevice = async () => {
       if (!selectedRoom || !selectedRoom.deviceId || !selectedRoom.profileId) {
+        return;
+      }
+
+      // Zones planned before the device was linked must not be replaced by the
+      // device's until the user chooses (see the pending-zones banner).
+      if (shouldSkipDeviceZoneOverwrite(selectedRoom)) {
         return;
       }
 
@@ -573,7 +601,78 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings, polygonOnlyZones]);
+  }, [selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, devices, deviceHasValidMappings, polygonOnlyZones, pendingZonePush]);
+
+  // ── Planned zones on a newly linked device ────────────────────────────
+  const [resolvingPendingZones, setResolvingPendingZones] = useState(false);
+
+  /** Send the zones planned before the device was linked, then clear the flag. */
+  const handleSendPlannedZones = async () => {
+    if (!selectedRoom?.deviceId || !selectedRoom.profileId) return;
+    const entityNamePrefix = resolveEntityPrefix({
+      entityMappings: selectedRoom.entityMappings,
+      entityNamePrefix: selectedRoom.entityNamePrefix,
+      mappingPrefix: selectedDeviceMapping?.esphomeNodeName,
+      devicePrefix: selectedDevice?.entityNamePrefix,
+    });
+    if (!entityNamePrefix) {
+      setError('Cannot send zones: device entity name prefix not found');
+      return;
+    }
+    setResolvingPendingZones(true);
+    setError(null);
+    // Polygon-only firmware (or a device already in polygon mode) takes polygons.
+    const payload = plannedZonesForDevice(selectedRoom.zones ?? [], polygonOnlyZones || polygonModeStatus.enabled);
+    let pushOutcome: ZonePushResult | Error;
+    try {
+      const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
+      if (payload.kind === 'polygon') {
+        pushOutcome = await pushPolygonZonesToDevice(selectedRoom.deviceId, selectedRoom.profileId, payload.zones, entityNamePrefix, entityMappingsToUse);
+      } else {
+        pushOutcome = await pushZonesToDevice(selectedRoom.deviceId, selectedRoom.profileId, payload.zones, entityNamePrefix, entityMappingsToUse);
+      }
+    } catch (err) {
+      pushOutcome = err instanceof Error ? err : new Error('Failed to send planned zones to the device');
+    }
+
+    // The zone endpoints answer 200 even when writes fail: judge the body. On
+    // any failure the flag and banner stay, the loader stays blocked by the
+    // flag rather than by loadedRoomRef, and the user can try again.
+    if (!shouldClearPendingAfterPush(pushOutcome, payload.zones)) {
+      setError(describeZonePushProblems(pushOutcome));
+      setResolvingPendingZones(false);
+      return;
+    }
+
+    try {
+      if (payload.kind === 'polygon') setPolygonZones(payload.zones);
+      // The device now matches the stored zones; don't read them straight back.
+      loadedRoomRef.current = selectedRoom.id;
+      const result = await updateRoom(selectedRoom.id, { metadata: clearPendingZonePushMetadata(selectedRoom.metadata) });
+      setRooms((prev) => prev.map((room) => (room.id === selectedRoom.id ? result.room : room)));
+      setWarning('Planned zones sent to the device.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Zones were sent, but the room could not be updated');
+    } finally {
+      setResolvingPendingZones(false);
+    }
+  };
+
+  /** Drop the planned zones in favour of the device's; the loader then reads them. */
+  const handleUseDeviceZones = async () => {
+    if (!selectedRoom) return;
+    setResolvingPendingZones(true);
+    setError(null);
+    try {
+      loadedRoomRef.current = null;
+      const result = await updateRoom(selectedRoom.id, { metadata: clearPendingZonePushMetadata(selectedRoom.metadata) });
+      setRooms((prev) => prev.map((room) => (room.id === selectedRoom.id ? result.room : room)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update the room');
+    } finally {
+      setResolvingPendingZones(false);
+    }
+  };
 
   // Fetch zone availability from entity registry
   useEffect(() => {
@@ -1285,6 +1384,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         devicePrefix: selectedDevice?.entityNamePrefix,
       });
 
+      // Set only from the write's own result: the zone endpoints answer 200
+      // even when entity writes fail, and a thrown error skips this entirely.
+      let pushClearsPending = false;
       if (selectedRoom.deviceId && effectiveProfile && entityNamePrefix) {
         // Skip entityMappings if device has valid mappings stored
         const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
@@ -1313,6 +1415,9 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             .map((zone) => ({ id: zone.id, status: getPolygonStatus(zone.id) }))
             .filter((zone) => zone.status === 'disabled' || zone.status === 'unavailable');
 
+          pushClearsPending =
+            shouldClearPendingAfterPush(result, zonesToWrite) && disabledPolygonZones.length === 0;
+
           if (disabledPolygonZones.length > 0) {
             const sample = disabledPolygonZones
               .slice(0, 3)
@@ -1339,6 +1444,8 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
           // Push zones to device (device is source of truth)
           const result = await pushZonesToDevice(selectedRoom.deviceId, effectiveProfile, availableZones, entityNamePrefix, entityMappingsToUse);
+          // Zones held back as disabled/unavailable never reached the device either.
+          pushClearsPending = shouldClearPendingAfterPush(result, availableZones) && skippedZones.length === 0;
           const warningMessages: string[] = [];
           if (result.warnings && result.warnings.length > 0) {
             const sample = result.warnings
@@ -1365,10 +1472,23 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         }
       }
 
-      // Save to add-on storage (rectangle zones only - polygon zones are device-only)
+      // Planned zones stop being pending only once the device confirmed all of them.
+      const clearPending = pushClearsPending && hasPendingZonePush(selectedRoom);
+      const roomToSave: RoomConfig = clearPending
+        ? { ...selectedRoom, metadata: clearPendingZonePushMetadata(selectedRoom.metadata) }
+        : selectedRoom;
+
+      // Save to add-on storage (rectangle zones only - polygon zones are device-only).
+      // A planned room has no device, so this is where its zones live.
       if (!polygonModeStatus.enabled) {
-        const result = await updateRoom(selectedRoom.id, selectedRoom);
+        const result = await updateRoom(selectedRoom.id, roomToSave);
         setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? result.room : r)));
+      } else if (clearPending) {
+        const result = await updateRoom(selectedRoom.id, { metadata: roomToSave.metadata });
+        setRooms((prev) => prev.map((r) => (r.id === selectedRoom.id ? result.room : r)));
+      }
+      if (isPlanned) {
+        setWarning('Zones saved to the planned room. They will be offered to the device when you link one.');
       }
 
       // Save zone labels to device mapping (for both rectangle and polygon zones)
@@ -1518,7 +1638,44 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
           {warning}
         </div>
       )}
-      {polygonModeStatus.enabled && polygonZones.length === 0 && (hasSavedRectangularRecovery || hasBackupRecovery || loadingLatestZoneBackup) && (
+      {/* Planned zones waiting for a decision after a device was linked */}
+      {selectedRoom?.deviceId && pendingZonePush && (
+        <div className="absolute top-36 left-1/2 -translate-x-1/2 z-50 w-[min(42rem,calc(100vw-2rem))] rounded-2xl border border-amber-500/40 bg-slate-900/90 px-5 py-4 text-slate-100 shadow-2xl backdrop-blur">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-amber-300">This room has planned zones</div>
+              <div className="mt-1 text-sm text-slate-300">
+                They were drawn before the device was linked and haven't been sent to it. Send them to the device, or replace them with the zones already on it.
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleSendPlannedZones}
+                disabled={resolvingPendingZones}
+                className="rounded-xl bg-aqua-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-aqua-500 disabled:opacity-50"
+              >
+                {resolvingPendingZones ? 'Working...' : 'Send planned zones'}
+              </button>
+              <button
+                type="button"
+                onClick={handleUseDeviceZones}
+                disabled={resolvingPendingZones}
+                className="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-700 disabled:opacity-50"
+              >
+                Use zones on the device
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isPlanned && selectedRoom && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-40 max-w-lg rounded-xl border border-aqua-500/40 bg-slate-900/90 backdrop-blur px-4 py-2 text-xs text-slate-300 shadow-xl">
+          <span className="font-semibold text-aqua-200">Planned · {plannedModelLabel(selectedRoom, profiles)}</span>
+          {' '}— zones are saved to this room only, within this model's limits. They're offered to the device when you link one.
+        </div>
+      )}
+      {!pendingZonePush && polygonModeStatus.enabled && polygonZones.length === 0 && (hasSavedRectangularRecovery || hasBackupRecovery || loadingLatestZoneBackup) && (
         <div className="absolute top-36 left-1/2 -translate-x-1/2 z-50 w-[min(42rem,calc(100vw-2rem))] rounded-2xl border border-sky-500/40 bg-slate-900/90 px-5 py-4 text-slate-100 shadow-2xl backdrop-blur">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -1645,7 +1802,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             >
               {zoneCapableRooms.map((room) => (
                 <option key={room.id} value={room.id}>
-                  {room.name}
+                  {roomOptionLabel(room, profiles)}
                 </option>
               ))}
             </select>
@@ -1842,7 +1999,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             deviceIconUrl={deviceIconUrl}
             clipRadarToWalls={clipRadarToWalls}
             heightCoverage={heightCoverageConfig ?? undefined}
-            showRadar={showDeviceRadar}
+            showRadar={coverageOverlays.cone}
             showWalls={showWalls}
             showFurniture={showFurniture}
             showDoors={showDoors}
@@ -2004,7 +2161,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             >
               {zoneCapableRooms.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.name}
+                  {roomOptionLabel(r, profiles)}
                 </option>
               ))}
             </select>

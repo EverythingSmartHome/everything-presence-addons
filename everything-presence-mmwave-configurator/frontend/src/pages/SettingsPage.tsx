@@ -34,11 +34,14 @@ import { FirmwareUpdateSection } from '../components/FirmwareUpdateSection';
 import { TroubleshootingCard } from '../components/TroubleshootingCard';
 import { useDeviceMappings } from '../contexts/DeviceMappingsContext';
 import { getDeviceMapping, DeviceMapping } from '../api/deviceMappings';
+import { getRoomDeviceStatus, plannedModelLabel } from '../utils/plannedRoom';
 
 interface SettingsPageProps {
   onBack?: () => void;
   onRoomDeleted?: (roomId: string) => void;
   onRoomUpdated?: (room: RoomConfig) => void;
+  /** Link a real device to a room (planned or unconfigured). */
+  onLinkDevice?: (roomId: string) => void;
 }
 
 type SettingsTab = 'rooms' | 'backups' | 'assets' | 'firmware' | 'troubleshooting';
@@ -51,7 +54,7 @@ const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'troubleshooting', label: 'Troubleshooting' },
 ];
 
-export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDeleted, onRoomUpdated }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDeleted, onRoomUpdated, onLinkDevice }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('rooms');
   const [rooms, setRooms] = useState<RoomConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,7 +306,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
   const handleUnlinkDevice = async (room: RoomConfig) => {
     if (!room.deviceId) return;
 
-    const confirmMessage = `Are you sure you want to unlink the device from "${room.name}"?\n\nThis will:\n• Remove the device association\n• Clear entity mappings\n\nThe room geometry, furniture, and zones will be preserved.`;
+    const confirmMessage = `Are you sure you want to unlink the device from "${room.name}"?\n\nThis will:\n• Remove the device association\n• Clear entity mappings\n\nThe room geometry, furniture, and zones will be preserved, and the room becomes a planned room for the same model so you can link a device again later.`;
     if (!confirm(confirmMessage)) {
       return;
     }
@@ -314,9 +317,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
       // Keep: name, zones, roomShell, furniture, doors, devicePlacement, etc.
       // Note: Empty strings are converted to undefined by backend's normalizeRoom
       // Note: null is used for entityMappings because undefined is stripped from JSON
+      // profileId is kept: the room becomes a planned room for the same model.
       const result = await updateRoom(room.id, {
         deviceId: '',
-        profileId: '',
         entityMappings: null as unknown as undefined,
         entityNamePrefix: '',
       });
@@ -328,7 +331,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
       // Notify parent (App.tsx) so it can update its rooms state
       onRoomUpdated?.(result.room);
 
-      setSuccess(`Device unlinked from "${room.name}". Room data preserved.`);
+      setSuccess(`Device unlinked from "${room.name}". Room data preserved as a planned room.`);
       setTimeout(() => setSuccess(null), 4000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to unlink device');
@@ -934,7 +937,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                         )}
                       </div>
                       <div className="text-sm text-slate-400">
-                        {room.deviceId ? 'Device linked' : 'No device linked'}
+                        {getRoomDeviceStatus(room) === 'linked'
+                          ? 'Device linked'
+                          : getRoomDeviceStatus(room) === 'planned'
+                          ? `Planned · ${plannedModelLabel(room, profiles)}`
+                          : 'No device linked'}
                         {room.roomShell?.points && room.roomShell.points.length > 0 && (
                           <span className="ml-2">· Room outline set</span>
                         )}
@@ -982,6 +989,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack, onRoomDelete
                           title="Remove device from room while preserving room geometry and furniture"
                         >
                           {unlinkingDeviceRoomId === room.id ? 'Unlinking...' : '🔗 Unlink Device'}
+                        </button>
+                      )}
+                      {!room.deviceId && onLinkDevice && (
+                        <button
+                          onClick={() => onLinkDevice(room.id)}
+                          className="min-w-0 rounded-lg border border-aqua-600/50 bg-aqua-600/10 px-3 py-2 text-sm font-semibold text-aqua-100 transition-all hover:bg-aqua-600/20 sm:px-4"
+                          title="Link a real device to this room"
+                        >
+                          🔗 Link Device
                         </button>
                       )}
                       <button

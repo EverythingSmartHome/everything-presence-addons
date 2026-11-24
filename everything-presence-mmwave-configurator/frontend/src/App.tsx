@@ -42,6 +42,10 @@ function App() {
   const [wizardOutlineDone, setWizardOutlineDone] = useState<boolean>(false);
   const [wizardPlacementDone, setWizardPlacementDone] = useState<boolean>(false);
   const [wizardZonesReady, setWizardZonesReady] = useState<boolean>(false);
+  // Plan mode: the wizard is setting up a planned room (a model, no device yet).
+  const [wizardPlanMode, setWizardPlanMode] = useState<boolean>(false);
+  // Room a device is being linked to; the wizard runs its existing-room path for it.
+  const [wizardLinkRoomId, setWizardLinkRoomId] = useState<string | null>(null);
   const [view, setView] = useState<'dashboard' | 'wizard' | 'zoneEditor' | 'roomBuilder' | 'liveTracking' | 'settings'>('dashboard');
   const [liveState, setLiveState] = useState<LiveState | null>(null);
 
@@ -76,6 +80,7 @@ function App() {
         setWizardOutlineDone(Boolean(settingsRes.settings.outlineDone));
         setWizardPlacementDone(Boolean(settingsRes.settings.placementDone));
         setWizardZonesReady(Boolean(settingsRes.settings.zonesReady));
+        setWizardPlanMode(Boolean(settingsRes.settings.wizardPlanMode));
         const defaultRoomId =
           typeof settingsRes.settings.defaultRoomId === 'string' ? settingsRes.settings.defaultRoomId : null;
         if (!selectedRoomId && defaultRoomId) {
@@ -626,16 +631,46 @@ function App() {
     }
   };
 
+  // Start the wizard from scratch (device step, nothing selected, not planning).
+  const resetWizardSelection = () => {
+    setWizardStep('device');
+    setWizardDeviceId(null);
+    setWizardProfileId(null);
+    setWizardPlanMode(false);
+    setWizardLinkRoomId(null);
+    updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null, wizardPlanMode: false }).catch(() => null);
+  };
+
+  /**
+   * Link a real device to a room (usually a planned one). Runs the wizard's
+   * existing-room path for that room: pick the device, discover its entities,
+   * then confirm the room - which is where a model mismatch is handled.
+   */
+  const startLinkDevice = async (roomId: string) => {
+    resetWizardSelection();
+    try {
+      // Other pages edit rooms through their own copies; the wizard works off ours.
+      const [roomsRes, devicesRes] = await Promise.all([fetchRooms(), fetchDevices()]);
+      setRooms(roomsRes.rooms);
+      setDevices(devicesRes.devices);
+    } catch {
+      // Fall back to what we already have.
+    }
+    setSelectedRoomId(roomId);
+    setWizardLinkRoomId(roomId);
+    setView('wizard');
+  };
+
   const dashboard = (
     <LiveTrackingPage
       onNavigate={(view) => {
         // Reset wizard step when navigating to Add Device
         if (view === 'wizard') {
-          setWizardStep('device');
-          updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
+          resetWizardSelection();
         }
         setView(view);
       }}
+      onLinkDevice={(roomId) => void startLinkDevice(roomId)}
       initialRoomId={selectedRoomId}
       initialProfileId={selectedProfileId}
       liveState={liveState}
@@ -661,11 +696,14 @@ function App() {
             selectedProfileId={wizardProfileId ?? selectedProfileId}
             onBack={() => {
               // Reset wizard when going back
-              setWizardStep('device');
-              setWizardDeviceId(null);
-              setWizardProfileId(null);
-              updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
+              resetWizardSelection();
               setView('dashboard');
+            }}
+            linkRoomId={wizardLinkRoomId}
+            initialPlanMode={wizardPlanMode}
+            onPlanModeChange={(planMode) => {
+              setWizardPlanMode(planMode);
+              updateSettings({ wizardPlanMode: planMode }).catch(() => null);
             }}
             onCreateRoom={async (name, deviceId, profileId, entityMappings) => {
               // Find the selected device to get its entityNamePrefix (legacy fallback)
@@ -702,11 +740,13 @@ function App() {
               setRooms((prev) => prev.map((r) => (r.id === updatedRoom.id ? updatedRoom : r)));
             }}
             onComplete={() => {
-              updateSettings({ wizardCompleted: true, wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
+              updateSettings({ wizardCompleted: true, wizardDeviceId: null, wizardProfileId: null, wizardPlanMode: false }).catch(() => null);
               setWizardCompleted(true);
               setWizardStep('finish');
               setWizardDeviceId(null);
               setWizardProfileId(null);
+              setWizardPlanMode(false);
+              setWizardLinkRoomId(null);
               setView('dashboard');
             }}
             initialStep={wizardStep}
@@ -743,8 +783,7 @@ function App() {
           <ZoneEditorPage
             onNavigate={(targetView) => {
               if (targetView === 'wizard') {
-                setWizardStep('device');
-                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
+                resetWizardSelection();
               }
               // Map 'liveDashboard' to 'dashboard' for the main live tracking view
               const mappedView = targetView === 'liveDashboard' ? 'dashboard' : targetView;
@@ -769,13 +808,13 @@ function App() {
           <RoomBuilderPage
             onNavigate={(targetView) => {
               if (targetView === 'wizard') {
-                setWizardStep('device');
-                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
+                resetWizardSelection();
               }
               // Map 'liveDashboard' to 'dashboard' for the main live tracking view
               const mappedView = targetView === 'liveDashboard' ? 'dashboard' : targetView;
               setView(mappedView);
             }}
+            onLinkDevice={(roomId) => void startLinkDevice(roomId)}
             initialRoomId={selectedRoomId}
             initialProfileId={selectedProfileId}
             onRoomChange={(roomId, profileId) => {
@@ -803,11 +842,11 @@ function App() {
             onNavigate={(view) => {
               // Reset wizard step when navigating to Add Device
               if (view === 'wizard') {
-                setWizardStep('device');
-                updateSettings({ wizardStep: 'device', wizardDeviceId: null, wizardProfileId: null }).catch(() => null);
+                resetWizardSelection();
               }
               setView(view);
             }}
+            onLinkDevice={(roomId) => void startLinkDevice(roomId)}
             initialRoomId={selectedRoomId}
             initialProfileId={selectedProfileId}
             liveState={liveState}
@@ -830,6 +869,7 @@ function App() {
             onRoomUpdated={(room) => {
               setRooms((prev) => prev.map((r) => (r.id === room.id ? room : r)));
             }}
+            onLinkDevice={(roomId) => void startLinkDevice(roomId)}
           />
         )}
         </main>
