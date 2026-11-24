@@ -10,6 +10,7 @@ import { EntityResolver } from '../domain/entityResolver';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { deviceMappingStorage, parseFirmwareVersion } from '../config/deviceMappingStorage';
 import { isPolygonOnlyDevice } from '../domain/firmwareVersionUtils';
+import { zoneSlotFromId } from '../domain/zoneSlots';
 import { logger } from '../logger';
 
 export interface DevicesRouterDependencies {
@@ -1065,14 +1066,17 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       const polygonExclusionMap = entityMap?.polygonExclusionEntities as Record<string, string> | undefined;
       const polygonEntryMap = entityMap?.polygonEntryEntities as Record<string, string> | undefined;
 
-      // Slot index = 1-based position within the zone's type, matching
-      // zoneWriter.applyPolygonZones (not the digit in zone.id).
-      const positionByType: Record<string, number> = {};
+      // Slot = trailing number of the zone id, as in zoneWriter.applyPolygonZones,
+      // so these checks look at the entity the writer writes. Zones without a
+      // usable slot are skipped here; the writer reports them as failures.
       const resolvedEntities = writableZones.map((zone) => {
         let key = '';
         let template: string | undefined;
         let type: 'polygon' | 'polygonExclusion' | 'polygonEntry' = 'polygon';
-        const index = (positionByType[zone.type] = (positionByType[zone.type] ?? 0) + 1);
+        const index = zoneSlotFromId(zone.id);
+        if (index === null || index < 1) {
+          return { zoneId: zone.id, entityId: null };
+        }
 
         if (zone.type === 'exclusion') {
           key = `exclusion${index}`;

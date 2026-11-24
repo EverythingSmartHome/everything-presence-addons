@@ -59,6 +59,7 @@ import {
 } from '../utils/pendingZonePush';
 import { MIN_POLYGON_VERTICES, canDeleteVertex, deleteVertex } from '../utils/polygonVertices';
 import { describePolygonSaveFailure } from '../utils/polygonSaveResult';
+import { nextZoneId } from '../utils/zoneSlotIds';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -2463,7 +2464,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         const regularCount = polygonZones.filter(z => z.type === 'regular').length;
                         if (regularCount >= zoneLimits.maxZones) return;
                         const newZone: ZonePolygon = {
-                          id: `Zone ${regularCount + 1}`,
+                          id: nextZoneId(polygonZones, 'regular'),
                           type: 'regular',
                           vertices: [{ x: 0, y: 1000 }, { x: 1000, y: 1000 }, { x: 500, y: 0 }],
                           enabled: true,
@@ -2481,7 +2482,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         const exclusionCount = polygonZones.filter(z => z.type === 'exclusion').length;
                         if (exclusionCount >= zoneLimits.maxExclusionZones) return;
                         const newZone: ZonePolygon = {
-                          id: `Exclusion ${exclusionCount + 1}`,
+                          id: nextZoneId(polygonZones, 'exclusion'),
                           type: 'exclusion',
                           vertices: [{ x: -500, y: 500 }, { x: 500, y: 500 }, { x: 0, y: -500 }],
                           enabled: true,
@@ -2499,7 +2500,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         const entryCount = polygonZones.filter(z => z.type === 'entry').length;
                         if (entryCount >= zoneLimits.maxEntryZones) return;
                         const newZone: ZonePolygon = {
-                          id: `Entry ${entryCount + 1}`,
+                          id: nextZoneId(polygonZones, 'entry'),
                           type: 'entry',
                           vertices: [{ x: 1500, y: 500 }, { x: 2500, y: 500 }, { x: 2000, y: -500 }],
                           enabled: true,

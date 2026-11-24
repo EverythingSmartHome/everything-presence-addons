@@ -60,7 +60,7 @@ test('unresolved regular zones fail the save while mapped clear slots are still 
   );
 });
 
-test('resolved zones are written and unresolved exclusion/entry zones are reported by slot position', async () => {
+test('resolved zones are written and unresolved exclusion/entry zones are reported by slot', async () => {
   const { writer, writes } = makeWriter();
   const mappings = {
     polygonZoneEntities: { zone1: 'text.z1', zone2: 'text.z2' },
@@ -131,4 +131,91 @@ test('fully mapped save succeeds with writes and clears unchanged', async () => 
       ['text.x1', 'clear'],
     ]
   );
+});
+
+const allMapped = {
+  polygonZoneEntities: { zone1: 'text.z1', zone2: 'text.z2', zone3: 'text.z3', zone4: 'text.z4' },
+  polygonExclusionEntities: { exclusion1: 'text.x1', exclusion2: 'text.x2' },
+  polygonEntryEntities: { entry1: 'text.e1', entry2: 'text.e2' },
+} as unknown as EntityMappings;
+
+const entryWrites = (writes: Array<{ entityId: string; value: string }>) =>
+  writes
+    .filter((w) => w.entityId.startsWith('text.e'))
+    .map((w) => [w.entityId, w.value === '' ? 'clear' : 'write']);
+
+test('a zone is written to the slot named by its id and unclaimed slots are cleared', async () => {
+  const { writer, writes } = makeWriter();
+
+  const result = await writer.applyPolygonZones(entityMap, [zone('Entry 2', 'entry')], undefined, allMapped);
+
+  assert.deepEqual(result, { ok: true, failures: [] });
+  assert.deepEqual(entryWrites(writes), [
+    ['text.e2', 'write'],
+    ['text.e1', 'clear'],
+  ]);
+});
+
+test('zones listed out of order are each written to their own slot', async () => {
+  const { writer, writes } = makeWriter();
+  const larger = [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 2000, y: 2000 }];
+
+  const result = await writer.applyPolygonZones(
+    entityMap,
+    [zone('Entry 2', 'entry', larger), zone('Entry 1', 'entry')],
+    undefined,
+    allMapped
+  );
+
+  assert.deepEqual(result, { ok: true, failures: [] });
+  assert.equal(writes.find((w) => w.entityId === 'text.e1')?.value, '0:0;1000:0;1000:1000;0:1000');
+  assert.equal(writes.find((w) => w.entityId === 'text.e2')?.value, '0:0;2000:0;2000:2000');
+  assert.equal(writes.filter((w) => w.entityId.startsWith('text.e')).length, 2, 'no entry slot is cleared');
+});
+
+test('duplicate, out-of-range and unnumbered ids are reported and not written', async () => {
+  const { writer, writes } = makeWriter();
+
+  const result = await writer.applyPolygonZones(
+    entityMap,
+    [
+      zone('Zone 1', 'regular'),
+      zone('Zone 1', 'regular'),
+      zone('Entry 5', 'entry'),
+      zone('Exclusion', 'exclusion'),
+    ],
+    undefined,
+    allMapped
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(
+    result.failures.map((f) => [f.error, f.description]),
+    [
+      ['DUPLICATE_ZONE_SLOT', 'Zone 1 could not be saved: another zone already uses Polygon Zone 1'],
+      ['INVALID_ZONE_ID', 'Exclusion could not be saved: the zone id has no Polygon Exclusion slot number'],
+      ['ZONE_SLOT_OUT_OF_RANGE', 'Entry 5 could not be saved: this device has only 2 Polygon Entry slots'],
+    ]
+  );
+  // Only the first Zone 1 is written; every other slot is cleared.
+  assert.deepEqual(
+    writes.filter((w) => w.value !== '').map((w) => w.entityId),
+    ['text.z1']
+  );
+  assert.deepEqual(
+    writes.filter((w) => w.value === '').map((w) => w.entityId),
+    ['text.z2', 'text.z3', 'text.z4', 'text.x1', 'text.x2', 'text.e1', 'text.e2']
+  );
+});
+
+test('ENTITY_NOT_MAPPED names the slot from the zone id', async () => {
+  const { writer } = makeWriter();
+  const mappings = { polygonZoneEntities: { zone1: 'text.z1' } } as unknown as EntityMappings;
+
+  const result = await writer.applyPolygonZones(entityMap, [zone('Zone 3', 'regular')], undefined, mappings);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.failures.map((f) => f.description), [
+    'Zone 3 could not be saved: no Polygon Zone 3 entity is mapped for this device',
+  ]);
 });

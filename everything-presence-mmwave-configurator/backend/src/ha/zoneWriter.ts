@@ -4,6 +4,7 @@ import { isValidPolygon, polygonToText } from '../domain/polygonUtils';
 import { EntityResolver } from '../domain/entityResolver';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { logger } from '../logger';
+import { zoneSlotFromId } from '../domain/zoneSlots';
 
 interface ZoneEntityConfig {
   beginX?: string | null;
@@ -155,10 +156,40 @@ export class ZoneWriter {
       const typedZones = zones.filter(z => z.type === group.zoneType);
       const hasGroup = Boolean(entityMap?.[group.groupKey]) || Boolean(deviceId);
       const polyMap: Record<string, string> = entityMap?.[group.groupKey] || {};
+      const maxSlots = Math.max(Object.keys(polyMap).length, group.minSlots);
+      const claimedSlots = new Set<number>();
 
-      // Write user zones. Slot index = position within its type (1-based).
-      typedZones.forEach((zone, idx) => {
-        const slot = idx + 1;
+      // Write user zones. Each zone goes to the slot named by its id ("Entry 2" -> entry slot 2).
+      typedZones.forEach((zone) => {
+        const slot = zoneSlotFromId(zone.id);
+        if (slot === null) {
+          logger.warn({ zoneId: zone.id, type: zone.type }, 'Polygon zone id has no slot number; zone not saved');
+          skippedFailures.push({
+            description: `${zone.id} could not be saved: the zone id has no ${group.slotLabel} slot number`,
+            error: 'INVALID_ZONE_ID',
+          });
+          return;
+        }
+        if (slot < 1 || slot > maxSlots) {
+          logger.warn({ zoneId: zone.id, slot, maxSlots }, `${group.slotLabel} slot out of range; zone not saved`);
+          skippedFailures.push({
+            description: slot < 1
+              ? `${zone.id} could not be saved: ${group.slotLabel} slots are numbered 1 to ${maxSlots}`
+              : `${zone.id} could not be saved: this device has only ${maxSlots} ${group.slotLabel} slots`,
+            error: 'ZONE_SLOT_OUT_OF_RANGE',
+          });
+          return;
+        }
+        if (claimedSlots.has(slot)) {
+          logger.warn({ zoneId: zone.id, slot }, `Another zone already uses ${group.slotLabel} ${slot}; zone not saved`);
+          skippedFailures.push({
+            description: `${zone.id} could not be saved: another zone already uses ${group.slotLabel} ${slot}`,
+            error: 'DUPLICATE_ZONE_SLOT',
+          });
+          return;
+        }
+        claimedSlots.add(slot);
+
         const key = `${group.keyPrefix}${slot}`;
         const entityId = hasGroup ? resolvePolygon(group.entityType, slot, group.groupKey, key, polyMap[key]) : null;
         if (!entityId) {
@@ -189,15 +220,15 @@ export class ZoneWriter {
 
       if (!hasGroup) continue;
 
-      // Clear unused slots. Unresolved slots are skipped silently: there is nothing to clear.
-      const maxSlots = Math.max(Object.keys(polyMap).length, group.minSlots);
-      for (let i = typedZones.length; i < maxSlots; i++) {
-        const key = `${group.keyPrefix}${i + 1}`;
-        const entityId = resolvePolygon(group.entityType, i + 1, group.groupKey, key, polyMap[key]);
+      // Clear slots no user zone claimed. Unresolved slots are skipped silently: there is nothing to clear.
+      for (let slot = 1; slot <= maxSlots; slot++) {
+        if (claimedSlots.has(slot)) continue;
+        const key = `${group.keyPrefix}${slot}`;
+        const entityId = resolvePolygon(group.entityType, slot, group.groupKey, key, polyMap[key]);
         if (entityId) {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, ''),
-            description: `clear ${group.taskLabel} ${i + 1}`,
+            description: `clear ${group.taskLabel} ${slot}`,
             entityId,
           });
         }

@@ -6,8 +6,18 @@ export interface PolygonSaveWarning {
 
 const MAX_LISTED = 4;
 
-/** Zones the backend could not write at all (no mapped entity, invalid shape). */
-const UNSAVED_ZONE_ERRORS = new Set(['ENTITY_NOT_MAPPED', 'INVALID_POLYGON']);
+/**
+ * Zones the backend could not write at all: no mapped entity, invalid shape,
+ * or a zone id that does not name a usable device slot.
+ */
+const SLOT_ERRORS = new Set(['INVALID_ZONE_ID', 'DUPLICATE_ZONE_SLOT', 'ZONE_SLOT_OUT_OF_RANGE']);
+const UNSAVED_ZONE_ERRORS = new Set([
+  'ENTITY_NOT_MAPPED',
+  'INVALID_POLYGON',
+  'INVALID_ZONE_ID',
+  'DUPLICATE_ZONE_SLOT',
+  'ZONE_SLOT_OUT_OF_RANGE',
+]);
 
 /**
  * Advisory warnings: pre-write entity checks from the polygon-zones route
@@ -53,7 +63,9 @@ export function describePolygonSaveFailure(warnings: PolygonSaveWarning[] | unde
 
   const hint = items.some((warning) => warning.error === 'ENTITY_NOT_MAPPED')
     ? 'Re-sync the device entities, or map the missing polygon zone entities manually in device settings, then save again.'
-    : 'Check the device entities in Home Assistant, then save again.';
+    : items.some((warning) => SLOT_ERRORS.has(warning.error))
+      ? 'Delete or re-add the listed zones so each one uses its own device slot, then save again.'
+      : 'Check the device entities in Home Assistant, then save again.';
 
   return `Not all zones were saved to the device. ${listed.join('. ')}${more}. ${hint}`;
 }
