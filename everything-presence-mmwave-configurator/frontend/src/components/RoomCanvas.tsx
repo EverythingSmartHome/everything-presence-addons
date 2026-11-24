@@ -128,6 +128,8 @@ interface RoomCanvasProps {
   deviceMarkerOpacity?: number;
   // When false, device icon won't capture mouse events (allows interacting with zones behind it)
   deviceInteractive?: boolean;
+  /** The marker is a planned device (a model with no real device linked): draw it as a ghost. */
+  devicePlanned?: boolean;
 }
 
 const CANVAS_SIZE = 700;
@@ -624,9 +626,39 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   deviceMarkerScale = 0.5,
   deviceMarkerOpacity = 1,
   deviceInteractive = true,
+  devicePlanned = false,
 }) => {
   const markerSize = 36 * Math.min(MARKER_SCALE_MAX, Math.max(MARKER_SCALE_MIN, Number.isFinite(deviceMarkerScale) ? deviceMarkerScale : 0.5));
-  const markerOpacity = Math.min(1, Math.max(0.1, Number.isFinite(deviceMarkerOpacity) ? deviceMarkerOpacity : 1));
+  const baseMarkerOpacity = Math.min(1, Math.max(0.1, Number.isFinite(deviceMarkerOpacity) ? deviceMarkerOpacity : 1));
+  // A planned device is a ghost: faded, with a dashed ring and a "Planned" tag.
+  const markerOpacity = devicePlanned ? Math.max(0.1, baseMarkerOpacity * 0.55) : baseMarkerOpacity;
+  const renderPlannedMarker = (px: number, py: number, size: number) => (devicePlanned ? (
+    <g style={{ pointerEvents: 'none' }} data-testid="planned-device-marker">
+      <circle
+        cx={px}
+        cy={py}
+        r={Math.max(10, size / 2 + 4)}
+        fill="none"
+        stroke="#7dd3fc"
+        strokeWidth={1.5}
+        strokeDasharray="4 3"
+        vectorEffect="non-scaling-stroke"
+      />
+      <text
+        x={px}
+        y={py + Math.max(10, size / 2 + 4) + 12}
+        textAnchor="middle"
+        fontSize={11}
+        fontWeight={600}
+        fill="#bae6fd"
+        stroke="#0f172a"
+        strokeWidth={3}
+        paintOrder="stroke"
+      >
+        Planned
+      </text>
+    </g>
+  ) : null);
   const safePoints = Array.isArray(points) ? points : [];
   // Locked walls are dropped from every hit-test below, so a click near one
   // falls through to whatever is behind it rather than grabbing the locked wall.
@@ -2059,6 +2091,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                     />
                   </g>
                 ))}
+                {showDevice && renderPlannedMarker(px, py, iconSize)}
               </g>
             );
           })() : undefined,
@@ -2243,6 +2276,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
                   </>
                 )}
                 </g>}
+                {showDevice && renderPlannedMarker(px, py, iconSize)}
                 {showDevice && (
                   <circle cx={px} cy={py} r={Math.max(22, iconSize / 2)} fill="transparent" onPointerDown={handleDevicePointerDown} onPointerUp={handleDevicePointerUp} style={{ cursor: devicePositionLocked ? (onDeviceClick ? 'pointer' : 'not-allowed') : 'grab' }} aria-label="Device marker" />
                 )}

@@ -33,6 +33,9 @@ import { getDeviceIconUrl } from '../utils/deviceIcon';
 import { resolveCoverageFov } from '../utils/coverage';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { isPlannedRoom, plannedModelLabel, roomOptionLabel } from '../utils/plannedRoom';
+import { shouldSkipDeviceZoneOverwrite } from '../utils/pendingZonePush';
+import { resolveCoverageOverlays } from '../utils/plannedPlacement';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -64,6 +67,8 @@ interface LiveTrackingPageProps {
     angle: number | null;
   }>;
   onRoomChange?: (roomId: string | null, profileId: string | null) => void;
+  /** Link a real device to a planned room. */
+  onLinkDevice?: (roomId: string) => void;
 }
 
 type MobileLiveSheet = 'details' | 'display' | 'zoom' | 'device' | 'navigation' | null;
@@ -81,7 +86,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   initialProfileId,
   liveState: propLiveState,
   targetPositions: propTargetPositions = [],
-  onRoomChange
+  onRoomChange,
+  onLinkDevice,
 }) => {
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
@@ -171,14 +177,19 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
 
   const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  // Ceiling slices belong to a real EPP; off until a device is linked.
   const isCeilingSliceMode =
+    Boolean(selectedRoom?.deviceId) &&
     selectedProfile?.id === 'everything_presence_pro' &&
     selectedRoom?.devicePlacement?.mountType === 'ceiling';
   const isEP1 = selectedRoom?.profileId === 'everything_presence_one';
+  // A planned room has a model but no device: no live data, settings or heatmap.
+  const isPlanned = isPlannedRoom(selectedRoom);
   const hasLiveStateForRoom = Boolean(
     liveState && selectedRoom?.deviceId && liveState.deviceId === selectedRoom.deviceId
   );
-  const showLiveOverlays = isEP1 ? true : hasLiveStateForRoom;
+  // Planned rooms still show their planned zones; there is just nothing live on them.
+  const showLiveOverlays = isEP1 || isPlanned ? true : hasLiveStateForRoom;
   const installationAngle =
     hasLiveStateForRoom && typeof liveState?.config?.installationAngle === 'number'
       ? liveState.config.installationAngle
@@ -226,11 +237,14 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     };
   }, [installationAngle, selectedRoom?.devicePlacement]);
 
-  const showCoverageOverlay = showDeviceRadar;
+  // A planned room always shows what its sensor would cover (footprint on the
+  // ceiling, cone on a wall); linked rooms follow the display setting.
+  const coverageOverlays = resolveCoverageOverlays(selectedRoom, showDeviceRadar);
+  const showCoverageOverlay = isPlanned || showDeviceRadar;
 
   // Check if device supports tracking (EP Lite only for heatmap)
   const supportsHeatmap = selectedProfile?.capabilities &&
-    (selectedProfile.capabilities as { tracking?: boolean }).tracking === true && !isEP1;
+    (selectedProfile.capabilities as { tracking?: boolean }).tracking === true && !isEP1 && !isPlanned;
 
   // Device mappings context - used to check if device has valid entity mappings
   // useDeviceMapping triggers loading the mapping into cache, useDeviceMappings provides the check
@@ -577,6 +591,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         return;
       }
 
+      // Zones planned before the device was linked stay until the user sends
+      // them or picks the device's in the Zone Editor or wizard.
+      if (shouldSkipDeviceZoneOverwrite(selectedRoom)) {
+        return;
+      }
+
       // Wait for mappings to be ready before fetching
       if (mappingLoading) {
         return;
@@ -650,6 +670,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
     selectedRoom?.entityNamePrefix,
     selectedRoom?.entityMappings,
     selectedRoom?.zones,
+    selectedRoom?.metadata?.pendingZonePush,
     devices,
     mappingLoading,
     deviceHasValidMappings,
@@ -906,6 +927,29 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       ? 'text-emerald-400'
       : 'text-slate-400';
 
+  // Shown instead of live data for a room planned for a model with no device yet.
+  const plannedCard = isPlanned && selectedRoom ? (
+    <div className="rounded-xl border border-aqua-500/40 bg-slate-900/90 backdrop-blur p-4 text-sm text-slate-200 shadow-xl">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="rounded-full border border-aqua-500/40 bg-aqua-500/10 px-2 py-0.5 text-[11px] font-semibold text-aqua-200">
+          Planned · {plannedModelLabel(selectedRoom, profiles)}
+        </span>
+      </div>
+      <p className="text-xs text-slate-400">
+        No device is linked to this room yet, so there is no live data. The coverage and zones shown are what this model would see from the planned position.
+      </p>
+      {onLinkDevice && (
+        <button
+          type="button"
+          onClick={() => onLinkDevice(selectedRoom.id)}
+          className="mt-3 w-full rounded-lg border border-aqua-600/50 bg-aqua-600/10 px-3 py-2 text-xs font-semibold text-aqua-100 transition-all hover:bg-aqua-600/20 active:scale-95"
+        >
+          🔗 Link device
+        </button>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="fixed inset-0 bg-slate-950 overflow-hidden">
       {/* Error Toast */}
@@ -962,7 +1006,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             >
               {rooms.map((room) => (
                 <option key={room.id} value={room.id}>
-                  {room.name}
+                  {roomOptionLabel(room, profiles)}
                 </option>
               ))}
             </select>
@@ -1148,7 +1192,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             maxRangeMeters={effectiveCoverageMaxRangeMeters}
             deviceIconUrl={deviceIconUrl}
             heightCoverage={showCoverageOverlay ? (heightCoverageConfig ?? undefined) : undefined}
-            showRadar={showCoverageOverlay && !isCeilingMount}
+            showRadar={coverageOverlays.cone}
             clipRadarToWalls={clipRadarToWalls}
             furniture={selectedRoom.furniture ?? []}
             doors={selectedRoom.doors ?? []}
@@ -1585,7 +1629,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             >
               {rooms.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.name}
+                  {roomOptionLabel(r, profiles)}
                 </option>
               ))}
             </select>
@@ -1597,6 +1641,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               <div className="live-dashboard-rail__fade-top" />
               <div className="live-dashboard-rail__fade-bottom" />
               <div className="live-dashboard-rail__scroll h-full space-y-3 overflow-y-auto pr-2 pb-2">
+            {plannedCard}
             {/* Main Status Panel */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur p-4 text-sm text-slate-200 shadow-xl">
               <div className="flex items-center gap-2 mb-3">
@@ -2527,7 +2572,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
               >
                 🎨 Display
               </button>
-              {selectedRoom && (
+              {selectedRoom && !isPlanned && (
                 <button
                   className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-1.5 text-xs font-semibold text-slate-100 transition-all hover:border-slate-600 hover:bg-slate-700 active:scale-95"
                   onClick={() => setShowDeviceSettings(true)}
@@ -2565,8 +2610,8 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
             </div>
           </div>
 
-          {/* Recording Controls (bottom left, above snap) - EPL only */}
-          {!isEP1 && (
+          {/* Recording Controls (bottom left, above snap) - EPL only, needs a live device */}
+          {!isEP1 && !isPlanned && (
             <div className="absolute bottom-32 left-6 z-40 hidden rounded-xl border border-slate-700/50 bg-slate-900/90 backdrop-blur px-4 py-3 shadow-xl md:block">
               <div className="flex items-center gap-3">
                 <button
@@ -2647,7 +2692,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                 active={activeMobileSheet === 'zoom'}
                 onClick={() => setActiveMobileSheet(activeMobileSheet === 'zoom' ? null : 'zoom')}
               />
-              {!isEP1 && (
+              {!isEP1 && !isPlanned && (
                 <CanvasToolbarButton
                   label={isRecording ? 'Stop' : 'Record'}
                   active={isRecording}
@@ -2662,10 +2707,12 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
                   }}
                 />
               )}
-              <CanvasToolbarButton
-                label="Device"
-                onClick={() => setShowDeviceSettings(true)}
-              />
+              {!isPlanned && (
+                <CanvasToolbarButton
+                  label="Device"
+                  onClick={() => setShowDeviceSettings(true)}
+                />
+              )}
               {selectedRoom?.deviceId && (
                 <CanvasToolbarButton
                   label="Logs"
@@ -2740,6 +2787,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
         onClose={() => setActiveMobileSheet(null)}
       >
         <div className="space-y-4 text-sm text-slate-200">
+          {isPlanned && plannedCard}
           <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
             <div className="mb-2 flex items-center gap-2">
               <div className={`h-3 w-3 rounded-full ${
@@ -2941,7 +2989,7 @@ export const LiveTrackingPage: React.FC<LiveTrackingPageProps> = ({
       </CanvasMobileSheet>
 
       {/* Device Settings Modal */}
-      {selectedRoom && (
+      {selectedRoom && !isPlanned && (
         <DeviceSettingsModal
           isOpen={showDeviceSettings}
           onClose={() => setShowDeviceSettings(false)}

@@ -238,6 +238,8 @@ export interface AppSettings {
   wizardStep?: string;
   wizardDeviceId?: string | null;
   wizardProfileId?: string | null;
+  /** The wizard is setting up a planned room (a model with no device yet). */
+  wizardPlanMode?: boolean;
   outlineDone?: boolean;
   placementDone?: boolean;
   zonesReady?: boolean;

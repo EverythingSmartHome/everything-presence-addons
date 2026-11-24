@@ -84,10 +84,19 @@ import {
   type RotationScope,
 } from '../utils/roomRotation';
 import { canCenterRoomSnapshot, centerRoomSnapshot, isRoomCentered } from '../utils/roomCentering';
+import {
+  fitZonesToProfile,
+  getRoomDeviceStatus,
+  resetModelSpecificPlacement,
+  roomOptionLabel,
+} from '../utils/plannedRoom';
+import { mountPlacementUpdate, shouldShowCoverageCone } from '../utils/plannedPlacement';
 
 interface RoomBuilderPageProps {
   onBack?: () => void;
   onNavigate?: (view: 'wizard' | 'zoneEditor' | 'roomBuilder' | 'settings' | 'liveDashboard') => void;
+  /** Link a real device to a planned or unconfigured room. */
+  onLinkDevice?: (roomId: string) => void;
   initialRoomId?: string | null;
   initialProfileId?: string | null;
   onRoomChange?: (roomId: string | null, profileId: string | null) => void;
@@ -146,6 +155,7 @@ type PointsChangeOptions = CommitRoomOptions & {
 export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   onBack,
   onNavigate,
+  onLinkDevice,
   initialRoomId,
   initialProfileId,
   onRoomChange,
@@ -376,10 +386,13 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     [selectedRoom, syncHistoryAvailability],
   );
 
+  // A selected room is judged on its own model only: a room with no model must
+  // not borrow the cone of whatever profile the picker last held (profiles[0]).
   const selectedProfile = useMemo(
-    () => profiles.find((p) => p.id === (selectedRoom?.profileId ?? selectedProfileId)) ?? null,
-    [profiles, selectedProfileId, selectedRoom?.profileId],
+    () => profiles.find((p) => p.id === (selectedRoom ? selectedRoom.profileId : selectedProfileId)) ?? null,
+    [profiles, selectedProfileId, selectedRoom],
   );
+  const roomDeviceStatus = getRoomDeviceStatus(selectedRoom);
 
   const selectedDevice = useMemo(
     () => (selectedRoom?.deviceId ? devices.find((d) => d.id === selectedRoom.deviceId) ?? null : null),
@@ -398,7 +411,9 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? selectedProfile?.limits?.maxRangeMeters;
 
   const isCeilingMount = selectedRoom?.devicePlacement?.mountType === 'ceiling';
+  // Ceiling slices belong to a real EPP; off until a device is linked.
   const isCeilingSliceMode =
+    Boolean(selectedRoom?.deviceId) &&
     selectedProfile?.id === 'everything_presence_pro' &&
     selectedRoom?.devicePlacement?.mountType === 'ceiling';
   const trackingMaxRangeMm = (selectedProfile?.limits?.maxRangeMeters ?? 6) * 1000;
@@ -434,6 +449,37 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
     const nextRoom: RoomConfig = { ...selectedRoom, devicePlacement: nextPlacement };
     commitRoom(nextRoom, { coalesceKey: 'device:placement' });
   }, [commitRoom, selectedRoom]);
+
+  /**
+   * Choose (or change) the model a room without a device is planned for.
+   * Settings that only fit the old model are reset, and zones the new model
+   * has no slot for are dropped after a warning.
+   */
+  const handlePlannedModelChange = useCallback((nextProfileId: string) => {
+    // A model can be picked or changed here, never cleared: a JSON update
+    // drops an undefined profileId, so "no model" could not be saved anyway.
+    if (!selectedRoom || selectedRoom.deviceId || !nextProfileId) return;
+    if (nextProfileId === selectedRoom.profileId) return;
+    const nextProfile = profiles.find((profile) => profile.id === nextProfileId) ?? { id: nextProfileId };
+    const { kept, dropped } = fitZonesToProfile(selectedRoom.zones ?? [], nextProfile);
+    if (dropped.length > 0 && !window.confirm(
+      `${'label' in nextProfile ? nextProfile.label : 'This model'} can't hold these zones, so they will be removed: ${dropped.map((zone) => zone.id).join(', ')}.\n\nContinue?`,
+    )) {
+      return;
+    }
+    const nextRoom: RoomConfig = {
+      ...selectedRoom,
+      profileId: nextProfileId,
+      zones: kept,
+      // Switching from one model to another resets what only fitted the old one.
+      devicePlacement: selectedRoom.profileId
+        ? resetModelSpecificPlacement(selectedRoom.devicePlacement, nextProfile)
+        : selectedRoom.devicePlacement,
+    };
+    commitRoom(nextRoom);
+    setSelectedProfileId(nextProfileId);
+    onRoomChange?.(selectedRoom.id, nextProfileId);
+  }, [commitRoom, onRoomChange, profiles, selectedRoom]);
 
   const coveragePresets = selectedProfile?.coverage?.presets ?? null;
   const coveragePresetId = useMemo(() => {
@@ -522,7 +568,8 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
   const handleRotationSuggestion = useCallback(
     (rotationDeg: number) => {
-      if (!selectedRoom || !isEplDevice) return;
+      // The suggestion is written to the device, so a planned room never gets one.
+      if (!selectedRoom?.deviceId || !isEplDevice) return;
       const suggestion = getInstallationAngleSuggestion(rotationDeg, selectedRoom.roomShell?.points);
       if (!suggestion) return;
       if (lastRotationSuggestionRef.current === rotationDeg) return;
@@ -2220,7 +2267,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               <option value="">Select room</option>
               {rooms.map((room) => (
                 <option key={room.id} value={room.id}>
-                  {room.name}
+                  {roomOptionLabel(room, profiles)}
                 </option>
               ))}
             </select>
@@ -2364,6 +2411,34 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
             setZoom((z) => Math.min(5, Math.max(0.1, z + delta)));
           }}
         >
+                {roomDeviceStatus === 'unconfigured' && (
+                  <div className="pointer-events-auto absolute left-1/2 top-24 z-30 max-w-md -translate-x-1/2 rounded-xl border border-slate-600/60 bg-slate-900/90 px-4 py-2 text-xs text-slate-300 shadow-xl backdrop-blur">
+                    No device or model for this room yet, so no coverage is shown.{' '}
+                    <button
+                      type="button"
+                      className="font-semibold text-aqua-300 underline hover:text-aqua-200"
+                      onClick={() => {
+                        setSettingsTab('device');
+                        setShowSettings(true);
+                      }}
+                    >
+                      Choose a model
+                    </button>
+                    {onLinkDevice && (
+                      <>
+                        {' '}or{' '}
+                        <button
+                          type="button"
+                          className="font-semibold text-aqua-300 underline hover:text-aqua-200"
+                          onClick={() => onLinkDevice(selectedRoom.id)}
+                        >
+                          link a device
+                        </button>
+                      </>
+                    )}
+                    .
+                  </div>
+                )}
                 {/*
                   Rotation spin: the geometry is already rotated by the time this
                   renders, so the wrapper starts the canvas back at the old
@@ -2456,8 +2531,11 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                   maxRangeMeters={effectiveCoverageMaxRangeMeters}
                   deviceIconUrl={deviceIconUrl}
                   clipRadarToWalls={clipRadarToWalls}
-                  heightCoverage={heightCoverageConfig ?? undefined}
-                  showRadar={showDeviceRadar && !isCeilingMount}
+                  // No model chosen yet: no cone, rather than a guess from some other model.
+                  heightCoverage={roomDeviceStatus === 'unconfigured' ? undefined : heightCoverageConfig ?? undefined}
+                  // A planned wall-mounted sensor always shows its cone; linked rooms follow the setting.
+                  showRadar={shouldShowCoverageCone(selectedRoom, showDeviceRadar) && !isCeilingMount && roomDeviceStatus !== 'unconfigured'}
+                  devicePlanned={roomDeviceStatus === 'planned'}
                   previewFrom={pendingStart}
                   previewTo={pendingStart && previewPoint ? previewPoint : null}
                   hoveredSegment={hoveredSegment}
@@ -2670,7 +2748,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
               <option value="">Select room</option>
               {rooms.map((room) => (
                 <option key={room.id} value={room.id}>
-                  {room.name}
+                  {roomOptionLabel(room, profiles)}
                 </option>
               ))}
             </select>
@@ -3088,6 +3166,38 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
 
                       {settingsTab === 'device' && (
                       <div className="space-y-1">
+                        {selectedRoom && !selectedRoom.deviceId && (
+                          <div className="mb-2 space-y-2 rounded-md border border-aqua-500/30 bg-aqua-500/5 p-2">
+                            <label className="flex items-center gap-2">
+                              <span className="inline-flex w-14 items-center gap-1">Model<HelpTooltip id="room-planned-model-help">No device is linked to this room. Pick the model you plan to install to see its coverage and zone limits.</HelpTooltip></span>
+                              <select
+                                aria-describedby="room-planned-model-help"
+                                className="w-full rounded-md border border-slate-700 bg-slate-800/70 px-2 py-1 text-slate-100 focus:border-aqua-500 focus:ring-1 focus:ring-aqua-500/50 focus:outline-none"
+                                value={selectedRoom.profileId ?? ''}
+                                onChange={(e) => handlePlannedModelChange(e.target.value)}
+                              >
+                                {!selectedRoom.profileId && <option value="" disabled>Choose a model…</option>}
+                                {profiles.map((profile) => (
+                                  <option key={profile.id} value={profile.id}>{profile.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <div className="text-[11px] text-slate-400">
+                              {roomDeviceStatus === 'planned'
+                                ? 'Planned room: coverage is shown for this model. Live data and device settings appear once a device is linked.'
+                                : 'No model chosen yet, so no coverage is shown.'}
+                            </div>
+                            {onLinkDevice && (
+                              <button
+                                type="button"
+                                className="w-full rounded-md border border-aqua-600/50 bg-aqua-600/10 px-2 py-1 text-[11px] font-semibold text-aqua-100 transition hover:bg-aqua-600/20"
+                                onClick={() => onLinkDevice(selectedRoom.id)}
+                              >
+                                🔗 Link device
+                              </button>
+                            )}
+                          </div>
+                        )}
                         <div className="flex items-center justify-between gap-2">
                           <div className="font-semibold text-slate-200">Device placement</div>
                           <button
@@ -3194,11 +3304,7 @@ export const RoomBuilderPage: React.FC<RoomBuilderPageProps> = ({
                               value={selectedRoom?.devicePlacement?.mountType ?? 'wall'}
                               onChange={(e) => {
                                 const value = e.target.value === 'ceiling' ? 'ceiling' : 'wall';
-                                updateDevicePlacement(
-                                  value === 'ceiling'
-                                    ? { mountType: value, pitchDeg: 90, heightMm: 2400 }
-                                    : { mountType: value }
-                                );
+                                updateDevicePlacement(mountPlacementUpdate(value));
                               }}
                             >
                               <option value="wall">Wall</option>

@@ -69,6 +69,7 @@ const readSettings = (): AppSettings => {
         outlineDone: Boolean((parsed as any).outlineDone),
         placementDone: Boolean((parsed as any).placementDone),
         zonesReady: Boolean((parsed as any).zonesReady),
+        wizardPlanMode: Boolean((parsed as any).wizardPlanMode),
         defaultRoomId:
           typeof rawDefaultRoom === 'string'
             ? rawDefaultRoom
