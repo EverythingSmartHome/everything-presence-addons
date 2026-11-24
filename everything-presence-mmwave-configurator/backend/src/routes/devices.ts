@@ -10,6 +10,7 @@ import { EntityResolver } from '../domain/entityResolver';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { deviceMappingStorage, parseFirmwareVersion } from '../config/deviceMappingStorage';
 import { isPolygonOnlyDevice } from '../domain/firmwareVersionUtils';
+import { zoneSlotFromId } from '../domain/zoneSlots';
 import { logger } from '../logger';
 
 export interface DevicesRouterDependencies {
@@ -1065,12 +1066,17 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
       const polygonExclusionMap = entityMap?.polygonExclusionEntities as Record<string, string> | undefined;
       const polygonEntryMap = entityMap?.polygonEntryEntities as Record<string, string> | undefined;
 
+      // Slot = trailing number of the zone id, as in zoneWriter.applyPolygonZones,
+      // so these checks look at the entity the writer writes. Zones without a
+      // usable slot are skipped here; the writer reports them as failures.
       const resolvedEntities = writableZones.map((zone) => {
         let key = '';
         let template: string | undefined;
         let type: 'polygon' | 'polygonExclusion' | 'polygonEntry' = 'polygon';
-        const indexMatch = zone.id.match(/(\d+)/);
-        const index = indexMatch ? parseInt(indexMatch[1], 10) : 1;
+        const index = zoneSlotFromId(zone.id);
+        if (index === null || index < 1) {
+          return { zoneId: zone.id, entityId: null };
+        }
 
         if (zone.type === 'exclusion') {
           key = `exclusion${index}`;
@@ -1110,13 +1116,8 @@ export const createDevicesRouter = (deps: DevicesRouterDependencies): Router => 
         }
 
         for (const entry of resolvedEntities) {
-          if (!entry.entityId) {
-            warnings.push({
-              description: `${entry.zoneId} entity could not be resolved`,
-              error: 'Entity not resolved',
-            });
-            continue;
-          }
+          // Unresolved zones are reported by applyPolygonZones as ENTITY_NOT_MAPPED failures.
+          if (!entry.entityId) continue;
 
           const registryEntry = registryById.get(entry.entityId);
           if (registryEntry?.disabled_by) {

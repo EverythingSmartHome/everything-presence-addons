@@ -58,6 +58,8 @@ import {
   type ZonePushResult,
 } from '../utils/pendingZonePush';
 import { MIN_POLYGON_VERTICES, canDeleteVertex, deleteVertex } from '../utils/polygonVertices';
+import { describePolygonSaveFailure } from '../utils/polygonSaveResult';
+import { nextZoneId } from '../utils/zoneSlotIds';
 import {
   buildCeilingExclusionZones,
   buildCeilingSliceZones,
@@ -1056,8 +1058,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
       );
 
       if (!result.ok) {
-        const sample = result.warnings?.[0];
-        throw new Error(sample ? `Recovery partially failed: ${sample.error}` : 'Failed to recover polygon zones');
+        throw new Error(
+          result.warnings && result.warnings.length > 0
+            ? `Recovery partially failed. ${describePolygonSaveFailure(result.warnings)}`
+            : 'Failed to recover polygon zones'
+        );
       }
 
       setPolygonZones(convertedZones);
@@ -1374,6 +1379,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
 
     setSaving(true);
     setWarning(null);
+    let polygonSaveError: string | null = null;
     try {
       const effectiveProfile = selectedRoom.profileId ?? selectedProfileId;
 
@@ -1400,7 +1406,11 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             entityMappingsToUse
           );
           const warningMessages: string[] = [];
-          if (result.warnings && result.warnings.length > 0) {
+          if (!result.ok) {
+            // Some zones were not written (unmapped slot, invalid shape or failed write).
+            // Applied after the rest of the save, because the success path clears the error.
+            polygonSaveError = describePolygonSaveFailure(result.warnings);
+          } else if (result.warnings && result.warnings.length > 0) {
             const sample = result.warnings
               .map((warning) => warning.entityId ?? warning.description)
               .filter(Boolean)
@@ -1525,8 +1535,12 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
         }
       }
 
-      onWizardZonesReady?.();
-      setError(null);
+      if (polygonSaveError) {
+        setError(polygonSaveError);
+      } else {
+        onWizardZonesReady?.();
+        setError(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save zones');
     } finally {
@@ -1629,7 +1643,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     <div className="fixed inset-0 bg-slate-950 overflow-hidden">
       {/* Error Toast */}
       {error && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[60] max-w-lg rounded-xl border border-rose-500/50 bg-rose-500/10 backdrop-blur px-6 py-3 text-rose-100 shadow-xl animate-in slide-in-from-top-4 fade-in">
           {error}
         </div>
       )}
@@ -2450,7 +2464,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         const regularCount = polygonZones.filter(z => z.type === 'regular').length;
                         if (regularCount >= zoneLimits.maxZones) return;
                         const newZone: ZonePolygon = {
-                          id: `Zone ${regularCount + 1}`,
+                          id: nextZoneId(polygonZones, 'regular'),
                           type: 'regular',
                           vertices: [{ x: 0, y: 1000 }, { x: 1000, y: 1000 }, { x: 500, y: 0 }],
                           enabled: true,
@@ -2468,7 +2482,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         const exclusionCount = polygonZones.filter(z => z.type === 'exclusion').length;
                         if (exclusionCount >= zoneLimits.maxExclusionZones) return;
                         const newZone: ZonePolygon = {
-                          id: `Exclusion ${exclusionCount + 1}`,
+                          id: nextZoneId(polygonZones, 'exclusion'),
                           type: 'exclusion',
                           vertices: [{ x: -500, y: 500 }, { x: 500, y: 500 }, { x: 0, y: -500 }],
                           enabled: true,
@@ -2486,7 +2500,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                         const entryCount = polygonZones.filter(z => z.type === 'entry').length;
                         if (entryCount >= zoneLimits.maxEntryZones) return;
                         const newZone: ZonePolygon = {
-                          id: `Entry ${entryCount + 1}`,
+                          id: nextZoneId(polygonZones, 'entry'),
                           type: 'entry',
                           vertices: [{ x: 1500, y: 500 }, { x: 2500, y: 500 }, { x: 2000, y: -500 }],
                           enabled: true,

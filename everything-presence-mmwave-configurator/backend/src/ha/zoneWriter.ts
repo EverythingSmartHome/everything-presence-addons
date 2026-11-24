@@ -4,6 +4,7 @@ import { isValidPolygon, polygonToText } from '../domain/polygonUtils';
 import { EntityResolver } from '../domain/entityResolver';
 import { deviceEntityService } from '../domain/deviceEntityService';
 import { logger } from '../logger';
+import { zoneSlotFromId } from '../domain/zoneSlots';
 
 interface ZoneEntityConfig {
   beginX?: string | null;
@@ -33,6 +34,27 @@ export interface ZoneWriteResult {
   ok: boolean;
   failures: ZoneWriteFailure[];
 }
+
+type PolygonEntityType = 'polygon' | 'polygonExclusion' | 'polygonEntry';
+type PolygonGroupKey = 'polygonZoneEntities' | 'polygonExclusionEntities' | 'polygonEntryEntities';
+
+/**
+ * Polygon zone groups in write order. Slot labels match the entity names users
+ * see in device settings (e.g. "Polygon Zone 1").
+ */
+const POLYGON_GROUPS: ReadonlyArray<{
+  zoneType: ZonePolygon['type'];
+  entityType: PolygonEntityType;
+  groupKey: PolygonGroupKey;
+  keyPrefix: string;
+  minSlots: number;
+  slotLabel: string;
+  taskLabel: string;
+}> = [
+  { zoneType: 'regular', entityType: 'polygon', groupKey: 'polygonZoneEntities', keyPrefix: 'zone', minSlots: 4, slotLabel: 'Polygon Zone', taskLabel: 'polygon zone' },
+  { zoneType: 'exclusion', entityType: 'polygonExclusion', groupKey: 'polygonExclusionEntities', keyPrefix: 'exclusion', minSlots: 2, slotLabel: 'Polygon Exclusion', taskLabel: 'exclusion polygon' },
+  { zoneType: 'entry', entityType: 'polygonEntry', groupKey: 'polygonEntryEntities', keyPrefix: 'entry', minSlots: 2, slotLabel: 'Polygon Entry', taskLabel: 'entry polygon' },
+];
 
 export class ZoneWriter {
   private readonly writeClient: IHaWriteClient;
@@ -115,15 +137,14 @@ export class ZoneWriter {
     deviceId?: string
   ): Promise<ZoneWriteResult> {
     const tasks: ZoneWriteTask[] = [];
+    // User zones that could not be written at all (no mapped entity or invalid shape).
+    // These fail the save; otherwise the zone silently disappears from the device.
+    const skippedFailures: ZoneWriteFailure[] = [];
 
     logger.debug({ entityNamePrefix, deviceId, zoneCount: zones.length, hasMappings: !!entityMappings }, 'Applying polygon zones');
 
-    const regularZones = zones.filter(z => z.type === 'regular');
-    const exclusionZones = zones.filter(z => z.type === 'exclusion');
-    const entryZones = zones.filter(z => z.type === 'entry');
-
     // Helper to resolve polygon entity
-    const resolvePolygon = (type: 'polygon' | 'polygonExclusion' | 'polygonEntry', index: number, groupKey: 'polygonZoneEntities' | 'polygonExclusionEntities' | 'polygonEntryEntities', key: string, template?: string): string | null => {
+    const resolvePolygon = (type: PolygonEntityType, index: number, groupKey: PolygonGroupKey, key: string, template?: string): string | null => {
       if (deviceId) {
         const entityId = deviceEntityService.getPolygonZoneEntity(deviceId, type, index);
         if (entityId) return entityId;
@@ -131,114 +152,91 @@ export class ZoneWriter {
       return EntityResolver.resolvePolygonZoneEntity(entityMappings, entityNamePrefix, groupKey, key, template);
     };
 
-    // Regular polygon zones
-    if (entityMap.polygonZoneEntities || deviceId) {
-      const polyMap = entityMap.polygonZoneEntities || {};
-      regularZones.forEach((zone, idx) => {
-        const key = `zone${idx + 1}`;
-        const entityId = resolvePolygon('polygon', idx + 1, 'polygonZoneEntities', key, polyMap[key]);
-        if (entityId) {
-          if (!isValidPolygon(zone.vertices)) {
-            logger.warn({ entityId, zoneId: zone.id, vertices: zone.vertices.length }, 'Skipping polygon zone with fewer than 3 distinct vertices');
-            return;
-          }
-          const textValue = polygonToText(zone.vertices);
-          logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting polygon zone');
-          tasks.push({
-            execute: () => this.writeClient.setTextEntity(entityId, textValue),
-            description: `polygon zone ${idx + 1}`,
-            entityId,
+    for (const group of POLYGON_GROUPS) {
+      const typedZones = zones.filter(z => z.type === group.zoneType);
+      const hasGroup = Boolean(entityMap?.[group.groupKey]) || Boolean(deviceId);
+      const polyMap: Record<string, string> = entityMap?.[group.groupKey] || {};
+      const maxSlots = Math.max(Object.keys(polyMap).length, group.minSlots);
+      const claimedSlots = new Set<number>();
+
+      // Write user zones. Each zone goes to the slot named by its id ("Entry 2" -> entry slot 2).
+      typedZones.forEach((zone) => {
+        const slot = zoneSlotFromId(zone.id);
+        if (slot === null) {
+          logger.warn({ zoneId: zone.id, type: zone.type }, 'Polygon zone id has no slot number; zone not saved');
+          skippedFailures.push({
+            description: `${zone.id} could not be saved: the zone id has no ${group.slotLabel} slot number`,
+            error: 'INVALID_ZONE_ID',
           });
+          return;
         }
+        if (slot < 1 || slot > maxSlots) {
+          logger.warn({ zoneId: zone.id, slot, maxSlots }, `${group.slotLabel} slot out of range; zone not saved`);
+          skippedFailures.push({
+            description: slot < 1
+              ? `${zone.id} could not be saved: ${group.slotLabel} slots are numbered 1 to ${maxSlots}`
+              : `${zone.id} could not be saved: this device has only ${maxSlots} ${group.slotLabel} slots`,
+            error: 'ZONE_SLOT_OUT_OF_RANGE',
+          });
+          return;
+        }
+        if (claimedSlots.has(slot)) {
+          logger.warn({ zoneId: zone.id, slot }, `Another zone already uses ${group.slotLabel} ${slot}; zone not saved`);
+          skippedFailures.push({
+            description: `${zone.id} could not be saved: another zone already uses ${group.slotLabel} ${slot}`,
+            error: 'DUPLICATE_ZONE_SLOT',
+          });
+          return;
+        }
+        claimedSlots.add(slot);
+
+        const key = `${group.keyPrefix}${slot}`;
+        const entityId = hasGroup ? resolvePolygon(group.entityType, slot, group.groupKey, key, polyMap[key]) : null;
+        if (!entityId) {
+          logger.warn({ zoneId: zone.id, slot, deviceId }, `No ${group.slotLabel} ${slot} entity is mapped; zone not saved`);
+          skippedFailures.push({
+            description: `${zone.id} could not be saved: no ${group.slotLabel} ${slot} entity is mapped for this device`,
+            error: 'ENTITY_NOT_MAPPED',
+          });
+          return;
+        }
+        if (!isValidPolygon(zone.vertices)) {
+          logger.warn({ entityId, zoneId: zone.id, vertices: zone.vertices.length }, `Skipping ${group.taskLabel} with fewer than 3 distinct vertices`);
+          skippedFailures.push({
+            entityId,
+            description: `${zone.id} could not be saved: the polygon needs at least 3 distinct points`,
+            error: 'INVALID_POLYGON',
+          });
+          return;
+        }
+        const textValue = polygonToText(zone.vertices);
+        logger.debug({ entityId, vertices: zone.vertices.length }, `Setting ${group.taskLabel}`);
+        tasks.push({
+          execute: () => this.writeClient.setTextEntity(entityId, textValue),
+          description: `${group.taskLabel} ${slot}`,
+          entityId,
+        });
       });
 
-      // Clear unused slots
-      const maxZones = Math.max(Object.keys(polyMap).length, 4);
-      for (let i = regularZones.length; i < maxZones; i++) {
-        const key = `zone${i + 1}`;
-        const entityId = resolvePolygon('polygon', i + 1, 'polygonZoneEntities', key, polyMap[key]);
+      if (!hasGroup) continue;
+
+      // Clear slots no user zone claimed. Unresolved slots are skipped silently: there is nothing to clear.
+      for (let slot = 1; slot <= maxSlots; slot++) {
+        if (claimedSlots.has(slot)) continue;
+        const key = `${group.keyPrefix}${slot}`;
+        const entityId = resolvePolygon(group.entityType, slot, group.groupKey, key, polyMap[key]);
         if (entityId) {
           tasks.push({
             execute: () => this.writeClient.setTextEntity(entityId, ''),
-            description: `clear polygon zone ${i + 1}`,
+            description: `clear ${group.taskLabel} ${slot}`,
             entityId,
           });
         }
       }
     }
 
-    // Exclusion polygon zones
-    if (entityMap.polygonExclusionEntities || deviceId) {
-      const polyMap = entityMap.polygonExclusionEntities || {};
-      exclusionZones.forEach((zone, idx) => {
-        const key = `exclusion${idx + 1}`;
-        const entityId = resolvePolygon('polygonExclusion', idx + 1, 'polygonExclusionEntities', key, polyMap[key]);
-        if (entityId) {
-          if (!isValidPolygon(zone.vertices)) {
-            logger.warn({ entityId, zoneId: zone.id, vertices: zone.vertices.length }, 'Skipping exclusion polygon with fewer than 3 distinct vertices');
-            return;
-          }
-          const textValue = polygonToText(zone.vertices);
-          logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting exclusion polygon');
-          tasks.push({
-            execute: () => this.writeClient.setTextEntity(entityId, textValue),
-            description: `exclusion polygon ${idx + 1}`,
-            entityId,
-          });
-        }
-      });
-
-      const maxExclusions = Math.max(Object.keys(polyMap).length, 2);
-      for (let i = exclusionZones.length; i < maxExclusions; i++) {
-        const key = `exclusion${i + 1}`;
-        const entityId = resolvePolygon('polygonExclusion', i + 1, 'polygonExclusionEntities', key, polyMap[key]);
-        if (entityId) {
-          tasks.push({
-            execute: () => this.writeClient.setTextEntity(entityId, ''),
-            description: `clear exclusion polygon ${i + 1}`,
-            entityId,
-          });
-        }
-      }
-    }
-
-    // Entry polygon zones
-    if (entityMap.polygonEntryEntities || deviceId) {
-      const polyMap = entityMap.polygonEntryEntities || {};
-      entryZones.forEach((zone, idx) => {
-        const key = `entry${idx + 1}`;
-        const entityId = resolvePolygon('polygonEntry', idx + 1, 'polygonEntryEntities', key, polyMap[key]);
-        if (entityId) {
-          if (!isValidPolygon(zone.vertices)) {
-            logger.warn({ entityId, zoneId: zone.id, vertices: zone.vertices.length }, 'Skipping entry polygon with fewer than 3 distinct vertices');
-            return;
-          }
-          const textValue = polygonToText(zone.vertices);
-          logger.debug({ entityId, vertices: zone.vertices.length }, 'Setting entry polygon');
-          tasks.push({
-            execute: () => this.writeClient.setTextEntity(entityId, textValue),
-            description: `entry polygon ${idx + 1}`,
-            entityId,
-          });
-        }
-      });
-
-      const maxEntries = Math.max(Object.keys(polyMap).length, 2);
-      for (let i = entryZones.length; i < maxEntries; i++) {
-        const key = `entry${i + 1}`;
-        const entityId = resolvePolygon('polygonEntry', i + 1, 'polygonEntryEntities', key, polyMap[key]);
-        if (entityId) {
-          tasks.push({
-            execute: () => this.writeClient.setTextEntity(entityId, ''),
-            description: `clear entry polygon ${i + 1}`,
-            entityId,
-          });
-        }
-      }
-    }
-
-    logger.info({ taskCount: tasks.length }, 'Executing polygon zone updates sequentially');
-    const failures = await this.executeTasksSequentially(tasks);
+    logger.info({ taskCount: tasks.length, skippedZones: skippedFailures.length }, 'Executing polygon zone updates sequentially');
+    const failures = [...skippedFailures, ...(await this.executeTasksSequentially(tasks))];
     return { ok: failures.length === 0, failures };
   }
 

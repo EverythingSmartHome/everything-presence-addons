@@ -41,6 +41,7 @@ import { resolveCoverageFov, resolveTrackingCoverageFov } from '../utils/coverag
 import { formatSnapPresetLabel } from '../utils/snapLabels';
 import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { describePolygonSaveFailure } from '../utils/polygonSaveResult';
 import { resolveZoneLimits, supportsZoneEditing } from '../utils/zoneCapabilities';
 import {
   buildDeviceLinkUpdate,
@@ -1638,6 +1639,11 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       if (polygonModeStatus.enabled) {
         // Push polygon zones to device
         pushResult = await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, entityMappingsToUse);
+        // Some polygon zones were not written (unmapped slot, invalid shape or failed write).
+        // Throwing here also keeps any pending planned-zone flag so the user can retry.
+        if (!pushResult.ok) {
+          throw new Error(describePolygonSaveFailure(pushResult.warnings));
+        }
       } else {
         // Push rectangular zones to device (device is source of truth)
         pushResult = await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix, entityMappingsToUse);
