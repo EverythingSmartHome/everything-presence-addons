@@ -151,8 +151,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
   // Support gate is deliberately ephemeral; enabling it never changes firmware.
   const [supportCode, setSupportCode] = useState('');
-  const [wifiPowerSupport, setWifiPowerSupport] = useState(() =>
-    new URLSearchParams(window.location.search).get('wifi_power') === '11');
+  const [wifiPowerSupport, setWifiPowerSupport] = useState(false);
   const expectedWifiPower = useRef<'standard' | 'wifi11' | null>(null);
 
   // Auto-detection state
