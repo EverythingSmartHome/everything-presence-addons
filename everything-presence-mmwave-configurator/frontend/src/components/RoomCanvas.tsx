@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
+import { zoneHandleUnit } from '../utils/zoneHandleSettings';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FurnitureInstance, Door } from '../api/types';
 import { getFurnitureIcon } from '../furniture/icons';
 import { CustomFurniturePreview, getCustomFurnitureType } from '../furniture/customVisual';
@@ -75,6 +76,7 @@ interface RoomCanvasProps {
   onEndpointDragStart?: (segment: number, endpoint: 'start' | 'end', start: Point) => void;
   onSegmentInsert?: (segmentIndex: number, point: Point) => void;
   renderOverlay?: (ctx: {
+    screenPixelUnit: number;
     toCanvas: (p: Point) => { x: number; y: number };
     fromCanvas: (x: number, y: number) => Point;
     toWorldFromEvent: (e: { clientX: number; clientY: number }) => Point | null;
@@ -697,6 +699,20 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   }), [isDark]);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const [viewport, setViewport] = useState({ width: 700, height: 700 });
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const measure = () => {
+      const rect = svg.getBoundingClientRect();
+      setViewport({ width: rect.width, height: rect.height });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, []);
+
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [editingWallLength, setEditingWallLength] = useState<number | null>(null);
   const [wallLengthDraft, setWallLengthDraft] = useState('');
@@ -1899,6 +1915,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
 
         {/* Build device element for non-interactive mode (Zone Editor) - passed to renderOverlay for z-order control */}
         {renderOverlay?.({
+          screenPixelUnit: zoneHandleUnit(effectiveZoom, viewport.width, viewport.height),
           toCanvas: toCanvasCoord,
           fromCanvas: fromCanvasCoord,
           toWorldFromEvent,

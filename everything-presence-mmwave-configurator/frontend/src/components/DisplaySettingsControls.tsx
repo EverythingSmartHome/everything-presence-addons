@@ -26,6 +26,8 @@ interface DisplaySettingsControlsProps {
     setTargetMarkerScale: (value: number) => void;
     showZoneLabels: boolean;
     setShowZoneLabels: (value: boolean) => void;
+    zoneHandleSize?: number;
+    setZoneHandleSize?: (value: number) => void;
     zoneLabelScale: number;
     setZoneLabelScale: (value: number) => void;
   };

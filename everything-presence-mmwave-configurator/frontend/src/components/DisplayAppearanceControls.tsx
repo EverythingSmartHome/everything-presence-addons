@@ -1,4 +1,5 @@
 import React from 'react';
+import { ZONE_HANDLE_MIN, ZONE_HANDLE_MAX } from '../utils/zoneHandleSettings';
 import { MARKER_SCALE_MAX, MARKER_SCALE_MIN } from '../utils/deviceMarkerSettings';
 import { HelpTooltip } from './HelpTooltip';
 
@@ -14,6 +15,8 @@ interface DisplayAppearanceControlsProps {
   setTargetMarkerScale: (value: number) => void;
   showZoneLabels: boolean;
   setShowZoneLabels: (value: boolean) => void;
+  zoneHandleSize?: number;
+  setZoneHandleSize?: (value: number) => void;
   zoneLabelScale: number;
   setZoneLabelScale: (value: number) => void;
 }
@@ -30,9 +33,12 @@ export const DisplayAppearanceControls: React.FC<DisplayAppearanceControlsProps>
   setTargetMarkerScale,
   showZoneLabels,
   setShowZoneLabels,
+  zoneHandleSize,
+  setZoneHandleSize,
   zoneLabelScale,
   setZoneLabelScale,
 }) => {
+  const handleHelp = React.useId();
   const markerHelp = React.useId();
   const labelsHelp = React.useId();
   const labelSizeHelp = React.useId();
@@ -74,6 +80,18 @@ export const DisplayAppearanceControls: React.FC<DisplayAppearanceControlsProps>
         className="w-full"
       />
     </label>
+
+    {zoneHandleSize !== undefined && setZoneHandleSize && (
+      <label className="block text-sm text-slate-200">
+        <span className="mb-1 flex items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-1">Zone handle size <HelpTooltip id={handleHelp}>Stays stable while zooming. Touch screens use at least an 11px radius.</HelpTooltip></span>
+          <span className="text-xs text-slate-400">{zoneHandleSize}px radius</span>
+        </span>
+        <input type="range" min={ZONE_HANDLE_MIN} max={ZONE_HANDLE_MAX} step={1}
+          value={zoneHandleSize} onChange={(event) => setZoneHandleSize(Number(event.target.value))}
+          aria-describedby={handleHelp} className="w-full" />
+      </label>
+    )}
 
     <label className="flex min-h-[40px] cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-800/50 px-3 text-sm text-slate-200">
       <span className="inline-flex items-center gap-1">Zone labels <HelpTooltip id={labelsHelp}>Shows or hides zone names on the canvas. This does not rename entity IDs.</HelpTooltip></span>

@@ -155,6 +155,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
     targetMarkerScale, setTargetMarkerScale,
     showZoneLabels, setShowZoneLabels,
     zoneLabelScale, setZoneLabelScale,
+    zoneHandleSize, setZoneHandleSize,
     clipRadarToWalls, setClipRadarToWalls,
   } = useDisplaySettings();
   const isMobileCanvas = useIsMobileCanvas();
@@ -1995,6 +1996,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
             snapGridMm={snapGridMm}
             height="100%"
             zoom={zoom}
+            zoneHandleSize={zoneHandleSize}
             panOffsetMm={panOffsetMm}
             onPanChange={(next) => setPanOffsetMm(next)}
             onZoomChange={setZoom}
@@ -2299,6 +2301,7 @@ export const ZoneEditorPage: React.FC<ZoneEditorPageProps> = ({
                     { label: 'Targets', checked: showTargets, onChange: setShowTargets },
                   ]}
                   appearance={{
+                    zoneHandleSize, setZoneHandleSize,
                     showDeviceMarker: showDeviceIcon,
                     deviceMarkerStyle, setDeviceMarkerStyle,
                     deviceMarkerScale, setDeviceMarkerScale,
