@@ -40,6 +40,7 @@ import { DeviceMapping, discoverAndSaveMapping } from '../api/deviceMappings';
 import { fetchPolygonZonesFromDevice } from '../api/zones';
 import { compareVersions, getZoneMigrationThreshold, requiresZoneMigration } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
+import { describePolygonSaveFailure } from '../utils/polygonSaveResult';
 import { resolveZoneLimits } from '../utils/zoneCapabilities';
 import polygonMigrationGraphic from '../assets/polygon-migration.png';
 
@@ -944,6 +945,16 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         profileId: context.profileId,
         entityNamePrefix: context.entityNamePrefix,
       });
+      if (res.ok === false) {
+        // Some zones were not written to the device: keep the details visible and fail the restore.
+        if (res.warnings && res.warnings.length > 0) {
+          setRestoreWarnings(res.warnings);
+        }
+        const message = `Zone restore failed. ${describePolygonSaveFailure(res.warnings)}`;
+        setRestoreError(message);
+        onErrorRef.current(message);
+        return false;
+      }
       if (res.warnings && res.warnings.length > 0) {
         setRestoreWarnings(res.warnings);
         onSuccessRef.current('Zones restored with warnings. Review the details below.');

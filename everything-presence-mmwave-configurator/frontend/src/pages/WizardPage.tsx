@@ -43,6 +43,29 @@ import { usesPolygonOnlyZones } from '../utils/firmware';
 import { resolveEntityPrefix } from '../utils/entityUtils';
 import { describePolygonSaveFailure } from '../utils/polygonSaveResult';
 import { resolveZoneLimits, supportsZoneEditing } from '../utils/zoneCapabilities';
+import {
+  buildDeviceLinkUpdate,
+  describeDeviceLinkMismatch,
+  isPlannedRoom,
+  planDeviceLink,
+  plannedModelLabel,
+} from '../utils/plannedRoom';
+import {
+  DEFAULT_CEILING_HEIGHT_MM,
+  plannedMountPlacement,
+  shouldShowCoverageCone,
+  supportedMountTypes,
+  type MountType,
+} from '../utils/plannedPlacement';
+import {
+  clearPendingZonePushMetadata,
+  describeZonePushProblems,
+  hasPendingZonePush,
+  plannedZonesForDevice,
+  shouldClearPendingAfterPush,
+  shouldSkipDeviceZoneOverwrite,
+  type ZonePushResult,
+} from '../utils/pendingZonePush';
 
 interface WizardPageProps {
   devices: DiscoveredDevice[];
@@ -60,6 +83,11 @@ interface WizardPageProps {
   initialStep?: string;
   onStepChange?: (key: StepKey) => void;
   onSelectionChange?: (deviceId: string | null, profileId: string | null) => void;
+  /** Room a device is being linked to: runs the existing-room path for it. */
+  linkRoomId?: string | null;
+  /** Resume plan mode (a planned room with no device) after a reload. */
+  initialPlanMode?: boolean;
+  onPlanModeChange?: (planMode: boolean) => void;
   outlineDone: boolean;
   placementDone: boolean;
   zonesReady: boolean;
@@ -79,6 +107,8 @@ interface WizardPageProps {
 
 type StepKey =
   | 'device'
+  | 'plannedModel'
+  | 'plannedMount'
   | 'entityDiscovery'
   | 'roomChoice'
   | 'roomDetails'
@@ -107,6 +137,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   initialStep = 'device',
   onStepChange,
   onSelectionChange,
+  linkRoomId = null,
+  initialPlanMode = false,
+  onPlanModeChange,
   outlineDone,
   placementDone,
   zonesReady,
@@ -116,11 +149,27 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   liveState,
   targetPositions,
 }) => {
-  const [deviceId, setDeviceId] = useState<string | null>(selectedDeviceId ?? null);
+  // Plan mode never applies while linking: linking needs a real device.
+  const [planMode, setPlanMode] = useState<boolean>(Boolean(initialPlanMode) && !linkRoomId);
+  const [deviceId, setDeviceId] = useState<string | null>(planMode ? null : selectedDeviceId ?? null);
   const [profileId, setProfileId] = useState<string | null>(selectedProfileId ?? null);
 
-  const [roomId, setRoomId] = useState<string | null>(rooms[0]?.id ?? null);
-  const [roomPath, setRoomPath] = useState<'new' | 'existing' | 'skip' | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(linkRoomId ?? rooms[0]?.id ?? null);
+  const [roomPath, setRoomPath] = useState<'new' | 'existing' | 'skip' | null>(
+    linkRoomId ? 'existing' : planMode ? 'new' : null,
+  );
+  const linkRoom = useMemo(
+    () => (linkRoomId ? rooms.find((room) => room.id === linkRoomId) ?? null : null),
+    [linkRoomId, rooms],
+  );
+
+  // Persist plan mode so a reload resumes the planned-room flow.
+  const lastPlanModeRef = useRef(planMode);
+  useEffect(() => {
+    if (lastPlanModeRef.current === planMode) return;
+    lastPlanModeRef.current = planMode;
+    onPlanModeChange?.(planMode);
+  }, [planMode, onPlanModeChange]);
   const [newRoomName, setNewRoomName] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -281,6 +330,27 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     [currentProfile],
   );
   const effectiveCoverageMaxRangeMeters = coverageFov?.maxRangeMeters ?? currentProfile?.limits?.maxRangeMeters;
+
+  // A planned wall-mounted sensor always shows its cone (you can't aim it
+  // otherwise); linked rooms keep following the display setting.
+  const showCoverageCone = shouldShowCoverageCone(selectedRoom, showDeviceRadar);
+  // A planned ceiling sensor shows its floor footprint instead, built the same
+  // way as the Room Builder's height coverage.
+  const plannedHeightCoverage = useMemo(() => {
+    const placement = selectedRoom?.devicePlacement;
+    if (!isPlannedRoom(selectedRoom) || placement?.mountType !== 'ceiling' || !coverageFov) return undefined;
+    const heightMm = Number(placement.heightMm);
+    const pitchDeg = Number.isFinite(placement.pitchDeg) ? Number(placement.pitchDeg) : 90;
+    if (!Number.isFinite(heightMm)) return undefined;
+    return {
+      enabled: true,
+      heightMm,
+      pitchDeg,
+      horizontalFovDeg: coverageFov.horizontalFovDeg,
+      verticalFovDeg: coverageFov.verticalFovDeg,
+      maxRangeMeters: coverageFov.maxRangeMeters,
+    };
+  }, [coverageFov, selectedRoom]);
   const trackingMaxRangeMeters = trackingCoverageFov?.maxRangeMeters ?? currentProfile?.limits?.maxRangeMeters;
   const trackingFieldOfViewDeg = trackingCoverageFov?.horizontalFovDeg ?? currentProfile?.limits?.fieldOfViewDegrees;
 
@@ -320,7 +390,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   const handleRotationSuggestion = useCallback(
     (rotationDeg: number) => {
-      if (!selectedRoom || !isEplDevice) return;
+      // The suggestion is applied to the device, so a planned room never gets one.
+      if (!selectedRoom?.deviceId || !isEplDevice) return;
       const suggestion = getInstallationAngleSuggestion(rotationDeg, selectedRoom.roomShell?.points);
       if (!suggestion) return;
       if (lastRotationSuggestionRef.current === rotationDeg) return;
@@ -439,10 +510,27 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
   // Dynamic steps based on room path
   const steps: StepKey[] = useMemo(() => {
-    const base: StepKey[] = ['device', 'entityDiscovery', 'roomChoice'];
-
     // Check if current profile supports zones
     const supportsZones = supportsZoneEditing(currentProfile);
+
+    // Plan mode: no device, so no entity discovery; always a new room.
+    // device (plan card) → plannedModel → roomDetails → outline → (plannedMount) → placement → doors → furniture → (zones) → finish
+    // The mount step only appears for models that can go on the ceiling, so
+    // placement starts with the right mount and coverage.
+    if (planMode) {
+      const planned: StepKey[] = supportedMountTypes(currentProfile).length > 1
+        ? ['device', 'plannedModel', 'roomDetails', 'outline', 'plannedMount', 'placement', 'doors', 'furniture']
+        : ['device', 'plannedModel', 'roomDetails', 'outline', 'placement', 'doors', 'furniture'];
+      return supportsZones ? [...planned, 'zones', 'finish'] : [...planned, 'finish'];
+    }
+
+    // Linking a device to a known room: the room choice is already made.
+    if (linkRoomId) {
+      const link: StepKey[] = ['device', 'entityDiscovery', 'roomDetails', 'placement'];
+      return supportsZones ? [...link, 'zones', 'finish'] : [...link, 'finish'];
+    }
+
+    const base: StepKey[] = ['device', 'entityDiscovery', 'roomChoice'];
 
     if (roomPath === 'skip') {
       // Skip room setup: device → entityDiscovery → roomChoice → (zones if supported) → finish
@@ -461,11 +549,18 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     return supportsZones
       ? [...base, 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'zones', 'finish']
       : [...base, 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'finish'];
-  }, [roomPath, currentProfile]);
+  }, [roomPath, currentProfile, planMode, linkRoomId]);
 
   const [stepIndex, setStepIndex] = useState<number>(() => {
-    // Initialize with default 'new' room path steps for initialStep lookup
-    const defaultSteps: StepKey[] = ['device', 'entityDiscovery', 'roomChoice', 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'zones', 'finish'];
+    // A link always starts at device selection.
+    if (linkRoomId) return 0;
+    // Initialize with default 'new' room path steps (or the plan-mode steps) for initialStep lookup
+    const plannedProfile = profiles.find((p) => p.id === selectedProfileId) ?? null;
+    const defaultSteps: StepKey[] = planMode
+      ? supportedMountTypes(plannedProfile).length > 1
+        ? ['device', 'plannedModel', 'roomDetails', 'outline', 'plannedMount', 'placement', 'doors', 'furniture', 'zones', 'finish']
+        : ['device', 'plannedModel', 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'zones', 'finish']
+      : ['device', 'entityDiscovery', 'roomChoice', 'roomDetails', 'outline', 'placement', 'doors', 'furniture', 'zones', 'finish'];
     const idx = defaultSteps.indexOf(initialStep as StepKey);
     return idx >= 0 ? idx : 0;
   });
@@ -1076,9 +1171,27 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   }, [currentStep, roomPath, selectedRoom, trackingMaxRangeMeters, handleDevicePlacementChange]);
 
   // Load zones from device when entering zones step
+  const pendingZonePush = hasPendingZonePush(selectedRoom);
   useEffect(() => {
     const loadZonesFromDevice = async () => {
-      if (currentStep !== 'zones' || !selectedRoom?.deviceId || !selectedRoom?.profileId) {
+      if (currentStep !== 'zones' || !selectedRoom) {
+        return;
+      }
+
+      // A planned room has no device to read: its stored zones are the zones.
+      if (!selectedRoom.deviceId) {
+        setZonesLoadingComplete(`${selectedRoom.id}:${selectedRoom.deviceId}:${selectedRoom.profileId}`);
+        return;
+      }
+
+      if (!selectedRoom.profileId) {
+        return;
+      }
+
+      // Zones planned before the device was linked are kept until the user
+      // chooses to send them or to use the device's (see the banner).
+      if (shouldSkipDeviceZoneOverwrite(selectedRoom)) {
+        setZonesLoadingComplete(`${selectedRoom.id}:${selectedRoom.deviceId}:${selectedRoom.profileId}`);
         return;
       }
 
@@ -1153,7 +1266,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     };
 
     loadZonesFromDevice();
-  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, devices, onRoomUpdate, deviceHasValidMappings, polygonOnlyZones]);
+  }, [currentStep, selectedRoom?.id, selectedRoom?.deviceId, selectedRoom?.profileId, selectedRoom?.entityNamePrefix, selectedRoom?.entityMappings, deviceId, devices, onRoomUpdate, deviceHasValidMappings, polygonOnlyZones, pendingZonePush]);
 
   // Fetch polygon mode status when entering zones step
   // This runs AFTER zones have been loaded to ensure room is fully initialized
@@ -1243,6 +1356,10 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     if (currentStep !== 'zones') return;
     if (!selectedRoom) return;
 
+    // Zones are optional when planning (the step can be skipped), so nothing is
+    // added on the user's behalf there.
+    if (planMode) return;
+
     // Don't auto-enable in polygon mode
     if (polygonModeStatus.enabled) return;
 
@@ -1265,7 +1382,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
 
     // Enable Zone 1 (no delay needed since we wait for loading to complete)
     enableZoneSlot('Zone 1');
-  }, [currentStep, selectedRoom, enabledZones.length, displayZones, zonesLoadingComplete, polygonModeStatus.enabled]);
+  }, [currentStep, selectedRoom, enabledZones.length, displayZones, zonesLoadingComplete, polygonModeStatus.enabled, planMode]);
 
   // Auto-zoom to fit all zones
   const handleAutoZoom = useCallback(() => {
@@ -1293,7 +1410,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
   // Track navigation direction for slide animations
   const [slideDirection, setSlideDirection] = useState<'forward' | 'backward'>('forward');
 
-  const canNext =
+  const canNext = currentStep === 'plannedModel' ? !!profileId : (
     (currentStep === 'device' && !!deviceId) ||
     (currentStep === 'entityDiscovery' && !!discoveredMappings) ||
     (currentStep === 'roomChoice' && !!roomPath) ||
@@ -1311,9 +1428,19 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       ? roomPath === 'skip' || selectedRoom?.devicePlacement?.x !== undefined
       : true) ||
     (currentStep === 'zones'
-      ? roomPath === 'skip' || (selectedRoom?.zones?.length ?? 0) > 0
+      ? roomPath === 'skip' || planMode || (selectedRoom?.zones?.length ?? 0) > 0
       : true) ||
-    currentStep === 'finish';
+    currentStep === 'finish');
+
+  /** Jump straight to a step of the *new* step list (after plan mode flips). */
+  const goToStep = (nextSteps: StepKey[], key: StepKey) => {
+    const idx = nextSteps.indexOf(key);
+    if (idx < 0) return;
+    setError(null);
+    setSlideDirection('forward');
+    setStepIndex(idx);
+    onStepChange?.(key);
+  };
 
   const jumpTo = (key: StepKey) => {
     const idx = steps.indexOf(key);
@@ -1323,9 +1450,45 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     }
   };
 
+  // ── Planned mount (plan mode, ceiling-capable models only) ────────────
+  // The choice is written to the room's devicePlacement as the step is left,
+  // so it is saved with the room and a reload resumes with it.
+  const [plannedMountType, setPlannedMountType] = useState<MountType>('wall');
+  const [plannedCeilingHeightMm, setPlannedCeilingHeightMm] = useState<number>(DEFAULT_CEILING_HEIGHT_MM);
+  useEffect(() => {
+    if (currentStep !== 'plannedMount') return;
+    const placement = selectedRoom?.devicePlacement;
+    setPlannedMountType(placement?.mountType === 'ceiling' ? 'ceiling' : 'wall');
+    if (Number.isFinite(placement?.heightMm) && Number(placement?.heightMm) > 0) {
+      setPlannedCeilingHeightMm(Number(placement?.heightMm));
+    }
+    // Seeded from the saved room once per visit to the step, so typing a
+    // height is not overwritten while the step is open.
+  }, [currentStep, selectedRoom?.id]);
+
+  // Zones are optional for a planned room: skipping goes straight to finish.
+  const [zonesSkipped, setZonesSkipped] = useState(false);
+  const skipPlannedZones = () => {
+    setZonesSkipped(true);
+    goToStep(steps, 'finish');
+  };
+
+  const applyPlannedMount = () => {
+    if (!selectedRoom) return;
+    void handleDevicePlacementChange(plannedMountPlacement(
+      selectedRoom.devicePlacement,
+      selectedRoom.roomShell?.points,
+      plannedMountType,
+      plannedCeilingHeightMm,
+    ));
+  };
+
   const nextStep = () => {
     if (!canNext) return;
     setError(null);
+    // Not awaited, like the outline centring below: the optimistic update lands
+    // first, so placement already renders with the chosen mount.
+    if (currentStep === 'plannedMount') applyPlannedMount();
     // Leaving the outline step is where a hand-drawn room gets put on the grid
     // origin. Hooked here rather than on the buttons because all three Next
     // affordances (mobile top bar, desktop floating, non-canvas fallback) come
@@ -1361,11 +1524,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     try {
       // Don't pass entityMappings - device mapping was already saved by EntityDiscovery
       // The backend will use device mapping as source of truth
-      const room = await onCreateRoom(newRoomName.trim(), deviceId, profileId, undefined);
+      // In plan mode the room gets the planned model and no device.
+      const room = await onCreateRoom(newRoomName.trim(), planMode ? null : deviceId, profileId, undefined);
       setRoomId(room.id);
       onSelectRoom(room.id, room.profileId ?? profileId ?? null);
       setNewRoomName('');
       setStepIndex(steps.indexOf('outline'));
+      onStepChange?.('outline');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create room');
     } finally {
@@ -1470,17 +1635,32 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     try {
       // Skip entityMappings if device has valid mappings stored
       const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom?.entityMappings;
+      let pushResult: ZonePushResult;
       if (polygonModeStatus.enabled) {
         // Push polygon zones to device
-        const result = await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, entityMappingsToUse);
-        if (!result.ok) {
-          throw new Error(describePolygonSaveFailure(result.warnings));
+        pushResult = await pushPolygonZonesToDevice(deviceId, profileId, polygonZones, entityNamePrefix, entityMappingsToUse);
+        // Some polygon zones were not written (unmapped slot, invalid shape or failed write).
+        // Throwing here also keeps any pending planned-zone flag so the user can retry.
+        if (!pushResult.ok) {
+          throw new Error(describePolygonSaveFailure(pushResult.warnings));
         }
       } else {
         // Push rectangular zones to device (device is source of truth)
-        await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix, entityMappingsToUse);
+        pushResult = await pushZonesToDevice(deviceId, profileId, selectedRoom!.zones, entityNamePrefix, entityMappingsToUse);
         // Also update add-on storage to mirror device state
         await updateRoom(selectedRoom!.id, { zones: selectedRoom!.zones });
+      }
+      // Planned zones stop being pending only once the device confirmed all of
+      // them (the endpoint answers 200 even when writes fail). Otherwise keep
+      // the flag, show what went wrong and leave the button free for a retry.
+      if (selectedRoom && hasPendingZonePush(selectedRoom)) {
+        if (!shouldClearPendingAfterPush(pushResult, zonesToPush)) {
+          setError(describeZonePushProblems(pushResult));
+          setPushSuccess(false);
+          return;
+        }
+        const cleared = await updateRoom(selectedRoom.id, { metadata: clearPendingZonePushMetadata(selectedRoom.metadata) });
+        onRoomUpdate?.(cleared.room);
       }
       setPushSuccess(true);
       setError(null);
@@ -1490,6 +1670,100 @@ export const WizardPage: React.FC<WizardPageProps> = ({
     } finally {
       setPushingZones(false);
     }
+  };
+
+  // ── Planned zones on a newly linked device ────────────────────────────
+  const [resolvingPendingZones, setResolvingPendingZones] = useState(false);
+
+  /** Send the zones planned before the device was linked, then clear the flag. */
+  const handleSendPlannedZones = async () => {
+    if (!selectedRoom?.deviceId || !selectedRoom.profileId) return;
+    const mapping = await getMapping(selectedRoom.deviceId);
+    const entityNamePrefix = resolveEntityPrefix({
+      entityMappings: selectedRoom.entityMappings,
+      entityNamePrefix: selectedRoom.entityNamePrefix,
+      mappingPrefix: mapping?.esphomeNodeName,
+      devicePrefix: devices.find((device) => device.id === selectedRoom.deviceId)?.entityNamePrefix,
+    });
+    if (!entityNamePrefix) {
+      setError('Cannot send zones: device entity name prefix not found');
+      return;
+    }
+    setResolvingPendingZones(true);
+    setError(null);
+    // Polygon-only firmware (or a device already in polygon mode) takes polygons.
+    const payload = plannedZonesForDevice(selectedRoom.zones ?? [], polygonOnlyZones || polygonModeStatus.enabled);
+    let pushOutcome: ZonePushResult | Error;
+    try {
+      const entityMappingsToUse = deviceHasValidMappings ? undefined : selectedRoom.entityMappings;
+      if (payload.kind === 'polygon') {
+        pushOutcome = await pushPolygonZonesToDevice(selectedRoom.deviceId, selectedRoom.profileId, payload.zones, entityNamePrefix, entityMappingsToUse);
+      } else {
+        pushOutcome = await pushZonesToDevice(selectedRoom.deviceId, selectedRoom.profileId, payload.zones, entityNamePrefix, entityMappingsToUse);
+      }
+    } catch (err) {
+      pushOutcome = err instanceof Error ? err : new Error('Failed to send planned zones to the device');
+    }
+
+    // The zone endpoints answer 200 even when writes fail: judge the body. On
+    // any failure the flag and banner stay, the loader is not marked as done,
+    // and the user can try again.
+    if (!shouldClearPendingAfterPush(pushOutcome, payload.zones)) {
+      setError(describeZonePushProblems(pushOutcome));
+      setResolvingPendingZones(false);
+      return;
+    }
+
+    try {
+      if (payload.kind === 'polygon') setPolygonZones(payload.zones);
+      // The device now matches the stored zones; don't read them straight back.
+      zonesLoadedRef.current.add(`${selectedRoom.id}:${selectedRoom.deviceId}:${selectedRoom.profileId}`);
+      const result = await updateRoom(selectedRoom.id, { metadata: clearPendingZonePushMetadata(selectedRoom.metadata) });
+      onRoomUpdate?.(result.room);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Zones were sent, but the room could not be updated');
+    } finally {
+      setResolvingPendingZones(false);
+    }
+  };
+
+  /** Drop the planned zones in favour of the device's; the loader then reads them. */
+  const handleUseDeviceZones = async () => {
+    if (!selectedRoom) return;
+    setResolvingPendingZones(true);
+    setError(null);
+    try {
+      zonesLoadedRef.current.delete(`${selectedRoom.id}:${selectedRoom.deviceId}:${selectedRoom.profileId}`);
+      const result = await updateRoom(selectedRoom.id, { metadata: clearPendingZonePushMetadata(selectedRoom.metadata) });
+      onRoomUpdate?.(result.room);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update the room');
+    } finally {
+      setResolvingPendingZones(false);
+    }
+  };
+
+  /**
+   * Link the wizard's device to an existing room. A room planned for another
+   * model is switched to the device's model after a warning, which resets the
+   * model-specific placement and drops zones the device has no slot for.
+   * Returns false when the user backs out.
+   */
+  const linkDeviceToExistingRoom = async (room: RoomConfig): Promise<boolean> => {
+    if (!deviceId) return true;
+    const plan = planDeviceLink(room, profileId, profiles);
+    if (plan.modelMismatch && !window.confirm(describeDeviceLinkMismatch(plan, profiles))) {
+      return false;
+    }
+    try {
+      const updatedRoom = await updateRoom(room.id, buildDeviceLinkUpdate(room, deviceId, plan));
+      onRoomUpdate?.(updatedRoom.room);
+      if (plan.profileId) setProfileId(plan.profileId);
+    } catch (err) {
+      console.error('Failed to link device to room:', err);
+      // Continue anyway - user can fix via settings
+    }
+    return true;
   };
 
   // Handle polygon zones change
@@ -1603,6 +1877,34 @@ export const WizardPage: React.FC<WizardPageProps> = ({
       </div>
     </div>
   );
+
+  // Planned zones waiting for a decision after a device was linked.
+  const pendingZonesBanner = currentStep === 'zones' && selectedRoom?.deviceId && pendingZonePush ? (
+    <div className="max-w-sm rounded-xl border border-amber-500/50 bg-slate-900/95 backdrop-blur p-4 shadow-xl">
+      <h4 className="text-sm font-semibold text-amber-200">This room has planned zones</h4>
+      <p className="text-xs text-slate-400 mt-1 mb-3">
+        They were drawn before the device was linked and haven't been sent to it. Send them to the device, or replace them with the zones already on it.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={handleSendPlannedZones}
+          disabled={resolvingPendingZones}
+          className="rounded-lg bg-aqua-600 hover:bg-aqua-500 px-3 py-1.5 text-xs font-semibold text-white transition-all disabled:opacity-50"
+        >
+          {resolvingPendingZones ? 'Working...' : 'Send planned zones'}
+        </button>
+        <button
+          type="button"
+          onClick={handleUseDeviceZones}
+          disabled={resolvingPendingZones}
+          className="rounded-lg border border-slate-600 bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-all disabled:opacity-50"
+        >
+          Use zones on the device
+        </button>
+      </div>
+    </div>
+  ) : null;
 
   // Check if current step is a canvas step (full-page mode)
   const isCanvasStep = currentStep === 'outline' || currentStep === 'doors' || currentStep === 'furniture' || currentStep === 'placement' || currentStep === 'zones';
@@ -1917,7 +2219,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-                showRadar={showDeviceRadar}
+                showRadar={showCoverageCone}
+              heightCoverage={plannedHeightCoverage}
               clipRadarToWalls={clipRadarToWalls}
               renderOverlay={({ toCanvas }) => {
                 if (!showTargets || !targetPositions?.length) return null;
@@ -1977,7 +2280,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar={showDeviceRadar}
+              showRadar={showCoverageCone}
+              heightCoverage={plannedHeightCoverage}
               clipRadarToWalls={clipRadarToWalls}
               renderOverlay={({ toCanvas }) => {
                 if (!showTargets || !targetPositions?.length) return null;
@@ -2008,6 +2312,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           {currentStep === 'placement' && (
             <RoomCanvas
               deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
+              devicePlanned={isPlannedRoom(selectedRoom)}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -2022,7 +2327,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar={showDeviceRadar}
+              showRadar={showCoverageCone}
+              heightCoverage={plannedHeightCoverage}
               clipRadarToWalls={clipRadarToWalls}
               rangeMm={15000}
               snapGridMm={canvasSnap}
@@ -2111,7 +2417,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 fieldOfViewDeg={trackingFieldOfViewDeg}
                 maxRangeMeters={trackingMaxRangeMeters}
                 deviceIconUrl={deviceIconUrl}
-              showRadar={showDeviceRadar}
+              showRadar={showCoverageCone}
+              heightCoverage={plannedHeightCoverage}
                 rangeMm={15000}
                 snapGridMm={canvasSnap}
                 height="100%"
@@ -2429,6 +2736,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 </label>
               </div>
 
+              {pendingZonesBanner}
+
               {/* Polygon mode prompt - show when supported but not enabled */}
               {showPolygonPrompt && !polygonModeStatus.enabled && (
                 <div className="max-w-sm rounded-xl border border-violet-500/50 bg-slate-900/95 backdrop-blur p-4 shadow-xl">
@@ -2548,6 +2857,17 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 </label>
               </div>
             </div>
+          )}
+
+          {/* Skip zones (plan mode): zones aren't needed to try out coverage */}
+          {planMode && currentStep === 'zones' && (
+            <button
+              type="button"
+              onClick={skipPlannedZones}
+              className="absolute bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-xl border border-slate-600 bg-slate-900/95 px-6 py-2.5 text-sm font-semibold text-slate-100 shadow-xl backdrop-blur transition-all hover:border-slate-500 hover:bg-slate-800 active:scale-95 md:bottom-20"
+            >
+              Skip zones
+            </button>
           )}
 
           {/* Floating Next Button (bottom center) */}
@@ -2935,6 +3255,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               onClose={() => setActiveMobileCanvasSheet(null)}
             >
               <div className="space-y-3">
+                {pendingZonesBanner}
                 {showPolygonPrompt && !polygonModeStatus.enabled && (
                   <div className="rounded-lg border border-violet-500/50 bg-violet-500/15 p-3">
                     <div className="mb-2 text-sm font-semibold text-violet-100">Enable Polygon Zones?</div>
@@ -3212,7 +3533,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             </div>
             <div className="text-xs text-slate-500">•</div>
             <div className="text-xs text-slate-400">
-              {currentStep === 'device' && 'Select device'}
+              {currentStep === 'device' && (linkRoomId ? 'Select device to link' : 'Select device')}
+              {currentStep === 'plannedModel' && 'Choose planned model'}
+              {currentStep === 'plannedMount' && 'Choose mount'}
               {currentStep === 'entityDiscovery' && 'Discover entities'}
               {currentStep === 'roomChoice' && 'Choose room path'}
               {currentStep === 'roomDetails' && 'Bind/create room'}
@@ -3283,7 +3606,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               </div>
             </div>
             <p className="text-sm text-slate-400">
-              Which Everything Presence device do you want to setup?
+              {linkRoomId
+                ? `Which device do you want to link to "${linkRoom?.name ?? 'this room'}"?`
+                : 'Which Everything Presence device do you want to setup?'}
             </p>
           </div>
           {devices.length === 0 && (
@@ -3291,6 +3616,44 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               <span className="text-4xl mb-3">🔍</span>
               <p className="text-sm">No devices discovered yet.</p>
               <p className="text-xs mt-1">Make sure your device is powered on and connected to the network.</p>
+            </div>
+          )}
+          {/* Plan mode: set a room up for a model you don't have (yet). Linking
+              needs a real device, so it is not offered there. */}
+          {!linkRoomId && (
+            <div
+              role="button"
+              tabIndex={0}
+              className={`mb-4 cursor-pointer rounded-xl border border-dashed transition-all duration-200 ${
+                devices.length === 0
+                  ? 'border-aqua-500/70 bg-aqua-500/10 px-6 py-6 hover:bg-aqua-500/15'
+                  : 'border-slate-700 bg-slate-900/40 px-4 py-3 hover:border-slate-600 hover:bg-slate-900/70'
+              } ${planMode ? 'border-aqua-500 bg-aqua-500/10' : ''}`}
+              onClick={() => {
+                const planSteps: StepKey[] = ['device', 'plannedModel'];
+                setPlanMode(true);
+                setDeviceId(null);
+                setRoomPath('new');
+                goToStep(planSteps, 'plannedModel');
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  (event.currentTarget as HTMLElement).click();
+                }
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <span className={devices.length === 0 ? 'text-3xl' : 'text-xl'}>📝</span>
+                <div>
+                  <div className={`font-semibold text-white ${devices.length === 0 ? 'text-base' : 'text-sm'}`}>
+                    Plan without a device
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    Pick a model and lay out a room to see its coverage before you buy or install it. You can link a real device later.
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           <div className="grid gap-3 md:grid-cols-2">
@@ -3311,14 +3674,21 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                   }`}
                   onClick={() => {
                     if (isAssigned) return;
+                    if (planMode) {
+                      // Picking a real device leaves plan mode.
+                      setPlanMode(false);
+                      setRoomPath(null);
+                    }
                     setDeviceId(d.id);
                     if (d.model) {
                       // Try to match profile by model field (exact match with HA's device.model)
                       const match = profiles.find((p) => (p as any).model === d.model);
                       if (match) setProfileId(match.id);
                     }
-                    // Auto-advance after brief delay for visual feedback
-                    setTimeout(() => nextStep(), 600);
+                    // Auto-advance after brief delay for visual feedback. Entity
+                    // discovery is always the step after a real device, whichever
+                    // step list (plan mode may just have been left) is current.
+                    setTimeout(() => goToStep(['device', 'entityDiscovery'], 'entityDiscovery'), 600);
                   }}
                 >
                   <div className="flex items-start justify-between">
@@ -3348,6 +3718,110 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Planned model step (plan mode only) */}
+      {currentStep === 'plannedModel' && (
+        <div className={`${slideAnimationClass} rounded-2xl border border-slate-800/50 bg-gradient-to-br from-slate-900/90 to-slate-900/70 p-6 backdrop-blur-xl shadow-xl`}>
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">📝</span>
+              <h3 className="text-lg font-bold text-white">Which model are you planning for?</h3>
+            </div>
+            <p className="text-sm text-slate-400">
+              The room uses this model's coverage and zone limits. Live data, device settings and sending zones become available once you link a real device.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">You can change the model later in Room Builder.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {profiles.map((p) => (
+              <div
+                key={p.id}
+                role="button"
+                tabIndex={0}
+                className={`group cursor-pointer rounded-xl border px-4 py-3 transition-all duration-200 ${
+                  profileId === p.id
+                    ? 'border-aqua-500 bg-aqua-500/10 shadow-lg shadow-aqua-500/20'
+                    : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900/80'
+                }`}
+                onClick={() => {
+                  setProfileId(p.id);
+                  setTimeout(() => goToStep(steps, 'roomDetails'), 400);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    (event.currentTarget as HTMLElement).click();
+                  }
+                }}
+              >
+                <div className="text-sm font-semibold text-white flex items-center gap-2">
+                  {p.label}
+                  {profileId === p.id && <span className="text-xs text-aqua-400">✓</span>}
+                </div>
+                {typeof p.limits?.maxRangeMeters === 'number' && (
+                  <div className="text-xs text-slate-400 mt-1">Range up to {p.limits.maxRangeMeters} m</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Planned mount step (plan mode, ceiling-capable models only) */}
+      {currentStep === 'plannedMount' && (
+        <div className={`${slideAnimationClass} rounded-2xl border border-slate-800/50 bg-gradient-to-br from-slate-900/90 to-slate-900/70 p-6 backdrop-blur-xl shadow-xl space-y-4`}>
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-2xl">📐</span>
+              <h3 className="text-lg font-bold text-white">How will the {currentProfile?.label ?? 'device'} be mounted?</h3>
+            </div>
+            <p className="text-sm text-slate-400">
+              The mount changes where the sensor sits and what it covers. A wall mount shows a coverage cone you can aim; a ceiling mount looks down and shows its floor footprint.
+            </p>
+            <p className="mt-1 text-xs text-slate-500">You can switch between wall and ceiling mounting later in Room Builder.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {supportedMountTypes(currentProfile).map((mount) => (
+              <button
+                key={mount}
+                type="button"
+                aria-pressed={plannedMountType === mount}
+                className={`rounded-xl border px-4 py-3 text-left transition-all duration-200 ${
+                  plannedMountType === mount
+                    ? 'border-aqua-500 bg-aqua-500/10 shadow-lg shadow-aqua-500/20'
+                    : 'border-slate-800 bg-slate-900/60 hover:border-slate-700 hover:bg-slate-900/80'
+                }`}
+                onClick={() => setPlannedMountType(mount)}
+              >
+                <div className="text-sm font-semibold text-white flex items-center gap-2">
+                  {mount === 'ceiling' ? 'Ceiling' : 'Wall'}
+                  {plannedMountType === mount && <span className="text-xs text-aqua-400">✓</span>}
+                </div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {mount === 'ceiling' ? 'Looking straight down from the ceiling.' : 'On a wall or shelf, facing into the room.'}
+                </div>
+              </button>
+            ))}
+          </div>
+          {plannedMountType === 'ceiling' && (
+            <label className="flex max-w-xs items-center gap-3 text-sm text-slate-300">
+              <span className="whitespace-nowrap">Ceiling height (m)</span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                step={0.1}
+                className="w-full rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-white focus:border-aqua-500 focus:outline-none focus:ring-1 focus:ring-aqua-500/50"
+                value={Math.round(plannedCeilingHeightMm / 100) / 10}
+                onChange={(e) => {
+                  const metres = Number(e.target.value);
+                  if (Number.isFinite(metres) && metres > 0) setPlannedCeilingHeightMm(Math.round(metres * 1000));
+                }}
+              />
+            </label>
+          )}
         </div>
       )}
 
@@ -3489,7 +3963,13 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               <h3 className="text-lg font-bold text-white">{roomPath === 'new' ? 'Create a new room' : 'Select a room'}</h3>
             </div>
             <p className="text-sm text-slate-400">
-              {roomPath === 'new' ? 'Name your room and select units. You\'ll draw the outline next.' : 'Choose an existing room to configure with your device.'}
+              {roomPath === 'new'
+                ? planMode
+                  ? `Name your planned ${currentProfile?.label ?? 'device'} room and select units. You'll draw the outline next.`
+                  : 'Name your room and select units. You\'ll draw the outline next.'
+                : linkRoomId
+                ? `Select "${linkRoom?.name ?? 'the room'}" to link ${selectedDevice?.name ?? 'your device'} to it.`
+                : 'Choose an existing room to configure with your device.'}
             </p>
           </div>
           {roomPath === 'existing' && (
@@ -3511,24 +3991,16 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                     }`}
                     onClick={async () => {
                       if (hasDevice) return;
-                      setRoomId(room.id);
-                      if (room.profileId) setProfileId(room.profileId);
-                      onSelectRoom(room.id, room.profileId ?? profileId ?? null);
 
-                      // Link the device to this existing room
-                      // Don't pass entityMappings - device mapping is source of truth
-                      if (deviceId) {
-                        try {
-                          const updatedRoom = await updateRoom(room.id, {
-                            deviceId,
-                            profileId: profileId ?? room.profileId,
-                          });
-                          onRoomUpdate?.(updatedRoom.room);
-                        } catch (err) {
-                          console.error('Failed to link device to room:', err);
-                          // Continue anyway - user can fix via settings
-                        }
-                      }
+                      // Link the device to this existing room (a planned room
+                      // for another model asks first). Don't pass entityMappings
+                      // - device mapping is source of truth.
+                      const linked = await linkDeviceToExistingRoom(room);
+                      if (!linked) return;
+
+                      setRoomId(room.id);
+                      if (!deviceId && room.profileId) setProfileId(room.profileId);
+                      onSelectRoom(room.id, (deviceId ? profileId : null) ?? room.profileId ?? profileId ?? null);
 
                       // Auto-advance to next step after brief delay for visual feedback
                       setTimeout(() => {
@@ -3540,9 +4012,16 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                       {room.name}
                       {roomId === room.id && <span className="text-xs text-aqua-400">✓</span>}
                       {hasDevice && <span className="text-xs text-slate-500">🔒</span>}
+                      {isPlannedRoom(room) && (
+                        <span className="rounded-full border border-aqua-500/40 bg-aqua-500/10 px-2 py-0.5 text-[10px] font-semibold text-aqua-200">
+                          Planned
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-slate-400 mt-1">
-                      {room.profileId ? `Profile: ${room.profileId}` : 'No profile'}
+                      {isPlannedRoom(room)
+                        ? `Planned for ${plannedModelLabel(room, profiles)}`
+                        : room.profileId ? `Profile: ${room.profileId}` : 'No profile'}
                       {hasDevice && <span className="text-xs text-slate-500 ml-2">• Device: {assignedDevice?.name ?? room.deviceId}</span>}
                     </div>
                   </div>
@@ -3732,6 +4211,7 @@ export const WizardPage: React.FC<WizardPageProps> = ({
           >
             <RoomCanvas
               deviceMarkerStyle={deviceMarkerStyle} deviceMarkerScale={deviceMarkerScale} deviceMarkerOpacity={deviceMarkerOpacity}
+              devicePlanned={isPlannedRoom(selectedRoom)}
               points={selectedRoom?.roomShell?.points ?? []}
               onChange={() => {}}
               lockShell={true}
@@ -3746,7 +4226,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar={showDeviceRadar}
+              showRadar={showCoverageCone}
+              heightCoverage={plannedHeightCoverage}
               clipRadarToWalls={clipRadarToWalls}
               rangeMm={15000}
               snapGridMm={canvasSnap}
@@ -4073,7 +4554,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               fieldOfViewDeg={trackingFieldOfViewDeg}
               maxRangeMeters={trackingMaxRangeMeters}
               deviceIconUrl={deviceIconUrl}
-              showRadar={showDeviceRadar}
+              showRadar={showCoverageCone}
+              heightCoverage={plannedHeightCoverage}
               rangeMm={15000}
               snapGridMm={canvasSnap}
               height="100%"
@@ -4152,9 +4634,11 @@ export const WizardPage: React.FC<WizardPageProps> = ({
             <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500/20 to-aqua-500/20 border-2 border-emerald-500/30 mb-6 animate-in zoom-in-95 duration-500">
               <span className="text-6xl">✓</span>
             </div>
-            <h3 className="text-3xl font-bold text-white mb-3">Setup Complete!</h3>
+            <h3 className="text-3xl font-bold text-white mb-3">{planMode ? 'Plan Saved!' : 'Setup Complete!'}</h3>
             <p className="text-base text-slate-400 max-w-lg mx-auto">
-              Your device and zones have been configured successfully. Review your configuration below.
+              {planMode
+                ? 'Your planned room has been saved. When you have the device, use "Link device" in Settings, the Room Builder or the dashboard to connect it to this room.'
+                : 'Your device and zones have been configured successfully. Review your configuration below.'}
             </p>
           </div>
 
@@ -4169,7 +4653,9 @@ export const WizardPage: React.FC<WizardPageProps> = ({
               <div className="rounded-xl border border-slate-800/50 bg-slate-900/50 p-4">
                 <div className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Device</div>
                 <div className="text-sm text-white font-semibold">
-                  {deviceId ? devices.find((d) => d.id === deviceId)?.name ?? deviceId : 'Not selected'}
+                  {deviceId
+                    ? devices.find((d) => d.id === deviceId)?.name ?? deviceId
+                    : planMode ? 'Planned (no device linked yet)' : 'Not selected'}
                 </div>
                 <div className="text-xs text-slate-400 mt-1">
                   {currentProfile ? currentProfile.label : profileId ?? 'No profile'}
@@ -4216,6 +4702,8 @@ export const WizardPage: React.FC<WizardPageProps> = ({
                 <div className="text-sm text-white font-semibold mb-2">
                   {(selectedRoom?.zones?.length ?? 0) > 0
                     ? `${selectedRoom?.zones?.length} zone${selectedRoom?.zones?.length === 1 ? '' : 's'} defined`
+                    : planMode && zonesSkipped
+                    ? 'Zones skipped - you can add them later in the Zone Editor'
                     : 'No zones defined'}
                 </div>
                 {(selectedRoom?.zones?.length ?? 0) > 0 && (

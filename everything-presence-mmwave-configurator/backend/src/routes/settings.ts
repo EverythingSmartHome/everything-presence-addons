@@ -27,6 +27,9 @@ export const createSettingsRouter = (): Router => {
     } else if (req.body?.wizardProfileId === null) {
       nextSettings.wizardProfileId = null;
     }
+    if (typeof req.body?.wizardPlanMode === 'boolean') {
+      nextSettings.wizardPlanMode = req.body.wizardPlanMode;
+    }
     if (typeof req.body?.outlineDone === 'boolean') {
       nextSettings.outlineDone = req.body.outlineDone;
     }

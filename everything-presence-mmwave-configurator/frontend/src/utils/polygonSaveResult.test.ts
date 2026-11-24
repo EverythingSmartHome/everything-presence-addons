@@ -33,6 +33,29 @@ test('caps the list and counts the rest', () => {
   assert.match(message, /\(\+2 more\)/);
 });
 
+test('lists unsaved zones before write failures and advisory warnings', () => {
+  const advisory = Array.from({ length: 4 }, (_, i) => ({
+    entityId: `text.adv_${i}`,
+    description: `Zone ${i + 1} entity is unavailable`,
+    error: 'unavailable',
+  }));
+  const message = describePolygonSaveFailure([
+    ...advisory,
+    { entityId: 'text.x1', description: 'exclusion polygon 1', error: 'Request timed out' },
+    { description: 'Zone 3 could not be saved: no Polygon Zone 3 entity is mapped for this device', error: 'ENTITY_NOT_MAPPED' },
+    { entityId: 'text.z4', description: 'Zone 4 could not be saved: the polygon needs at least 3 distinct points', error: 'INVALID_POLYGON' },
+  ]);
+  const notMapped = message.indexOf('Zone 3 could not be saved');
+  const invalid = message.indexOf('Zone 4 could not be saved');
+  const writeFailure = message.indexOf('exclusion polygon 1 (Request timed out)');
+  const firstAdvisory = message.indexOf('Zone 1 entity is unavailable');
+  assert.ok(notMapped >= 0 && invalid > notMapped, 'unsaved zones come first, in original order');
+  assert.ok(writeFailure > invalid, 'write failures follow unsaved zones');
+  assert.ok(firstAdvisory > writeFailure, 'advisory warnings come last');
+  assert.doesNotMatch(message, /Zone 2 entity is unavailable/);
+  assert.match(message, /\(\+3 more\)/);
+});
+
 test('falls back to a generic message without warnings', () => {
   assert.equal(describePolygonSaveFailure(undefined), 'Polygon zones were not saved to the device.');
 });
