@@ -1,3 +1,4 @@
+import { wifiPowerUnavailableReason, verifyFirmwareInstall } from '../utils/firmwarePower';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   fetchDevices,
@@ -152,6 +153,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   // Support gate is deliberately ephemeral; enabling it never changes firmware.
   const [supportCode, setSupportCode] = useState('');
   const [wifiPowerSupport, setWifiPowerSupport] = useState(false);
+  const verificationStartedAt = useRef<number | null>(null);
   const expectedWifiPower = useRef<'standard' | 'wifi11' | null>(null);
 
   // Auto-detection state
@@ -640,7 +642,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     }
   };
 
-  const triggerUpdateOnDevice = async (token: string) => {
+  const triggerUpdateOnDevice = async (token: string, confirmedPower?: 'standard' | 'wifi11') => {
     if (!selectedDeviceId) {
       onError('No device selected');
       return;
@@ -696,7 +698,9 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       seenRebootUp: false,
       rebootStartAt: null,
     };
-    await triggerFirmwareUpdate(selectedDeviceId, token);
+    verificationStartedAt.current = null;
+    const result = await triggerFirmwareUpdate(selectedDeviceId, token, confirmedPower);
+    expectedWifiPower.current = result.wifiPowerProfile ?? null;
 
     setMonitoringUpdate(true);
     onSuccess('Firmware update started. Monitoring progress...');
@@ -777,7 +781,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         return;
       }
 
-      await triggerUpdateOnDevice(res.prepared.token);
+      await triggerUpdateOnDevice(res.prepared.token, powerProfile);
     } catch (err) {
       setUpdateStatus('error');
       onError(err instanceof Error ? err.message : 'Failed to install firmware');
@@ -1731,7 +1735,8 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
     const pollIntervalMs = 3000;
     const rebootTimeoutMs = 120000;
 
-    const poll = async () => {
+    let pollInFlight = false;
+    const pollOnce = async () => {
       updateMonitorRef.current.attempts += 1;
       try {
         const status = await fetchFirmwareUpdateStatus(selectedDeviceId);
@@ -1749,16 +1754,6 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
           : null;
         const installedVersionMatches =
           !!preparedVersion && !!installedVersion && installedVersion === preparedVersion;
-        let powerVerified = expectedWifiPower.current === null;
-        if (expectedWifiPower.current && !inProgress) {
-          const result = await getDeviceConfig('everything-presence-one', installedVersion || preparedVersion || 'unknown', selectedDeviceId);
-          if (cancelled) return;
-          const expected = expectedWifiPower.current;
-          powerVerified = result.config.configSource === 'entities' &&
-            result.config.firmware_channel === (expected === 'wifi11' ? 'stable-wifi11' : 'stable') &&
-            (result.config.wifi_power_profile ?? 'standard') === expected;
-          if (powerVerified) setDeviceConfig(result.config);
-        }
         const hasStartSignal =
           inProgress || (progress !== null && progress > 0) || installedVersionMatches;
 
@@ -1793,7 +1788,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
             }
             updateMonitorRef.current.seenRebootDown = true;
           }
-          if (updateMonitorRef.current.seenRebootDown && !isUnavailable) {
+          if (updateMonitorRef.current.seenRebootDown && availabilityValue !== null && !isUnavailable) {
             updateMonitorRef.current.seenRebootUp = true;
             setRebootConfirmed(true);
           }
@@ -1809,6 +1804,32 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         }
 
         const hasRebooted = updateMonitorRef.current.seenRebootDown && updateMonitorRef.current.seenRebootUp;
+
+        let powerVerified = expectedWifiPower.current === null;
+        if (expectedWifiPower.current) {
+          // Same-version equality alone is not evidence that installation started.
+          const ready = installCompleteSignal && (availabilityEntityId ? hasRebooted : updateMonitorRef.current.seenInProgress);
+          if (ready) {
+            verificationStartedAt.current ??= Date.now();
+            let reportedConfig: DeviceConfig | null = null;
+            try {
+              const result = await withTimeout(getDeviceConfig('everything-presence-one', installedVersion || preparedVersion || 'unknown', selectedDeviceId), 10000, 'Build flags unavailable');
+              reportedConfig = result.config;
+            } catch { /* Missing flags are reported by the bounded verification below. */ }
+            if (cancelled) return;
+            const verification = verifyFirmwareInstall({ ready, expectedVersion: preparedVersion,
+              installedVersion, expectedPower: expectedWifiPower.current, config: reportedConfig,
+              elapsedMs: Date.now() - verificationStartedAt.current });
+            if (verification.error) {
+              setMonitoringUpdate(false);
+              setUpdateStatus('error');
+              onError(verification.error);
+              return;
+            }
+            powerVerified = verification.verified;
+            if (powerVerified && reportedConfig) setDeviceConfig(reportedConfig);
+          }
+        }
 
         if (updateMonitorRef.current.seenStart && powerVerified) {
           if (availabilityEntityId) {
@@ -1891,8 +1912,13 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       if (updateMonitorRef.current.attempts >= maxAttempts) {
         setMonitoringUpdate(false);
         setUpdateStatus('error');
-        onError('Timed out waiting for firmware update status. Check Home Assistant for progress.');
+        onError(expectedWifiPower.current ? `Could not confirm installation and Wi-Fi profile ${expectedWifiPower.current}. Refresh device information before retrying.` : 'Timed out waiting for firmware update status. Check Home Assistant for progress.');
       }
+    };
+    const poll = async () => {
+      if (pollInFlight || cancelled) return;
+      pollInFlight = true;
+      try { await pollOnce(); } finally { pollInFlight = false; }
     };
 
     poll();
@@ -2618,7 +2644,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                                 v{update.newVersion}
                               </span>
                               <span className="ml-2 text-xs text-slate-400">
-                                ({update.channel === 'stable-wifi11' ? 'stable � Wi-Fi 11 dBm' : update.channel})
+                                ({update.channel === 'stable-wifi11' ? 'stable - Wi-Fi 11 dBm' : update.channel})
                               </span>
                             </div>
                             <span className="text-xs text-slate-500">
@@ -2906,10 +2932,10 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
               ) : (
                 <div className="mt-3 space-y-3 text-xs text-slate-300">
                   <p>Wi-Fi power troubleshooting. Install only when advised by support. 11 dBm may reduce Wi-Fi range. Installation preserves the reported board, sensor, Bluetooth and CO2 configuration.</p>
-                  {deviceConfig.configSource !== 'entities' ? (
-                    <p>This firmware cannot report its hardware configuration. Use the <a className="underline" href="https://docs.everythingsmart.io/flash/everything-presence-one.html?wifi_power=11" target="_blank" rel="noreferrer">USB installer</a> and select your board and sensor.</p>
-                  ) : !['stable', 'stable-wifi11'].includes(deviceConfig.firmware_channel) ? (
-                    <p>Power switching is available for stable EP1 firmware only.</p>
+                  {wifiPowerUnavailableReason(deviceConfig) ? (
+                    <p>{wifiPowerUnavailableReason(deviceConfig)}{' '}
+                      {deviceConfig.configSource !== 'entities' && <a className="underline" href="https://docs.everythingsmart.io/flash/everything-presence-one.html?wifi_power=11" target="_blank" rel="noreferrer">Open USB installer</a>}
+                    </p>
                   ) : (
                     <button type="button" disabled={monitoringUpdate || ['preparing', 'downloading', 'updating'].includes(updateStatus)}
                       onClick={() => handleAutoInstall(deviceConfig.firmware_channel === 'stable-wifi11' ? 'standard' : 'wifi11')}
@@ -2950,7 +2976,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                     className="w-full rounded border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   />
                   <p className="mt-1 text-xs text-slate-500">
-                    Enter the full URL to the firmware manifest.json file
+                    Enter a firmware manifest URL from a configured firmware catalog.
                   </p>
                 </div>
                 <button
@@ -3057,7 +3083,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
                             {device?.name || entry.deviceId}
                           </div>
                           <div className="text-slate-400">
-                            Version: {entry.version} | Files: {entry.binaryCount}
+                            Version: {entry.version} | Wi-Fi power: {entry.wifiPowerProfile === 'wifi11' ? '11 dBm' : entry.wifiPowerProfile === 'standard' ? 'Standard' : 'Unknown - prepare again'} | Files: {entry.binaryCount}
                           </div>
                           <div className="text-slate-500">
                             Cached: {new Date(entry.cachedAt).toLocaleString()}

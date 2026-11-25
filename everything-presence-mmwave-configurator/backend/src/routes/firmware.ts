@@ -1,4 +1,4 @@
-import { withWifiPowerProfile } from '../domain/firmwarePower';
+import { withWifiPowerProfile, wifiPowerProfile } from '../domain/firmwarePower';
 import { Router } from 'express';
 import { FirmwareService } from '../domain/firmwareService';
 import { firmwareStorage } from '../config/firmwareStorage';
@@ -226,9 +226,17 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         });
       }
 
+      const variant = await firmwareService.findVariantByManifestUrl(manifestUrl);
+      if (!variant) {
+        return res.status(409).json({ error: 'This manifest is not in the configured firmware catalogs. Use automatic preparation or configure its firmware index first.' });
+      }
+      const validation = firmwareService.validateFirmwareCompatibility(deviceConfig, variant);
+      if (!validation.valid) {
+        return res.status(409).json({ error: validation.hardBlocks.map(issue => issue.message).join(' '), validation });
+      }
       logger.info({ deviceId, manifestUrl }, 'Preparing firmware');
 
-      const result = await firmwareService.prepareFirmwareForDevice(deviceId, manifestUrl);
+      const result = await firmwareService.prepareFirmwareForDevice(deviceId, manifestUrl, variant);
 
       res.json({
         success: true,
@@ -256,7 +264,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
   router.post('/update/:deviceId', async (req, res) => {
     try {
       const { deviceId } = req.params;
-      const { token } = req.body;
+      const { token, wifiPowerProfile: requestedPower } = req.body;
 
       if (!token || typeof token !== 'string') {
         return res.status(400).json({ error: 'token is required' });
@@ -266,6 +274,28 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
       const entry = firmwareStorage.getCacheEntry(deviceId, token);
       if (!entry) {
         return res.status(404).json({ error: 'Firmware cache entry not found' });
+      }
+
+      if (!entry.variant) {
+        return res.status(409).json({ error: 'This cached firmware has no verified build metadata. Prepare the firmware again before installing.' });
+      }
+      const deviceConfig = await firmwareService.getDeviceConfig(entry.variant.requirements.model, entry.version, deviceId);
+      if (deviceConfig.configSource !== 'entities') {
+        return res.status(409).json({ error: 'Device build config not available. Firmware updates are disabled to prevent mismatched installs.' });
+      }
+      let targetConfig = deviceConfig;
+      if (requestedPower !== undefined) {
+        try {
+          targetConfig = withWifiPowerProfile(deviceConfig, requestedPower);
+        } catch (error) {
+          return res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid Wi-Fi power profile' });
+        }
+      }
+      const validation = firmwareService.validateFirmwareCompatibility(targetConfig, entry.variant);
+      if (!validation.valid || (requestedPower !== undefined &&
+          (validation.warnings.length > 0 || targetConfig.firmware_channel !== entry.variant.requirements.firmware_channel))) {
+        return res.status(409).json({ error: validation.hardBlocks.map(issue => issue.message).join(' ') ||
+          'Support power switching must preserve the device hardware configuration and stable channel.', validation });
       }
 
       const updateService = await firmwareService.resolveService(deviceId, 'setUpdateManifest');
@@ -290,6 +320,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         deviceId,
         localManifestUrl,
         version: entry.version,
+        wifiPowerProfile: entry.variant.requirements.model === 'everything-presence-one' && ['stable', 'stable-wifi11'].includes(entry.variant.requirements.firmware_channel) ? wifiPowerProfile(entry.variant.requirements) : undefined,
       });
     } catch (error) {
       logger.error({ error }, 'Failed to trigger device update');
@@ -359,6 +390,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
           deviceId: e.deviceId,
           token: e.token,
           version: e.version,
+          wifiPowerProfile: e.variant ? wifiPowerProfile(e.variant.requirements) : null,
           originalManifestUrl: e.originalManifestUrl,
           cachedAt: e.cachedAt,
           binaryCount: e.binaryPaths.length,
@@ -383,6 +415,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         entries: entries.map((e) => ({
           token: e.token,
           version: e.version,
+          wifiPowerProfile: e.variant ? wifiPowerProfile(e.variant.requirements) : null,
           originalManifestUrl: e.originalManifestUrl,
           cachedAt: e.cachedAt,
           binaryCount: e.binaryPaths.length,
@@ -642,17 +675,11 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         return res.status(404).json({ error: 'Product index not found' });
       }
 
-      // Construct the full manifest URL
-      // The manifestUrl in variant is relative, so we need to build the full URL
-      const settings = firmwareStorage.getSettings();
-      const baseUrl = settings.firmwareIndexUrls?.[0]?.replace('/firmware-index.json', '') ||
-                     DEFAULT_FIRMWARE_INDEX_URLS[deviceConfig.model]?.replace('/firmware-index.json', '');
-
-      if (!baseUrl) {
-        return res.status(500).json({ error: 'Could not determine firmware base URL' });
+      // Resolve against the index that actually supplied the variant, not the first configured URL.
+      const fullManifestUrl = await firmwareService.resolveVariantManifestUrl(matchingVariant, deviceConfig.model);
+      if (!fullManifestUrl) {
+        return res.status(409).json({ error: 'Firmware catalog changed during preparation. Refresh the catalog and try again.' });
       }
-
-      const fullManifestUrl = `${baseUrl}/${matchingVariant.manifestUrl}`;
 
       // Validate compatibility
       const validation = firmwareService.validateFirmwareCompatibility(targetConfig, matchingVariant);
@@ -673,7 +700,7 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
       });
 
       // Prepare the firmware
-      const prepared = await firmwareService.prepareFirmwareForDevice(deviceId, fullManifestUrl);
+      const prepared = await firmwareService.prepareFirmwareForDevice(deviceId, fullManifestUrl, matchingVariant);
 
       res.json({
         success: true,

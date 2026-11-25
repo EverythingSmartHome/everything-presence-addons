@@ -544,6 +544,7 @@ export interface CachedFirmwareEntry {
   originalManifestUrl: string;
   cachedAt: number;
   binaryCount: number;
+  wifiPowerProfile?: string | null;
 }
 
 export interface PreparedFirmwareResponse {
@@ -557,6 +558,7 @@ export interface PreparedFirmwareResponse {
 }
 
 export interface FirmwareUpdateResponse {
+  wifiPowerProfile?: 'standard' | 'wifi11';
   success: boolean;
   deviceId: string;
   localManifestUrl: string;

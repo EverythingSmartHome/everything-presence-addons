@@ -28,7 +28,12 @@ import { AppSettings } from './types';
 const handle = async <T>(res: Response): Promise<T> => {
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    let message = `${res.status} ${res.statusText}: ${text}`;
+    try {
+      const body = JSON.parse(text);
+      if (typeof body.error === 'string') message = `${res.status}: ${body.error}${body.code ? ` (${body.code})` : ''}`;
+    } catch { /* Non-JSON errors retain the HTTP status and response text. */ }
+    throw new Error(message);
   }
   return (await res.json()) as T;
 };
@@ -298,12 +303,13 @@ export const prepareFirmware = async (
 
 export const triggerFirmwareUpdate = async (
   deviceId: string,
-  token: string
+  token: string,
+  wifiPowerProfile?: 'standard' | 'wifi11'
 ): Promise<FirmwareUpdateResponse> => {
   const res = await fetch(ingressAware(`api/firmware/update/${deviceId}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, wifiPowerProfile }),
   });
   return handle<FirmwareUpdateResponse>(res);
 };

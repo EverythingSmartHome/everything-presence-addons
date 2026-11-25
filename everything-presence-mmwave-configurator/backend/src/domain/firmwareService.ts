@@ -265,7 +265,8 @@ export class FirmwareService {
    */
   async prepareFirmwareForDevice(
     deviceId: string,
-    manifestUrl: string
+    manifestUrl: string,
+    variant?: FirmwareVariant
   ): Promise<PreparedFirmware> {
     const token = firmwareStorage.generateToken();
     const cacheDir = firmwareStorage.ensureDeviceCacheDir(deviceId, token);
@@ -328,6 +329,7 @@ export class FirmwareService {
         manifestPath,
         binaryPaths,
         originalManifestUrl: manifestUrl,
+        variant,
         cachedAt: Date.now(),
       };
       firmwareStorage.saveCacheEntry(entry);
@@ -685,6 +687,32 @@ export class FirmwareService {
     );
 
     return results.filter((index): index is FirmwareIndex => index !== null);
+  }
+
+  async resolveVariantManifestUrl(variant: FirmwareVariant, model: string): Promise<string | null> {
+    const urls = firmwareStorage.getSettings().firmwareIndexUrls || Object.values(DEFAULT_FIRMWARE_INDEX_URLS);
+    for (const url of urls) {
+      const index = await this.fetchFirmwareIndex(url);
+      if (index?.product.id === model && index.firmwares.some(release => release.variants.some(v =>
+          v.id === variant.id && v.manifestUrl === variant.manifestUrl &&
+          JSON.stringify(v.requirements) === JSON.stringify(variant.requirements)))) {
+        return new URL(variant.manifestUrl, url).href;
+      }
+    }
+    return null;
+  }
+
+  /** Resolve manual manifests against configured catalogs; never guess from filenames. */
+  async findVariantByManifestUrl(manifestUrl: string): Promise<FirmwareVariant | null> {
+    const urls = firmwareStorage.getSettings().firmwareIndexUrls || Object.values(DEFAULT_FIRMWARE_INDEX_URLS);
+    for (const url of urls) {
+      const index = await this.fetchFirmwareIndex(url);
+      for (const release of index?.firmwares ?? []) {
+        const variant = release.variants.find(v => new URL(v.manifestUrl, url).href === new URL(manifestUrl).href);
+        if (variant) return variant;
+      }
+    }
+    return null;
   }
 
   /**

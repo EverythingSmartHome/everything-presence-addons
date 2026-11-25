@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { firmwareStorage, CachedFirmwareEntry } from '../config/firmwareStorage';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { withWifiPowerProfile, wifiPowerProfile } from './firmwarePower';
@@ -35,6 +39,9 @@ test('power switching refuses inferred hardware, unsupported devices/channels, a
     { ...current, model: 'everything-presence-lite' as const },
     { ...current, firmware_channel: 'beta' as const },
     { ...current, sensor_variant: '' },
+    { ...current, ethernet_enabled: true },
+    { ...current, board_revision: '9.9' },
+    { ...current, firmware_channel: 'smartthings' as const },
     { ...current, board_revision: '1.3' },
   ]) assert.throws(() => withWifiPowerProfile(config, 'wifi11'));
   for (const input of [11, null, '', 'standard-wifi11', {}]) {
@@ -68,4 +75,34 @@ test('existing clients filtering by channel cannot cross power profiles', () => 
   assert.equal(oldClientCandidates.length, 1);
   assert.equal(oldClientCandidates[0].variants[0].id, 'stable-wifi11');
   assert.equal(index.firmwares.filter(fw => fw.channel === 'stable').flatMap(fw => fw.variants).length, 1);
+});
+
+
+test('manifest lookup uses its owning index and rejects uncatalogued URLs', async t => {
+  const svc = service();
+  t.mock.method(firmwareStorage, 'getSettings', () => ({ firmwareIndexUrls: ['https://example.com/lite/firmware-index.json', 'https://example.com/ep1/firmware-index.json'] }));
+  t.mock.method(svc, 'fetchFirmwareIndex', async (url: string) => url.includes('/ep1/') ? index : { ...index, product: { ...index.product, id: 'everything-presence-lite' }, firmwares: [] });
+  assert.equal(await svc.resolveVariantManifestUrl(variant(reduced), current.model), 'https://example.com/ep1/stable-wifi11-manifest.json');
+  assert.equal((await svc.findVariantByManifestUrl('https://example.com/ep1/stable-wifi11-manifest.json'))?.id, 'stable-wifi11');
+  assert.equal(await svc.findVariantByManifestUrl('https://example.com/unknown.json'), null);
+});
+
+
+test('preparation stores catalog requirements alongside the downloaded manifest version', async t => {
+  const svc = service();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'firmware-power-test-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  t.mock.method(firmwareStorage, 'ensureDeviceCacheDir', () => directory);
+  t.mock.method(firmwareStorage, 'getSettings', () => ({}));
+  t.mock.method(firmwareStorage, 'cleanupOldVersions', () => {});
+  let stored: any;
+  t.mock.method(firmwareStorage, 'saveCacheEntry', (entry: CachedFirmwareEntry) => { stored = entry; });
+  t.mock.method(svc, 'getLanIp', () => '127.0.0.1');
+  t.mock.method(svc, 'fetchRemoteManifest', async () => ({ name: 'EP1', version: '1.2.17', builds: [{ chipFamily: 'ESP32', parts: [] }] }));
+  const metadata = variant(reduced);
+  const prepared = await svc.prepareFirmwareForDevice('ep1', 'https://example.com/manifest.json', metadata);
+  assert.equal(prepared.version, '1.2.17');
+  assert.equal(stored.version, prepared.version);
+  assert.deepEqual(stored.variant, metadata);
+  assert.equal(stored.variant.requirements.wifi_power_profile, 'wifi11');
 });
