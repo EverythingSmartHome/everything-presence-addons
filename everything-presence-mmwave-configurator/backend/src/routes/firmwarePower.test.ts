@@ -14,6 +14,7 @@ test('support prepare chooses the requested power profile using legacy build fla
     co2_enabled: false, bluetooth_enabled: true, board_revision: '1.6', sensor_variant: 'sen0609',
     firmware_channel: 'stable', configSource: 'entities' };
   let downloaded = '';
+  let preparedVersion = '1.2.17';
   const index: FirmwareIndex = { schemaVersion: '1.0', generatedAt: '',
     product: { id: device.model, displayName: 'EP1', latestVersion: '1.2.17' }, migrations: [],
     firmwares: ['stable', 'stable-wifi11'].map(channel => ({ version: '1.2.17', channel: channel as 'stable' | 'stable-wifi11',
@@ -28,7 +29,7 @@ test('support prepare chooses the requested power profile using legacy build fla
   t.mock.method(FirmwareService.prototype, 'prepareFirmwareForDevice', async (deviceId: string, url: string, variant: { requirements: { firmware_channel: string } }) => {
     assert.equal(variant.requirements.firmware_channel, url.includes('wifi11') ? 'stable-wifi11' : 'stable');
     downloaded = url;
-    return { deviceId, token: 'prepared-only', version: '1.2.17', localManifestUrl: 'http://localhost/test.json' };
+    return { deviceId, token: 'prepared-only', version: preparedVersion, localManifestUrl: 'http://localhost/test.json' };
   });
   const app = express(); app.use(express.json());
   app.use('/api/firmware', createFirmwareRouter({ config: {} as FirmwareConfig, writeClient: {} as IHaWriteClient }));
@@ -51,6 +52,14 @@ test('support prepare chooses the requested power profile using legacy build fla
   response = await request({ wifiPowerProfile: 'standard' }); assert.equal(response.status, 200);
   assert.match(downloaded, /\/stable-manifest.json$/);
   response = await request({ wifiPowerProfile: 'invalid' }); assert.equal(response.status, 400);
+  index.product.latestVersion = '9.0.0';
+  index.migrations = [{ id: 'rectangular-to-polygon-zones', fromVersion: '<2.0.0', toVersion: '>=2.0.0', description: 'Test migration', backupRequired: true, handler: 'test' }];
+  response = await request();
+  assert.equal((await response.json() as any).migration, undefined, 'a newer product release must not trigger migration for an older prepared manifest');
+  preparedVersion = '2.0.0';
+  index.product.latestVersion = '1.2.17';
+  response = await request();
+  assert.equal((await response.json() as any).migration.id, 'rectangular-to-polygon-zones', 'migration follows the downloaded manifest version');
   device = { ...device, configSource: 'inferred' };
   response = await request({ wifiPowerProfile: 'wifi11' }); assert.equal(response.status, 409);
 });

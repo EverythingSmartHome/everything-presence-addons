@@ -693,14 +693,14 @@ export const createFirmwareRouter = (deps: FirmwareRouterDependencies): Router =
         });
       }
 
+      // Prepare the firmware
+      const prepared = await firmwareService.prepareFirmwareForDevice(deviceId, fullManifestUrl, matchingVariant);
+
       const migration = productIndex.migrations.find((m) => {
         if (m.id !== 'rectangular-to-polygon-zones') return false;
         return firmwareService.matchesVersionRange(currentVersion, m.fromVersion) &&
-          firmwareService.matchesVersionRange(productIndex.product.latestVersion, m.toVersion);
+          firmwareService.matchesVersionRange(prepared.version, m.toVersion);
       });
-
-      // Prepare the firmware
-      const prepared = await firmwareService.prepareFirmwareForDevice(deviceId, fullManifestUrl, matchingVariant);
 
       res.json({
         success: true,

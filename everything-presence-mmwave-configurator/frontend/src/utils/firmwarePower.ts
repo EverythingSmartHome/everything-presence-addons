@@ -29,3 +29,21 @@ export function verifyFirmwareInstall(input: {
   }
   return { verified: false };
 }
+
+
+export interface PreparedPowerSwitch {
+  deviceId: string;
+  token: string;
+  profile: 'standard' | 'wifi11';
+}
+
+// Intent is local to this preparation. Every retry/confirmation asks again;
+// neither a different token nor a different device inherits consent.
+export function confirmPreparedPowerSwitch(
+  intent: PreparedPowerSwitch | null, deviceId: string, token: string,
+  confirm: (message: string) => boolean,
+): 'standard' | 'wifi11' | undefined | false {
+  if (!intent || intent.deviceId !== deviceId || intent.token !== token) return undefined;
+  const label = intent.profile === 'wifi11' ? 'reduced Wi-Fi power (11 dBm)' : 'standard Wi-Fi power';
+  return confirm(`Install stable EP1 firmware with ${label}? The device will reboot. Reduced power may reduce Wi-Fi range. Your board, sensor, Bluetooth and CO2 configuration will be preserved.`) ? intent.profile : false;
+}

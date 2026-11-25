@@ -1,4 +1,4 @@
-import { wifiPowerUnavailableReason, verifyFirmwareInstall } from '../utils/firmwarePower';
+import { wifiPowerUnavailableReason, verifyFirmwareInstall, confirmPreparedPowerSwitch, type PreparedPowerSwitch } from '../utils/firmwarePower';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   fetchDevices,
@@ -153,6 +153,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   // Support gate is deliberately ephemeral; enabling it never changes firmware.
   const [supportCode, setSupportCode] = useState('');
   const [wifiPowerSupport, setWifiPowerSupport] = useState(false);
+  const preparedPowerSwitch = useRef<PreparedPowerSwitch | null>(null);
   const verificationStartedAt = useRef<number | null>(null);
   const expectedWifiPower = useRef<'standard' | 'wifi11' | null>(null);
 
@@ -357,6 +358,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
 
   // Reset state when device changes
   const handleDeviceChange = (deviceId: string) => {
+    preparedPowerSwitch.current = null;
     expectedWifiPower.current = null;
     setSupportCode('');
     setWifiPowerSupport(false);
@@ -569,6 +571,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleManualPrepare = async () => {
+    preparedPowerSwitch.current = null;
     expectedWifiPower.current = null;
     resetMigrationFlow();
     if (!selectedDeviceId) {
@@ -685,6 +688,16 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       .find((value) => typeof value === 'string' && value.trim().length > 0) || null;
     setAvailabilityEntityId(availabilityId);
 
+    if (confirmedPower === undefined) {
+      const confirmation = confirmPreparedPowerSwitch(preparedPowerSwitch.current, selectedDeviceId, token, message => window.confirm(message));
+      if (confirmation === false) {
+        setUpdateStatus('ready');
+        setMigrationPhase(prev => prev === 'installing' ? 'prompt' : prev);
+        return;
+      }
+      confirmedPower = confirmation;
+    }
+
     setUpdateStatus('updating');
     setUpdateProgress(null);
     setUpdateEntityStatus(null);
@@ -731,6 +744,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
       const label = powerProfile === 'wifi11' ? 'reduced Wi-Fi power (11 dBm)' : 'standard Wi-Fi power';
       if (!window.confirm(`Install stable EP1 firmware with ${label}? The device will reboot. Reduced power may reduce Wi-Fi range. Your board, sensor, Bluetooth and CO2 configuration will be preserved.`)) return;
     }
+    preparedPowerSwitch.current = null;
     expectedWifiPower.current = powerProfile ?? null;
     resetMigrationFlow();
     const device = devices.find((d) => d.id === selectedDeviceId);
@@ -761,6 +775,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
         powerProfile
       );
 
+      preparedPowerSwitch.current = powerProfile ? { deviceId: device.id, token: res.prepared.token, profile: powerProfile } : null;
       setPreparedToken(res.prepared.token);
       setPreparedVersion(res.newVersion);
       setPreparedMigrationMeta(res.migration ?? null);
@@ -810,6 +825,7 @@ export const FirmwareUpdateSection: React.FC<FirmwareUpdateSectionProps> = ({
   };
 
   const handleInstallCachedEntry = async (entry: CachedFirmwareEntry) => {
+    preparedPowerSwitch.current = null;
     expectedWifiPower.current = null;
     resetMigrationFlow();
     if (!selectedDeviceId || selectedDeviceId !== entry.deviceId) {

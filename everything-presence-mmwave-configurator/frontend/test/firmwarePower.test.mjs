@@ -3,7 +3,7 @@ import test, { after } from 'node:test';
 import { createServer } from 'vite';
 const server = await createServer({ logLevel: 'silent', server: { middlewareMode: true } });
 after(() => server.close());
-const { wifiPowerUnavailableReason, verifyFirmwareInstall } = await server.ssrLoadModule('/src/utils/firmwarePower.ts');
+const { wifiPowerUnavailableReason, verifyFirmwareInstall, confirmPreparedPowerSwitch } = await server.ssrLoadModule('/src/utils/firmwarePower.ts');
 
 const config = { model: 'everything-presence-one', firmware_channel: 'stable',
   configSource: 'entities', board_revision: '1.6', sensor_variant: 'sen0609',
@@ -48,4 +48,41 @@ test('install requests send power consent only when explicitly supplied and disp
   assert.deepEqual(body, { token: 'cached' });
   await assert.rejects(triggerFirmwareUpdate('ep1', 'cached', 'wifi11'), /409: Use the support option/);
   assert.deepEqual(body, { token: 'cached', wifiPowerProfile: 'wifi11' });
+});
+
+
+test('retry and migration confirmation retain the prepared target but ask for fresh consent', async t => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: { pathname: '/' } };
+  t.after(() => { globalThis.window = originalWindow; });
+  const { triggerFirmwareUpdate } = await server.ssrLoadModule('/src/api/client.ts');
+  const bodies = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({ success: true }));
+  });
+  let confirmations = 0;
+  const confirm = () => { confirmations++; return true; };
+  for (const profile of ['wifi11', 'standard']) {
+    const intent = { deviceId: 'ep1', token: 'prepared', profile };
+    for (const path of ['retry', 'migration-confirm']) {
+      const power = confirmPreparedPowerSwitch(intent, 'ep1', 'prepared', confirm);
+      await triggerFirmwareUpdate('ep1', 'prepared', power);
+      assert.deepEqual(bodies.at(-1), { token: 'prepared', wifiPowerProfile: profile }, path);
+    }
+    assert.equal(confirmPreparedPowerSwitch(intent, 'other-device', 'prepared', confirm), undefined);
+    assert.equal(confirmPreparedPowerSwitch(intent, 'ep1', 'other-token', confirm), undefined);
+    assert.equal(confirmPreparedPowerSwitch(intent, 'ep1', 'prepared', () => false), false);
+  }
+  assert.equal(confirmations, 4);
+  assert.equal(confirmPreparedPowerSwitch(null, 'ep1', 'prepared', confirm), undefined);
+});
+
+test('server error details remain visible without exposing raw JSON', async t => {
+  const originalWindow = globalThis.window;
+  globalThis.window = { location: { pathname: '/' } };
+  t.after(() => { globalThis.window = originalWindow; });
+  const { triggerFirmwareUpdate } = await server.ssrLoadModule('/src/api/client.ts');
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ error: 'Failed to trigger device update', details: 'Device service timed out', code: 'SERVICE_TIMEOUT' }), { status: 500 }));
+  await assert.rejects(triggerFirmwareUpdate('ep1', 'cached'), { message: '500: Failed to trigger device update (SERVICE_TIMEOUT): Device service timed out' });
 });

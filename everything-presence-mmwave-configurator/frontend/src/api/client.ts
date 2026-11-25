@@ -31,7 +31,7 @@ const handle = async <T>(res: Response): Promise<T> => {
     let message = `${res.status} ${res.statusText}: ${text}`;
     try {
       const body = JSON.parse(text);
-      if (typeof body.error === 'string') message = `${res.status}: ${body.error}${body.code ? ` (${body.code})` : ''}`;
+      if (typeof body.error === 'string') message = `${res.status}: ${body.error}${body.code ? ` (${body.code})` : ''}${typeof body.details === 'string' && body.details ? `: ${body.details}` : ''}`;
     } catch { /* Non-JSON errors retain the HTTP status and response text. */ }
     throw new Error(message);
   }
