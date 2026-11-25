@@ -1,3 +1,4 @@
+import { normalizeZoneHandleSize } from '../utils/zoneHandleSettings';
 import { useState, useEffect, useCallback } from 'react';
 import { MARKER_SCALE_MAX, MARKER_SCALE_MIN, normalizeDeviceMarkerSettings } from '../utils/deviceMarkerSettings';
 
@@ -17,6 +18,7 @@ export interface DisplaySettings {
   targetMarkerScale: number;
   showZoneLabels: boolean;
   zoneLabelScale: number;
+  zoneHandleSize: number;
   showAlignedDirection: boolean;
   clipRadarToWalls: boolean;
   units: 'metric' | 'imperial';
@@ -44,6 +46,7 @@ const defaultSettings: DisplaySettings = {
   targetMarkerScale: 1,
   showZoneLabels: true,
   zoneLabelScale: 1,
+  zoneHandleSize: normalizeZoneHandleSize(undefined),
   showAlignedDirection: false,
   clipRadarToWalls: true,
   units: 'metric',
@@ -59,10 +62,11 @@ export const normalizeDisplaySettings = (value: unknown): DisplaySettings => {
     ...defaultSettings,
     ...parsed,
     ...normalizeDeviceMarkerSettings(parsed),
+    zoneHandleSize: normalizeZoneHandleSize(parsed.zoneHandleSize),
   };
 };
 
-const loadSettings = (): DisplaySettings => {
+export const loadSettings = (): DisplaySettings => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -76,7 +80,7 @@ const loadSettings = (): DisplaySettings => {
   return defaultSettings;
 };
 
-const saveSettings = (settings: DisplaySettings): void => {
+export const saveSettings = (settings: DisplaySettings): void => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch (e) {
@@ -156,6 +160,10 @@ export const useDisplaySettings = () => {
     setSettings((prev) => ({ ...prev, zoneLabelScale: Math.min(MARKER_SCALE_MAX, Math.max(MARKER_SCALE_MIN, value)) }));
   }, []);
 
+  const setZoneHandleSize = useCallback((value: number) => {
+    setSettings((prev) => ({ ...prev, zoneHandleSize: normalizeZoneHandleSize(value) }));
+  }, []);
+
   const setShowAlignedDirection = useCallback((value: boolean) => {
     setSettings((prev) => ({ ...prev, showAlignedDirection: value }));
   }, []);
@@ -197,6 +205,7 @@ export const useDisplaySettings = () => {
     targetMarkerScale: settings.targetMarkerScale,
     showZoneLabels: settings.showZoneLabels,
     zoneLabelScale: settings.zoneLabelScale,
+    zoneHandleSize: settings.zoneHandleSize,
     showAlignedDirection: settings.showAlignedDirection,
     clipRadarToWalls: settings.clipRadarToWalls,
     units: settings.units,
@@ -219,6 +228,7 @@ export const useDisplaySettings = () => {
     setTargetMarkerScale,
     setShowZoneLabels,
     setZoneLabelScale,
+    setZoneHandleSize,
     setShowAlignedDirection,
     setClipRadarToWalls,
     setUnits,

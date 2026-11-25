@@ -1,3 +1,4 @@
+import { normalizeZoneHandleSize } from '../utils/zoneHandleSettings';
 import React, { useRef, useState } from 'react';
 import { ZoneRect, ZonePolygon, Point, FurnitureInstance, Door, isZonePolygon } from '../api/types';
 import { RoomCanvas } from './RoomCanvas';
@@ -31,6 +32,7 @@ interface ZoneCanvasProps {
   snapGridMm?: number;
   height?: number | string;
   zoom?: number;
+  zoneHandleSize?: number;
   panOffsetMm?: { x: number; y: number };
   onPanChange?: (offset: { x: number; y: number }) => void;
   onZoomChange?: (zoom: number) => void;
@@ -98,6 +100,7 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
   snapGridMm = 0,
   height = 520,
   zoom = 1,
+  zoneHandleSize = 8,
   panOffsetMm = { x: 0, y: 0 },
   onPanChange,
   onZoomChange,
@@ -542,6 +545,9 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
       deviceInteractive={false}
       lockShell
       renderOverlay={(params) => {
+        const unit = params.screenPixelUnit;
+        const touch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+        const handleRadius = Math.max(touch ? 11 : 0, normalizeZoneHandleSize(zoneHandleSize)) * unit;
         const { toCanvas, toWorldFromEvent, onCanvasPointerMove, onCanvasPointerRelease } = params;
         const forwardCanvasPointerMove = (e: React.PointerEvent<SVGElement>) => {
           onCanvasPointerMove(e);
@@ -760,10 +766,10 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                   key={handle.name}
                   cx={handle.x}
                   cy={handle.y}
-                  r={11}
+                  r={handleRadius}
                   fill="white"
                   stroke={color}
-                  strokeWidth={2}
+                  strokeWidth={2 * unit}
                   transform={`translate(${canvasTopLeft.x}, ${canvasTopLeft.y}) rotate(${rotationDeg})`}
                   style={{
                     transformOrigin: '0 0',
@@ -912,10 +918,10 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                     key={`vertex-${idx}`}
                     cx={v.x}
                     cy={v.y}
-                    r={isVertexSelected ? 13 : 11}
+                    r={handleRadius * (isVertexSelected ? 1.18 : 1)}
                     fill={isVertexSelected ? color : 'white'}
                     stroke={isVertexSelected ? 'white' : color}
-                    strokeWidth={isVertexSelected ? 3 : 2}
+                    strokeWidth={(isVertexSelected ? 3 : 2) * unit}
                     style={{ cursor: polygonLateralOnlyAxis === 'x' ? 'ew-resize' : polygonLateralOnlyAxis === 'y' ? 'ns-resize' : 'move' }}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -962,11 +968,11 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                     key={`midpoint-${idx}`}
                     cx={midX}
                     cy={midY}
-                    r={8}
+                    r={touch ? handleRadius : handleRadius * 0.75}
                     fill={color}
                     fillOpacity={0.5}
                     stroke="white"
-                    strokeWidth={1}
+                    strokeWidth={unit}
                     style={{ cursor: 'crosshair' }}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1005,8 +1011,8 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                 if (!anchor) return null;
                 if (!canDeleteVertex(polygon.vertices, vertexIndex)) return null;
 
-                const badgeX = anchor.x + 20;
-                const badgeY = anchor.y - 20;
+                const badgeX = anchor.x + handleRadius * 2.5;
+                const badgeY = anchor.y - handleRadius * 2.5;
 
                 return (
                   <g
@@ -1024,13 +1030,11 @@ export const ZoneCanvas: React.FC<ZoneCanvasProps> = ({
                     }}
                   >
                     <title>{`Delete node ${vertexIndex + 1}`}</title>
-                    {/* Enlarged transparent hit area for touch */}
-                    <circle cx={badgeX} cy={badgeY} r={18} fill="transparent" />
-                    <circle cx={badgeX} cy={badgeY} r={11} fill="#f43f5e" stroke="white" strokeWidth={2} />
+                    <circle cx={badgeX} cy={badgeY} r={handleRadius} fill="#f43f5e" stroke="white" strokeWidth={2 * unit} />
                     <path
-                      d={`M ${badgeX - 4} ${badgeY - 4} L ${badgeX + 4} ${badgeY + 4} M ${badgeX + 4} ${badgeY - 4} L ${badgeX - 4} ${badgeY + 4}`}
+                      d={`M ${badgeX - handleRadius * 0.5} ${badgeY - handleRadius * 0.5} L ${badgeX + handleRadius * 0.5} ${badgeY + handleRadius * 0.5} M ${badgeX + handleRadius * 0.5} ${badgeY - handleRadius * 0.5} L ${badgeX - handleRadius * 0.5} ${badgeY + handleRadius * 0.5}`}
                       stroke="white"
-                      strokeWidth={2}
+                      strokeWidth={2 * unit}
                       strokeLinecap="round"
                       pointerEvents="none"
                     />
