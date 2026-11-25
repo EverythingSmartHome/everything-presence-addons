@@ -20,7 +20,8 @@ export interface DeviceConfig {
   bluetooth_enabled: boolean;
   board_revision: string;
   sensor_variant: string;
-  firmware_channel: 'stable' | 'beta' | 'smartthings';
+  wifi_power_profile?: 'standard' | 'wifi11';
+  firmware_channel: 'stable' | 'beta' | 'smartthings' | 'stable-wifi11';
   /** How the config was determined - 'entities' means read from device, 'inferred' means guessed */
   configSource: ConfigSource;
 }
@@ -35,6 +36,7 @@ export interface FirmwareRequirements {
   bluetooth_enabled: boolean;
   board_revision: string;
   sensor_variant: string;
+  wifi_power_profile?: 'standard' | 'wifi11';
   firmware_channel: string;
 }
 
@@ -52,7 +54,7 @@ export interface FirmwareVariant {
  */
 export interface FirmwareRelease {
   version: string;
-  channel: 'stable' | 'beta';
+  channel: 'stable' | 'beta' | 'stable-wifi11';
   releaseDate: string;
   releaseNotes: string;
   minPreviousVersion?: string;

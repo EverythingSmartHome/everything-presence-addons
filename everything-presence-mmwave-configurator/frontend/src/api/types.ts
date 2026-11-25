@@ -544,6 +544,7 @@ export interface CachedFirmwareEntry {
   originalManifestUrl: string;
   cachedAt: number;
   binaryCount: number;
+  wifiPowerProfile?: string | null;
 }
 
 export interface PreparedFirmwareResponse {
@@ -557,6 +558,7 @@ export interface PreparedFirmwareResponse {
 }
 
 export interface FirmwareUpdateResponse {
+  wifiPowerProfile?: 'standard' | 'wifi11';
   success: boolean;
   deviceId: string;
   localManifestUrl: string;
@@ -655,7 +657,7 @@ export type DeviceModel =
   | 'everything-presence-lite'
   | 'everything-presence-pro';
 
-export type FirmwareChannel = 'stable' | 'beta' | 'smartthings';
+export type FirmwareChannel = 'stable' | 'beta' | 'smartthings' | 'stable-wifi11';
 
 /** How the device configuration was determined */
 export type ConfigSource = 'entities' | 'inferred';
@@ -667,6 +669,7 @@ export interface DeviceConfig {
   bluetooth_enabled: boolean;
   board_revision: string;
   sensor_variant: string;
+  wifi_power_profile?: 'standard' | 'wifi11';
   firmware_channel: FirmwareChannel;
   /** How the config was determined - 'entities' means read from device, 'inferred' means guessed */
   configSource: ConfigSource;
@@ -679,6 +682,7 @@ export interface FirmwareRequirements {
   bluetooth_enabled: boolean;
   board_revision: string;
   sensor_variant: string;
+  wifi_power_profile?: 'standard' | 'wifi11';
   firmware_channel: string;
 }
 
@@ -690,7 +694,7 @@ export interface FirmwareVariant {
 
 export interface FirmwareRelease {
   version: string;
-  channel: 'stable' | 'beta';
+  channel: 'stable' | 'beta' | 'stable-wifi11';
   releaseDate: string;
   releaseNotes: string;
   minPreviousVersion?: string;

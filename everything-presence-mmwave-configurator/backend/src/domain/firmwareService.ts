@@ -1,3 +1,4 @@
+import { wifiPowerProfile } from './firmwarePower';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -264,7 +265,8 @@ export class FirmwareService {
    */
   async prepareFirmwareForDevice(
     deviceId: string,
-    manifestUrl: string
+    manifestUrl: string,
+    variant?: FirmwareVariant
   ): Promise<PreparedFirmware> {
     const token = firmwareStorage.generateToken();
     const cacheDir = firmwareStorage.ensureDeviceCacheDir(deviceId, token);
@@ -327,6 +329,7 @@ export class FirmwareService {
         manifestPath,
         binaryPaths,
         originalManifestUrl: manifestUrl,
+        variant,
         cachedAt: Date.now(),
       };
       firmwareStorage.saveCacheEntry(entry);
@@ -528,6 +531,8 @@ export class FirmwareService {
           board_revision: String(configData.board_revision || ''),
           sensor_variant: String(configData.sensor_variant || ''),
           firmware_channel: (configData.firmware_channel as DeviceConfig['firmware_channel']) || 'stable',
+          wifi_power_profile: (configData.wifi_power_profile as DeviceConfig['wifi_power_profile']) ??
+            (configData.firmware_channel === 'stable-wifi11' ? 'wifi11' : 'standard'),
           configSource: 'entities',
         };
 
@@ -684,6 +689,32 @@ export class FirmwareService {
     return results.filter((index): index is FirmwareIndex => index !== null);
   }
 
+  async resolveVariantManifestUrl(variant: FirmwareVariant, model: string): Promise<string | null> {
+    const urls = firmwareStorage.getSettings().firmwareIndexUrls || Object.values(DEFAULT_FIRMWARE_INDEX_URLS);
+    for (const url of urls) {
+      const index = await this.fetchFirmwareIndex(url);
+      if (index?.product.id === model && index.firmwares.some(release => release.variants.some(v =>
+          v.id === variant.id && v.manifestUrl === variant.manifestUrl &&
+          JSON.stringify(v.requirements) === JSON.stringify(variant.requirements)))) {
+        return new URL(variant.manifestUrl, url).href;
+      }
+    }
+    return null;
+  }
+
+  /** Resolve manual manifests against configured catalogs; never guess from filenames. */
+  async findVariantByManifestUrl(manifestUrl: string): Promise<FirmwareVariant | null> {
+    const urls = firmwareStorage.getSettings().firmwareIndexUrls || Object.values(DEFAULT_FIRMWARE_INDEX_URLS);
+    for (const url of urls) {
+      const index = await this.fetchFirmwareIndex(url);
+      for (const release of index?.firmwares ?? []) {
+        const variant = release.variants.find(v => new URL(v.manifestUrl, url).href === new URL(manifestUrl).href);
+        if (variant) return variant;
+      }
+    }
+    return null;
+  }
+
   /**
    * Find matching firmware variant for a device config
    */
@@ -720,6 +751,7 @@ export class FirmwareService {
     const matchingVariant = latestFirmware.variants.find((variant) => {
       const req = variant.requirements;
       return (
+        wifiPowerProfile(req) === wifiPowerProfile(deviceConfig) &&
         req.model === deviceConfig.model &&
         req.ethernet_enabled === deviceConfig.ethernet_enabled &&
         req.co2_enabled === deviceConfig.co2_enabled &&
@@ -799,6 +831,12 @@ export class FirmwareService {
     const hardBlocks: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
     const req = firmwareVariant.requirements;
+
+    if (wifiPowerProfile(req) !== wifiPowerProfile(deviceConfig)) {
+      hardBlocks.push({ field: 'wifi_power_profile', deviceValue: wifiPowerProfile(deviceConfig),
+        firmwareValue: wifiPowerProfile(req), severity: 'hard_block',
+        message: 'Wi-Fi power differs. Use the explicit support option to change power profiles.' });
+    }
 
     // Hard blocks - will break the device
     if (req.model !== deviceConfig.model) {
@@ -907,6 +945,7 @@ export class FirmwareService {
       const variant = firmware.variants.find((v) => {
         const req = v.requirements;
         return (
+          wifiPowerProfile(req) === wifiPowerProfile(deviceConfig) &&
           req.model === deviceConfig.model &&
           req.ethernet_enabled === deviceConfig.ethernet_enabled &&
           req.co2_enabled === deviceConfig.co2_enabled &&

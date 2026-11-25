@@ -1,3 +1,4 @@
+import type { FirmwareVariant } from '../types/firmware';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -17,6 +18,7 @@ export interface CachedFirmwareEntry {
   binaryPaths: string[];
   originalManifestUrl: string;
   cachedAt: number;
+  variant?: FirmwareVariant; // Absent on legacy entries: prepare again before installing.
 }
 
 export interface FirmwareCacheIndex {
